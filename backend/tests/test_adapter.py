@@ -26,9 +26,9 @@ def test_call_sends_common_params(monkeypatch):
         return FakeResp({"code": 0, "msg": "success"})
 
     monkeypatch.setattr(client.requests, "post", fake_post)
-    body = client.call("post_text_message", {"to_wxid": "wxid_x"}, uuid="u-1")
+    body = client.call("send_api", "post_text_message", {"to_wxid": "wxid_x"}, uuid="u-1")
 
-    assert captured["url"].endswith("/post_text_message")
+    assert captured["url"].endswith("/wx_app/send_api/post_text_message")
     assert captured["data"]["openid"] == client.MIDDLE_OPENID
     assert captured["data"]["uuid"] == "u-1"
     assert captured["data"]["to_wxid"] == "wxid_x"
@@ -44,7 +44,7 @@ def test_call_generates_uuid_when_missing(monkeypatch):
         return FakeResp({"code": 0, "msg": "success"})
 
     monkeypatch.setattr(client.requests, "post", fake_post)
-    client.call("check_online")
+    client.call("login_api", "check_online")
 
     assert captured["data"]["uuid"]  # 有值即可，具体值不关心
 
@@ -57,7 +57,7 @@ def test_call_raises_on_error_code(monkeypatch):
 
     monkeypatch.setattr(client.requests, "post", fake_post)
     with pytest.raises(MiddleApiError) as exc_info:
-        client.call("check_online")
+        client.call("login_api", "check_online")
     assert exc_info.value.msg == "设备离线"
 
 
@@ -70,4 +70,4 @@ def test_call_wraps_network_error(monkeypatch):
 
     monkeypatch.setattr(client.requests, "post", fake_post)
     with pytest.raises(MiddleApiError):
-        client.call("check_online")
+        client.call("login_api", "check_online")

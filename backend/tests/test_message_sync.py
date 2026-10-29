@@ -33,7 +33,8 @@ def patch_pull(monkeypatch, body):
     """替换中间方调用，并记录收到的查询参数。"""
     captured = {}
 
-    def fake_call(action, params=None, uuid=None):
+    def fake_call(module, action, params=None, uuid=None):
+        captured["module"] = module
         captured["action"] = action
         captured["params"] = params
         return body
@@ -136,6 +137,7 @@ def test_sync_pull_params(app, monkeypatch):
 
     message_sync.sync_once(app)
 
+    assert captured["module"] == "messag_api"
     assert captured["action"] == "get_message"
     assert "start_create_time" in captured["params"]
     assert captured["params"]["page_size"] == 100

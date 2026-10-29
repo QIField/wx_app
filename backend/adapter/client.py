@@ -27,13 +27,15 @@ class MiddleApiError(Exception):
         self.msg = msg
 
 
-def call(action, params=None, uuid=None):
+def call(module, action, params=None, uuid=None):
     """调中间方接口：拼公共参数、发 POST、统一解析返回。
 
-    - action 形如 post_text_message / get_post_text_message
+    - module：接口模块段（send_api / messag_api / login_api / group_api / contacts_api）
+    - action：模块下方法名，形如 post_text_message / get_post_text_message
+    - 真实 URL 三段式：{BASE}/wx_app/{module}/{action}
     - uuid 由调用方传入（发送闭环里下发和确认用同一个）；不传则自动生成
     """
-    url = MIDDLE_BASE_URL.rstrip("/") + "/" + action.lstrip("/")
+    url = f"{MIDDLE_BASE_URL.rstrip('/')}/wx_app/{module.strip('/')}/{action.strip('/')}"
     form = {
         "openid": MIDDLE_OPENID,
         "uuid": uuid or str(uuid_lib.uuid4()),
@@ -42,9 +44,15 @@ def call(action, params=None, uuid=None):
         form.update(params)
 
     if DEMO_MODE:
-        # 查询接口带 data（发送确认轮询会用到），命令接口只回 code/msg
-        data = {"result": 1} if action.startswith("get_") else None
-        return {"code": 0, "msg": "success (demo)", **({"data": data} if data else {})}
+        # 查询接口带 data（发送确认轮询会用到），命令接口只回 code/msg。
+        # demo 的查询结构对齐真实返回：任务记录列表 + processing_result。
+        if action.startswith("get_"):
+            data = [{
+                "uuid": form["uuid"],
+                "processing_result": '{"ret": 200, "msg": "操作成功"}',
+            }]
+            return {"code": 0, "msg": "success (demo)", "data": data}
+        return {"code": 0, "msg": "success (demo)"}
 
     try:
         resp = requests.post(url, data=form, timeout=TIMEOUT)

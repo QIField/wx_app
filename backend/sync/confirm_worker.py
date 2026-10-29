@@ -3,6 +3,8 @@
 每轮：查出"已下发"的任务 → 逐个用 uuid 查结果 → 更新 task 和 message 状态。
 查询本身失败不改结果，只累计 retry_count，超过 MAX_RETRY 兜底标失败。
 """
+import json
+
 from backend.adapter import sender as middle_sender
 from backend.extensions import db
 from backend.models.message import Message
@@ -30,7 +32,10 @@ def confirm_once(app):
 
 
 def _confirm_one(task):
-    """确认单个任务的结果。"""
+    """确认单个任务的结果。
+
+    三态处理：True=成功 / False=失败 / None=结果还没出来（下轮再查）。
+    """
     try:
         body = middle_sender.get_result(task.action, task.uuid)
     except Exception:
@@ -39,7 +44,14 @@ def _confirm_one(task):
             _mark_failed(task)
         return
 
-    if _parse_success(body):
+    verdict = _parse_verdict(body, task.uuid)
+    if verdict is None:
+        # 结果未生成：不算失败，累计重试，超过兜底次数才标失败
+        task.retry_count += 1
+        if task.retry_count >= MAX_RETRY:
+            _mark_failed(task)
+        return
+    if verdict:
         task.status = SendTask.ST_SUCCESS
         _mark_message(task, Message.ST_SENT)
         _broadcast(task, Message.ST_SENT)
@@ -74,16 +86,27 @@ def _mark_message(task, status):
         msg.status = status
 
 
-def _parse_success(body):
-    """判断发送是否成功。
+def _parse_verdict(body, want_uuid):
+    """按真实返回判定结果（2026-10-29 联调实测结构）。
 
-    中间方约定：code==0 表示请求成功，查询结果在 data 里。
-    data.status 的实际取值以中间方返回为准，联调时在这里校准：
-    - 有 status 字段：取 0/1 视为成功，其他视为失败
-    - 无 status 字段：code==0 即视为成功
+    查询接口返回：{"code":0, "data":[{"uuid":"...", "processing_result":"{\"ret\":200,...}"}]}
+    返回三态：True=设备处理成功 / False=处理失败 / None=还没出结果（data 里没有这条 uuid）。
     """
-    data = body.get("data") or {}
-    status = data.get("status")
-    if status is None:
-        return body.get("code") == 0
-    return status in (0, 1, "0", "1")
+    if body.get("code") != 0:
+        return False
+    data = body.get("data") or []
+    if isinstance(data, dict):
+        data = [data]
+    for rec in data:
+        if rec.get("uuid") != want_uuid:
+            continue
+        result = rec.get("processing_result")
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except ValueError:
+                return False
+        if isinstance(result, dict):
+            return result.get("ret") == 200
+        return False
+    return None

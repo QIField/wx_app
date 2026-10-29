@@ -25,10 +25,14 @@ def make_task(app, conversation, task_status, msg_status):
 
 
 def test_confirm_success(app, conversation, monkeypatch):
-    """结果成功：task=成功、message=已发送。"""
+    """结果成功（processing_result ret=200）：task=成功、message=已发送。"""
 
     def fake_get_result(action, uuid):
-        return {"code": 0, "msg": "success", "data": {"status": 0}}
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": [{"uuid": "u-1", "processing_result": '{"ret": 200, "msg": "操作成功"}'}],
+        }
 
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
     task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
@@ -41,10 +45,14 @@ def test_confirm_success(app, conversation, monkeypatch):
 
 
 def test_confirm_failed(app, conversation, monkeypatch):
-    """结果失败：task=失败、message=失败。"""
+    """结果失败（processing_result ret!=200）：task=失败、message=失败。"""
 
     def fake_get_result(action, uuid):
-        return {"code": 0, "msg": "success", "data": {"status": -1}}
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": [{"uuid": "u-1", "processing_result": '{"ret": 500, "msg": "发送失败"}'}],
+        }
 
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
     task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
@@ -54,6 +62,23 @@ def test_confirm_failed(app, conversation, monkeypatch):
     db.session.expire_all()
     assert task.status == SendTask.ST_FAILED
     assert msg.status == Message.ST_FAILED
+
+
+def test_confirm_result_not_ready_keeps_retrying(app, conversation, monkeypatch):
+    """结果还没生成（data 里没有这条 uuid）：不算失败，重试+1。"""
+
+    def fake_get_result(action, uuid):
+        return {"code": 0, "msg": "success", "data": []}
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert task.status == SendTask.ST_DISPATCHED
+    assert task.retry_count == 1
+    assert msg.status == Message.ST_SENDING
 
 
 def test_confirm_query_error_keeps_retrying(app, conversation, monkeypatch):

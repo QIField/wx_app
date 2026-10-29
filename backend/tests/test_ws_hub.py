@@ -59,7 +59,7 @@ def test_confirm_broadcasts_send_result(app, conversation, monkeypatch):
     monkeypatch.setattr(hub, "broadcast", lambda e, d: events.append((e, d)))
 
     def ok(action, uuid):
-        return {"code": 0, "data": {"status": 0}}
+        return {"code": 0, "data": [{"uuid": uuid, "processing_result": '{"ret": 200}'}]}
 
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", ok)
     msg = Message(conversation_id=conversation.id, msg_type=1, direction=2,

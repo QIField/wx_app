@@ -6,14 +6,18 @@ from backend.adapter import client
 
 def test_demo_mode_returns_success(monkeypatch):
     monkeypatch.setattr(client, "DEMO_MODE", True)
-    body = client.call("post_text_message")
+    body = client.call("send_api", "post_text_message")
     assert body["code"] == 0
 
 
 def test_demo_mode_query_carries_data(monkeypatch):
+    import json
+
     monkeypatch.setattr(client, "DEMO_MODE", True)
-    body = client.call("get_post_text_message")
-    assert body["data"]["result"] == 1
+    body = client.call("send_api", "get_post_text_message", uuid="u-9")
+    rec = body["data"][0]
+    assert rec["uuid"] == "u-9"
+    assert json.loads(rec["processing_result"])["ret"] == 200
 
 
 def test_demo_send_flow_reaches_sent(app, monkeypatch, conversation):

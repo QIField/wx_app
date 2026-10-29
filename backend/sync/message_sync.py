@@ -39,7 +39,7 @@ def sync_once(app):
             "page_size": PAGE_SIZE,
         }
         try:
-            body = middle_client.call("get_message", params)
+            body = middle_client.call("messag_api", "get_message", params)
         except Exception:
             db.session.rollback()  # 拉取失败：游标不动，下一轮重来
             return
