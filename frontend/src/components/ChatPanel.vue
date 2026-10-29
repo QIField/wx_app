@@ -7,6 +7,23 @@ import { useChatStore } from '../stores/chat'
 const chat = useChatStore()
 const input = ref('')
 const scroller = ref(null)
+const composerH = ref(52)
+
+/* 顶部拖拽拉伸：按住输入框上边缘上下拖，向上拖=变高 */
+let drag = null
+function onGrabDown(e) {
+  drag = { y: e.clientY, h: composerH.value }
+  window.addEventListener('mousemove', onGrabMove)
+  window.addEventListener('mouseup', onGrabUp)
+}
+function onGrabMove(e) {
+  composerH.value = Math.min(300, Math.max(52, drag.h - (e.clientY - drag.y)))
+}
+function onGrabUp() {
+  window.removeEventListener('mousemove', onGrabMove)
+  window.removeEventListener('mouseup', onGrabUp)
+  drag = null
+}
 
 const TYPE_LABEL = { 2: '[图片]', 3: '[文件]', 4: '[视频]', 5: '[链接]' }
 const STATUS_LABEL = { 0: '发送中', 1: '已发送', 2: '失败' }
@@ -97,6 +114,7 @@ async function onSend() {
     </el-scrollbar>
 
     <div class="editor">
+      <div class="grab-bar" title="拖拽调整输入框高度" @mousedown.prevent="onGrabDown"><i></i></div>
       <div class="tools">
         <svg viewBox="0 0 24 24" class="ticon"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         <svg viewBox="0 0 24 24" class="ticon"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9.5" cy="9.5" r="1.6" fill="currentColor"/><path d="M5 17l4.5-4.5L13 16l3-3 3 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
@@ -107,8 +125,9 @@ async function onSend() {
         <textarea
           v-model="input"
           class="composer"
+          :style="{ height: composerH + 'px' }"
           :disabled="!chat.currentId"
-          placeholder="输入消息…（右下角可拉伸高度）"
+          placeholder="输入消息…"
           @keydown.ctrl.enter.prevent="onSend"
         ></textarea>
         <el-button type="primary" class="send" :disabled="!chat.currentId || !input.trim()" @click="onSend">发送</el-button>
@@ -185,14 +204,27 @@ async function onSend() {
 }
 .st.fail { color: var(--c-danger); font-weight: 600; }
 
-.editor { border-top: 1px solid var(--c-border); background: var(--c-panel); padding: 6px 12px 10px; }
+.editor { border-top: 1px solid var(--c-border); background: var(--c-panel); padding: 0 12px 10px; }
+.grab-bar {
+  height: 10px; margin: 0 -12px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: ns-resize;
+  transition: background 0.15s;
+}
+.grab-bar:hover { background: #f0f4fb; }
+.grab-bar i {
+  width: 28px; height: 3px; border-radius: 2px;
+  background: var(--c-border-strong);
+  transition: background 0.15s, width 0.15s;
+}
+.grab-bar:hover i { background: var(--c-primary); width: 44px; }
 .tools { display: flex; align-items: center; gap: 10px; padding: 3px 2px 6px; }
 .ticon { width: 16px; height: 16px; color: var(--c-text-sub); cursor: pointer; transition: color 0.15s; }
 .ticon:hover { color: var(--c-primary); }
 .hint { margin-left: auto; font-size: 10px; color: var(--c-border-strong); }
 .input-row { display: flex; gap: 10px; align-items: flex-end; }
 
-/* 原生 textarea：右下角可拖拽拉伸高度 */
+/* 高度由顶部拖拽条控制，禁用原生 resize 手柄 */
 .composer {
   flex: 1;
   font-family: var(--font-ui);
@@ -203,10 +235,9 @@ async function onSend() {
   border: 1px solid var(--c-border-strong);
   border-radius: var(--r-md);
   background: var(--c-panel);
-  resize: vertical;
-  min-height: 52px;
-  max-height: 220px;
+  resize: none;
   outline: none;
+  overflow-y: auto;
   transition: border-color 0.15s;
 }
 .composer:focus { border-color: var(--c-primary); }
