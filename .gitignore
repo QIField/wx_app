@@ -10,6 +10,7 @@ env/
 .env
 .env.*
 *.env
+!.env.example
 
 # 日志
 logs/
@@ -18,6 +19,7 @@ logs/
 # 本地数据库备份
 backups/
 *.sql.bak
+*.db
 
 # ===== 前端 Vue3 / Node =====
 node_modules/
@@ -29,9 +31,14 @@ pnpm-debug.log*
 
 # ===== 编辑器 / IDE =====
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.swp
 *.swo
+
+# Trae 自动生成
+.screenshots/
+.trae-html-share-packages/
 
 # ===== 操作系统文件 =====
 Thumbs.db

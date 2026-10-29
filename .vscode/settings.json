@@ -1,0 +1,21 @@
+{
+    // Python 解释器：默认指向项目虚拟环境
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+    // 新终端自动激活虚拟环境（需 Trae 已安装 Python 扩展）
+    "python.terminal.activateEnvironment": true,
+    "python.venvPath": "${workspaceFolder}",
+    // 终端启动配置：每个新终端自动执行 Activate.ps1（不依赖扩展，双保险）
+    "terminal.integrated.profiles.windows": {
+        "wx_app venv": {
+            "source": "PowerShell",
+            "args": [
+                "-NoExit",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "& '${workspaceFolder}\\.venv\\Scripts\\Activate.ps1'"
+            ]
+        }
+    },
+    "terminal.integrated.defaultProfile.windows": "wx_app venv"
+}

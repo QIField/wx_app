@@ -1,0 +1,107 @@
+"""发送结果确认单测：mock get_result，验证任务收尾。"""
+from backend.extensions import db
+from backend.models.message import Message
+from backend.models.send_task import SendTask
+from backend.sync import confirm_worker
+
+
+def make_task(app, conversation, task_status, msg_status):
+    """造一对 task + message，模拟已下发的状态。"""
+    msg = Message(
+        conversation_id=conversation.id,
+        msg_type=Message.MSG_TEXT,
+        direction=Message.DIR_OUT,
+        content="hi",
+        status=msg_status,
+    )
+    task = SendTask(
+        uuid="u-1", action="post_text_message", status=task_status, message_id=None
+    )
+    db.session.add_all([msg, task])
+    db.session.flush()
+    task.message_id = msg.id
+    db.session.commit()
+    return task, msg
+
+
+def test_confirm_success(app, conversation, monkeypatch):
+    """结果成功：task=成功、message=已发送。"""
+
+    def fake_get_result(action, uuid):
+        return {"code": 0, "msg": "success", "data": {"status": 0}}
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert task.status == SendTask.ST_SUCCESS
+    assert msg.status == Message.ST_SENT
+
+
+def test_confirm_failed(app, conversation, monkeypatch):
+    """结果失败：task=失败、message=失败。"""
+
+    def fake_get_result(action, uuid):
+        return {"code": 0, "msg": "success", "data": {"status": -1}}
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert task.status == SendTask.ST_FAILED
+    assert msg.status == Message.ST_FAILED
+
+
+def test_confirm_query_error_keeps_retrying(app, conversation, monkeypatch):
+    """查询本身失败：状态不变、重试次数+1，不到兜底次数不标失败。"""
+
+    def boom(action, uuid):
+        raise ConnectionError("超时")
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", boom)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert task.status == SendTask.ST_DISPATCHED
+    assert task.retry_count == 1
+    assert msg.status == Message.ST_SENDING
+
+
+def test_confirm_gives_up_after_max_retry(app, conversation, monkeypatch):
+    """重试到兜底次数：按失败收尾。"""
+
+    def boom(action, uuid):
+        raise ConnectionError("超时")
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", boom)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+    task.retry_count = confirm_worker.MAX_RETRY - 1
+    db.session.commit()
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert task.status == SendTask.ST_FAILED
+    assert msg.status == Message.ST_FAILED
+
+
+def test_confirm_skips_non_dispatched(app, conversation, monkeypatch):
+    """非"已下发"状态的任务不参与确认。"""
+    called = []
+
+    def fake_get_result(action, uuid):
+        called.append(uuid)
+        return {"code": 0, "data": {}}
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    make_task(app, conversation, SendTask.ST_PENDING, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    assert called == []
