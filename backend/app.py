@@ -43,12 +43,19 @@ def register_error_handlers(app: Flask) -> None:
 
 
 def init_scheduler(app: Flask):
-    """定时任务：发送结果确认。只在直接运行 app.py 时启动。"""
+    """定时任务：收消息轮询 + 发送结果确认。只在直接运行 app.py 时启动。"""
     from apscheduler.schedulers.background import BackgroundScheduler
 
     from backend.sync.confirm_worker import confirm_once
+    from backend.sync.message_sync import sync_once
 
     sched = BackgroundScheduler(daemon=True)
+    sched.add_job(
+        lambda: sync_once(app),
+        "interval",
+        seconds=POLL_INTERVAL_SECONDS,
+        id="sync_message",
+    )
     sched.add_job(
         lambda: confirm_once(app),
         "interval",

@@ -3,5 +3,6 @@ from backend.models.base import SoftDeleteMixin
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.send_task import SendTask
+from backend.models.sync_cursor import SyncCursor
 
-__all__ = ["SoftDeleteMixin", "Conversation", "Message", "SendTask"]
+__all__ = ["SoftDeleteMixin", "Conversation", "Message", "SendTask", "SyncCursor"]
