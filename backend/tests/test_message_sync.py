@@ -1,6 +1,8 @@
 """收消息轮询单测：mock 中间方 get_message，验证入库与游标。"""
 from datetime import datetime, timedelta
 
+import json
+
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
@@ -41,6 +43,46 @@ def patch_pull(monkeypatch, body):
 
     monkeypatch.setattr(message_sync.middle_client, "call", fake_call)
     return captured
+
+
+def make_real_item(**over):
+    """按 2026-10-29 联调实测结构造一条群消息（RFC 1123 时间、字符串类型）。"""
+    raw_json = json.dumps({
+        "TypeName": "AddMsg",
+        "Data": {"MsgId": 1622189713, "NewMsgId": 1920921937912189642,
+                 "FromUserName": {"string": "38854524004@chatroom"},
+                 "ToUserName": {"string": "wxid_yfm4es06qpzt22"},
+                 "CreateTime": 1793268964},
+        "Wxid": "wxid_me",
+    }, ensure_ascii=False)
+    item = {
+        "id": 10524,
+        "msg_id": "1622189713",
+        "from_wxid": "38854524004@chatroom",
+        "to_wxid": "wxid_me",
+        "msg_type": "1",
+        "content": "wxid_iobwbybwbmp622:\n11537649409=盖茨80，原厂220",
+        "create_time": "Thu, 29 Oct 2026 18:16:04 GMT",
+        "raw_json": raw_json,
+    }
+    item.update(over)
+    return item
+
+
+def test_sync_saves_real_structure(app, monkeypatch):
+    """实测真实结构：群消息拆发言人、RFC1123 时间、字符串类型、raw_json 取 NewMsgId。"""
+    patch_pull(monkeypatch, make_body([make_real_item()]))
+
+    message_sync.sync_once(app)
+
+    msg = Message.query.one()
+    assert msg.middle_msg_id == "1622189713"
+    assert msg.new_msg_id == "1920921937912189642"
+    assert msg.msg_type == Message.MSG_TEXT
+    assert msg.sender_wxid == "wxid_iobwbybwbmp622"  # 从 content 拆出的发言人
+    assert msg.content == "11537649409=盖茨80，原厂220"
+    assert msg.direction == Message.DIR_IN
+    assert msg.create_time.strftime("%Y-%m-%d %H:%M:%S") == "2026-10-29 18:16:04"
 
 
 def test_sync_saves_new_message(app, monkeypatch):

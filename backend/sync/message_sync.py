@@ -3,10 +3,11 @@
 流程（已确认的《收消息轮询》流程图）：
 读游标 → 调 get_message 拉增量 → 去重 → 入库 + 更新会话 → 推游标。
 
-联调校准点（代码里已标 TODO）：
-- get_message 返回的消息字段名（_normalize）
-- 消息类型编码映射（_TYPE_MAP）
-- start_create_time 的时间格式
+联调实测（2026-10-29）已确认的真实结构：
+- data.list 数组，元素含 from_wxid/to_wxid/msg_type(字符串)/content/create_time(RFC 1123)/raw_json
+- 群消息 content = "发言人wxid:\n正文"，需拆分
+- new_msg_id 在 raw_json 的 NewMsgId 字段里
+- 无 is_sender：from==设备wxid 视为自己发出（设备wxid取 raw_json.Wxid）
 """
 from datetime import datetime, timedelta
 
@@ -153,25 +154,40 @@ def _save_message(item):
 
 
 def _normalize(item):
-    """中间方一条消息 → 入库字段。字段名以实际返回为准，联调校准。
+    """中间方一条消息 → 入库字段（结构按 2026-10-29 联调实测）。
 
-    方向规则：接口带 is_sender=1 视为自己发出的；默认按客户发来的处理。
+    方向规则：from == 设备wxid（raw_json.Wxid）视为自己发出的，否则为客户发来。
     """
     try:
         from_wxid = item.get("from_wxid", "")
         to_wxid = item.get("to_wxid", "")
-        is_self = bool(item.get("is_sender")) or item.get("direction") == 1
+        raw = _parse_raw_json(item.get("raw_json"))
+        self_wxid = raw.get("Wxid") or to_wxid
+        is_self = bool(item.get("is_sender")) or from_wxid == self_wxid
         direction = Message.DIR_OUT if is_self else Message.DIR_IN
         peer_wxid = to_wxid if is_self else from_wxid
         if not peer_wxid:
             return None
 
-        raw_type = item.get("msg_type")
+        # msg_type 实测是字符串 "1"，转 int 再查映射
+        try:
+            raw_type = int(item.get("msg_type"))
+        except (TypeError, ValueError):
+            raw_type = 1
         msg_type = _TYPE_MAP.get(raw_type, Message.MSG_TEXT)
 
         create_time = _parse_time(item.get("create_time"))
         if create_time is None:
             return None
+
+        content = item.get("content") or ""
+        sender_wxid = from_wxid
+        # 群消息 content = "发言人wxid:\n正文"，拆出发言人
+        if not is_self and "@chatroom" in peer_wxid and ":\n" in content:
+            head, _, rest = content.partition(":\n")
+            if head and "\n" not in head:
+                sender_wxid = head
+                content = rest
 
         return {
             "direction": direction,
@@ -181,28 +197,62 @@ def _normalize(item):
                 if "@chatroom" in peer_wxid
                 else Conversation.CHAT_SINGLE
             ),
-            "sender_wxid": from_wxid,
-            "sender_name": item.get("sender_name") or from_wxid,
+            "sender_wxid": sender_wxid,
+            "sender_name": item.get("sender_name") or sender_wxid,
             "msg_type": msg_type,
-            "content": item.get("content", ""),
+            "content": content,
             "payload": dict(item),  # 原文全量留底
             "middle_msg_id": str(item.get("msg_id") or ""),
-            "new_msg_id": str(item.get("new_msg_id") or ""),
+            "new_msg_id": str(
+                item.get("new_msg_id")
+                or raw.get("NewMsgId")
+                or (raw.get("Data") or {}).get("NewMsgId")
+                or ""
+            ),
             "create_time": create_time,
         }
     except Exception:
         return None  # 单条坏数据不拖垮整轮
 
 
+def _parse_raw_json(value):
+    """解析 raw_json 字符串（里面藏着设备wxid和NewMsgId），失败返回空 dict。"""
+    if not value:
+        return {}
+    import json
+
+    try:
+        obj = json.loads(value)
+        return obj if isinstance(obj, dict) else {}
+    except ValueError:
+        return {}
+
+
 def _parse_time(value):
-    """兼容字符串 'YYYY-MM-DD HH:MM:SS' 和秒级时间戳两种格式。"""
+    """兼容三种实测/文档格式：
+    - RFC 1123 "Thu, 29 Oct 2026 18:16:04 GMT"（实测：字面值即北京时间，不做时区换算）
+    - "YYYY-MM-DD HH:MM:SS"
+    - 秒级时间戳
+    """
+    from email.utils import parsedate_to_datetime
+
     if value is None:
         return None
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value)
+    text = str(value)
+    if text.endswith("GMT"):
+        try:
+            dt = parsedate_to_datetime(text)
+            # 中间方的 GMT 标注不可信，按字面值取本地时间
+            return datetime(
+                dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second
+            )
+        except (ValueError, TypeError):
+            return None
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
-            return datetime.strptime(str(value), fmt)
+            return datetime.strptime(text, fmt)
         except ValueError:
             continue
     return None

@@ -1,6 +1,7 @@
 """消息相关 API：发送消息入口。"""
 from flask import Blueprint, jsonify, request
 
+from backend.config import SEND_ENABLED
 from backend.sync.send_service import SendDispatchError, send_message
 
 bp = Blueprint("messages", __name__)
@@ -14,6 +15,9 @@ def send_message_api(conversation_id):
 
     返回 data.message_id + status（0=发送中，等 WebSocket 推最终结果）。
     """
+    if not SEND_ENABLED:
+        return jsonify(code=403, msg="发送功能未启用（联调收消息阶段禁用，.env 改 SEND_ENABLED 后重启）"), 403
+
     body = request.get_json(silent=True) or {}
     msg_type = body.get("msg_type")
     if msg_type not in _VALID_TYPES:

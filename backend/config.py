@@ -28,6 +28,9 @@ DATABASE_URL = _pick_database_url()
 MIDDLE_BASE_URL = os.getenv("MIDDLE_BASE_URL", "")
 MIDDLE_OPENID = os.getenv("MIDDLE_OPENID", "")
 
+# 发送总开关：false 时前端发送接口直接拒绝（防止联调收消息阶段误发真消息）
+SEND_ENABLED = os.getenv("SEND_ENABLED", "false").lower() in ("1", "true", "yes")
+
 # 收消息轮询间隔（秒）
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "2"))
 
