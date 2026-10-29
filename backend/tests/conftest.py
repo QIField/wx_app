@@ -2,28 +2,28 @@
 import pytest
 from sqlalchemy.pool import StaticPool
 
-from backend.app import create_app
 from backend.extensions import db as _db
 from backend.models import Conversation
+from backend.tests.app_factory import make_test_app
 
 
 @pytest.fixture()
 def app():
-    """每个用例一个独立 app + 内存库，用 StaticPool 保证同库连接。"""
-    app = create_app()
-    app.config.update(
-        SQLALCHEMY_DATABASE_URI="sqlite://",
-        SQLALCHEMY_ENGINE_OPTIONS={
-            "poolclass": StaticPool,
-            "connect_args": {"check_same_thread": False},
-        },
-        TESTING=True,
-    )
+    """每个用例一个独立 app + 内存库（创建时就传测试配置，杜绝误连 dev 库）。"""
+    app = make_test_app()
     with app.app_context():
         _db.create_all()
         yield app
         _db.session.remove()
         _db.drop_all()
+
+
+@pytest.fixture(autouse=True)
+def real_middle_mode(monkeypatch):
+    """默认走真实适配器路径（adapter 单测自己 mock requests）；demo 测试再显式开演示模式。"""
+    from backend.adapter import client
+
+    monkeypatch.setattr(client, "DEMO_MODE", False)
 
 
 @pytest.fixture()

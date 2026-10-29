@@ -13,6 +13,10 @@ from backend.config import MIDDLE_BASE_URL, MIDDLE_OPENID
 
 TIMEOUT = 10  # 秒
 
+# 演示模式：没配中间方地址时，所有请求直接返回模拟成功。
+# 配置了 MIDDLE_BASE_URL 后自动走真实接口，代码无需改动。
+DEMO_MODE = not MIDDLE_BASE_URL
+
 
 class MiddleApiError(Exception):
     """中间方返回 code != 0，或网络请求本身失败。"""
@@ -36,6 +40,11 @@ def call(action, params=None, uuid=None):
     }
     if params:
         form.update(params)
+
+    if DEMO_MODE:
+        # 查询接口带 data（发送确认轮询会用到），命令接口只回 code/msg
+        data = {"result": 1} if action.startswith("get_") else None
+        return {"code": 0, "msg": "success (demo)", **({"data": data} if data else {})}
 
     try:
         resp = requests.post(url, data=form, timeout=TIMEOUT)
