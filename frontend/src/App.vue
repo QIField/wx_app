@@ -52,16 +52,18 @@ onMounted(async () => {
     <div class="layout">
       <aside class="col-side"><ConvList /></aside>
       <main class="col-main"><ChatPanel /></main>
-      <div v-if="infoOpen" class="info-resizer" title="拖拽调整宽度" @mousedown.prevent="onResizeDown"><i></i></div>
-      <aside v-if="infoOpen" class="col-info" :style="{ width: infoW + 'px' }"><InfoPanel /></aside>
-      <button
-        class="info-toggle"
-        :title="infoOpen ? '收起扩展栏' : '展开扩展栏'"
-        @click="infoOpen = !infoOpen"
-      >
+      <aside v-if="infoOpen" class="col-info" :style="{ width: infoW + 'px' }">
+        <div class="info-resizer" title="拖拽调整宽度" @mousedown.prevent="onResizeDown"><i></i></div>
+        <InfoPanel />
+        <button class="info-toggle" title="收起扩展栏" @click="infoOpen = false">
+          <svg viewBox="0 0 24 24" width="12" height="12">
+            <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </aside>
+      <button v-else class="info-toggle outside" title="展开扩展栏" @click="infoOpen = true">
         <svg viewBox="0 0 24 24" width="12" height="12">
-          <path v-if="infoOpen" d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-          <path v-else d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
     </div>
@@ -132,23 +134,26 @@ onMounted(async () => {
   min-width: 0;
 }
 .col-info {
+  position: relative;
   background: var(--c-panel);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
-  overflow: hidden;
+  overflow: visible;
   flex-shrink: 0;
   transition: width 0.12s ease-out;
 }
 
-/* 与输入框拖拽条同款把手样式 */
+/* 把手与按钮都嵌在右栏内部，不占外面空间 */
 .info-resizer {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
   width: 10px;
-  flex-shrink: 0;
+  z-index: 5;
   cursor: col-resize;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: var(--r-md) 0 0 var(--r-md);
   transition: background 0.15s;
 }
 .info-resizer i {
@@ -161,21 +166,36 @@ onMounted(async () => {
 .info-resizer:hover i { background: var(--c-primary); height: 44px; }
 
 .info-toggle {
-  width: 16px;
-  flex-shrink: 0;
+  position: absolute;
+  right: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 14px; height: 52px;
+  z-index: 5;
   border: 1px solid var(--c-border);
-  border-radius: var(--r-sm);
+  border-right: none;
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
   background: var(--c-panel);
   color: var(--c-text-sub);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
   transition: all 0.15s;
 }
 .info-toggle:hover {
   color: var(--c-primary);
   border-color: var(--c-primary);
   background: var(--c-primary-soft);
+}
+.info-toggle.outside {
+  position: static;
+  transform: none;
+  align-self: stretch;
+  height: auto;
+  width: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-card);
 }
 </style>
