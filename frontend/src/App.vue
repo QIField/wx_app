@@ -52,7 +52,7 @@ onMounted(async () => {
     <div class="layout">
       <aside class="col-side"><ConvList /></aside>
       <main class="col-main"><ChatPanel /></main>
-      <div v-if="infoOpen" class="info-resizer" title="拖拽调整宽度" @mousedown.prevent="onResizeDown"></div>
+      <div v-if="infoOpen" class="info-resizer" title="拖拽调整宽度" @mousedown.prevent="onResizeDown"><i></i></div>
       <aside v-if="infoOpen" class="col-info" :style="{ width: infoW + 'px' }"><InfoPanel /></aside>
       <button
         class="info-toggle"
@@ -140,14 +140,25 @@ onMounted(async () => {
   transition: width 0.12s ease-out;
 }
 
+/* 与输入框拖拽条同款把手样式 */
 .info-resizer {
-  width: 5px;
+  width: 10px;
   flex-shrink: 0;
   cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 3px;
   transition: background 0.15s;
 }
-.info-resizer:hover { background: var(--c-primary); }
+.info-resizer i {
+  width: 3px; height: 28px;
+  border-radius: 2px;
+  background: var(--c-border-strong);
+  transition: background 0.15s, height 0.15s;
+}
+.info-resizer:hover { background: #f0f4fb; }
+.info-resizer:hover i { background: var(--c-primary); height: 44px; }
 
 .info-toggle {
   width: 16px;
