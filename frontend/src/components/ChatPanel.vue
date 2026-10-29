@@ -1,5 +1,5 @@
 <script setup>
-/** 中栏：聊天窗 + 输入框。气泡方向=direction；状态只区分 发送中/已发送/失败。 */
+/** 中栏：聊天窗 + 输入框。气泡带头像昵称；状态只区分 发送中/已发送/失败。 */
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
@@ -23,6 +23,19 @@ const timeline = computed(() => {
   }
   return out
 })
+
+/* 行头像：in=客户（群消息取发言人首字，单聊取会话名首字）；out=客服 */
+function avatarOf(m) {
+  if (m.direction === 2) return '客'
+  const s = chat.currentConv?.chat_type === 2
+    ? (m.sender_name || '客')
+    : (chat.currentConv?.name || chat.currentConv?.wxid || '?')
+  return s.slice(0, 1).toUpperCase()
+}
+function nameOf(m) {
+  if (m.direction === 2) return '客服'
+  return chat.currentConv?.chat_type === 2 ? (m.sender_name || '成员') : (chat.currentConv?.name || chat.currentConv?.wxid)
+}
 
 watch(
   () => [chat.currentId, chat.currentMessages.length],
@@ -65,14 +78,17 @@ async function onSend() {
             <span>{{ row.label }}</span>
           </div>
           <div v-else class="msg" :class="row.direction === 2 ? 'out' : 'in'">
-            <div class="bubble">
-              <div v-if="row.direction === 1 && chat.currentConv?.chat_type === 2" class="sender">{{ row.sender_name }}</div>
-              <div v-if="row.msg_type === 2" class="img-ph">图片 {{ row.content }}</div>
-              <div v-else-if="row.msg_type !== 1" class="content type-label">{{ TYPE_LABEL[row.msg_type] || '[未知类型]' }}</div>
-              <div v-else class="content">{{ row.content }}</div>
-              <div class="meta">
-                <span v-if="row.direction === 2" :class="['st', { fail: row.status === 2 }]">{{ STATUS_LABEL[row.status] }}</span>
-                <span class="num">{{ row.create_time?.slice(11, 16) }}</span>
+            <span class="avatar" :class="row.direction === 2 ? 'agent' : 'client'">{{ avatarOf(row) }}</span>
+            <div class="body">
+              <div class="name">{{ nameOf(row) }}</div>
+              <div class="bubble">
+                <div v-if="row.msg_type === 2" class="img-ph">图片 {{ row.content }}</div>
+                <div v-else-if="row.msg_type !== 1" class="content type-label">{{ TYPE_LABEL[row.msg_type] || '[未知类型]' }}</div>
+                <div v-else class="content">{{ row.content }}</div>
+                <div class="meta">
+                  <span v-if="row.direction === 2" :class="['st', { fail: row.status === 2 }]">{{ STATUS_LABEL[row.status] }}</span>
+                  <span class="num">{{ row.create_time?.slice(11, 16) }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -88,14 +104,13 @@ async function onSend() {
         <span class="hint">Ctrl+Enter 发送</span>
       </div>
       <div class="input-row">
-        <el-input
+        <textarea
           v-model="input"
-          type="textarea"
-          :rows="2"
+          class="composer"
           :disabled="!chat.currentId"
-          placeholder="输入消息…"
+          placeholder="输入消息…（右下角可拉伸高度）"
           @keydown.ctrl.enter.prevent="onSend"
-        />
+        ></textarea>
         <el-button type="primary" class="send" :disabled="!chat.currentId || !input.trim()" @click="onSend">发送</el-button>
       </div>
     </div>
@@ -125,22 +140,36 @@ async function onSend() {
 }
 
 .msgs { padding: 4px 16px 16px; }
-.msg { display: flex; margin-bottom: 10px; animation: pop 0.22s both; }
+.msg { display: flex; gap: 8px; margin-bottom: 12px; animation: pop 0.22s both; }
 @keyframes pop {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
-.msg.out { justify-content: flex-end; }
+.msg.out { flex-direction: row-reverse; }
+
+.avatar {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: var(--r-sm);
+  color: #fff; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 16px;
+}
+.avatar.client { background: var(--c-ok); }
+.avatar.agent { background: var(--c-primary); }
+
+.body { max-width: 72%; min-width: 0; display: flex; flex-direction: column; }
+.msg.out .body { align-items: flex-end; }
+.name { font-size: 11px; color: var(--c-text-sub); margin-bottom: 2px; }
+
 .bubble {
-  max-width: 72%;
   padding: 7px 10px;
   border-radius: var(--r-lg);
   background: var(--c-panel);
   border: 1px solid var(--c-border);
+  width: fit-content;
 }
 .msg.in .bubble { border-top-left-radius: 3px; }
 .msg.out .bubble { background: var(--c-primary-soft); border-color: #c9dbff; border-top-right-radius: 3px; }
-.sender { font-size: 11px; color: var(--c-primary); margin-bottom: 2px; }
 .img-ph {
   width: 150px; height: 100px;
   border-radius: var(--r-sm);
@@ -162,5 +191,26 @@ async function onSend() {
 .ticon:hover { color: var(--c-primary); }
 .hint { margin-left: auto; font-size: 10px; color: var(--c-border-strong); }
 .input-row { display: flex; gap: 10px; align-items: flex-end; }
-.send { height: 52px; min-width: 72px; }
+
+/* 原生 textarea：右下角可拖拽拉伸高度 */
+.composer {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--c-text);
+  line-height: 1.5;
+  padding: 7px 10px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: var(--c-panel);
+  resize: vertical;
+  min-height: 52px;
+  max-height: 220px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.composer:focus { border-color: var(--c-primary); }
+.composer:disabled { background: #f5f7fa; cursor: not-allowed; }
+.composer::placeholder { color: var(--c-border-strong); }
+.send { min-width: 72px; height: 52px; }
 </style>
