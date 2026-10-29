@@ -46,13 +46,30 @@ def sync_once(app):
 
         items = _extract_messages(body)
         latest = cursor.last_sync_time
+        pushed = []  # 本轮新入库的消息，commit 后统一广播
         for item in items:
-            saved_at = _save_message(item)
-            if saved_at is not None and saved_at > latest:
-                latest = saved_at
+            saved = _save_message(item)
+            if saved is None:
+                continue
+            pushed.append(saved)
+            if saved["create_time"] > latest:
+                latest = saved["create_time"]
 
         cursor.last_sync_time = latest
         db.session.commit()
+
+        # commit 之后才广播：保证前端听到推送时库里一定能查到
+        from backend.ws import hub
+        for saved in pushed:
+            hub.broadcast("new_message", {
+                "message_id": saved["message_id"],
+                "conversation_id": saved["conversation_id"],
+                "direction": saved["direction"],
+                "msg_type": saved["msg_type"],
+                "content": saved["content"],
+                "sender_name": saved["sender_name"],
+                "create_time": saved["create_time"].strftime("%Y-%m-%d %H:%M:%S"),
+            })
 
 
 def _get_cursor():
@@ -86,7 +103,7 @@ def _extract_messages(body):
 def _save_message(item):
     """单条消息入库：去重 → 转字段 → 建/找会话 → 写 message → 更新会话。
 
-    返回该消息的 create_time（供游标推进）；重复或坏数据返回 None。
+    返回推送信息字典（commit 后供广播用）；重复或坏数据返回 None。
     """
     fields = _normalize(item)
     if fields is None:
@@ -123,7 +140,16 @@ def _save_message(item):
         conv.unread_count = (conv.unread_count or 0) + 1
     conv.last_msg = _short_summary(fields["msg_type"], fields["content"])
     conv.last_msg_at = fields["create_time"]
-    return fields["create_time"]
+
+    return {
+        "message_id": msg.id,
+        "conversation_id": conv.id,
+        "direction": fields["direction"],
+        "msg_type": fields["msg_type"],
+        "content": fields["content"],
+        "sender_name": fields["sender_name"],
+        "create_time": fields["create_time"],
+    }
 
 
 def _normalize(item):

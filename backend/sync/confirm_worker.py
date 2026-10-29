@@ -42,8 +42,25 @@ def _confirm_one(task):
     if _parse_success(body):
         task.status = SendTask.ST_SUCCESS
         _mark_message(task, Message.ST_SENT)
+        _broadcast(task, Message.ST_SENT)
     else:
         _mark_failed(task)
+        _broadcast(task, Message.ST_FAILED)
+
+
+def _broadcast(task, msg_status):
+    """状态有变化就推给前端：气泡从"发送中"变成"已发送/失败"。"""
+    if task.message_id is None:
+        return
+    msg = db.session.get(Message, task.message_id)
+    if msg is None:
+        return
+    from backend.ws import hub
+    hub.broadcast("send_result", {
+        "message_id": msg.id,
+        "conversation_id": msg.conversation_id,
+        "status": msg_status,
+    })
 
 
 def _mark_failed(task):
