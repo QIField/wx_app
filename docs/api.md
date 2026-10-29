@@ -65,7 +65,7 @@
 }
 ```
 
-msg_type 对照：1文本 2图片 3文件 4视频 5链接卡片（中间方只有这 5 种）
+msg_type 对照：1文本 2图片 3文件 4视频 5链接卡片（业务端自定编码；中间方微信原始编码 1文本 / 3图片 / 34文件 / 43视频 / 49链接卡片，由收消息同步层 message_sync.py 统一转换）
 
 ### POST /api/conversations/{id}/messages — 发消息
 
@@ -128,6 +128,14 @@ msg_type 对照：1文本 2图片 3文件 4视频 5链接卡片（中间方只�
 > 开发适配器（backend/adapter/）时以这份表为准。
 > 完整字段以《接口文档(2).txt》原文为准，此处是开发备忘。
 
+## 实测确认（2026-10-29 联调）
+
+- URL 为**三段式**：`https://域名/wx_app/{模块}/{方法}`，如 `/wx_app/contacts_api/fetch_contacts_list_cache`
+- 查询接口返回的任务记录结构：`data` 为**数组**，元素含 `uuid`、`processing_result`（JSON 字符串，`ret:200` 即处理成功，可能带 `data` 字段存业务结果）、`processing_result_date`
+- `processing_result_date` / `create_time` 时间格式为 RFC 1123（`Thu, 29 Oct 2026 18:03:44 GMT`）
+- `get_check_online` 实测返回 `processing_result.data = true` 表示设备在线
+- **待确认**：`get_message` 正常返回时 `data` 的消息结构（空数据时实测 `data: []` 数组，等真实消息进来后核对字段名）
+
 ## 统一规则
 
 - 全部 **POST**，Content-Type：`application/x-www-form-urlencoded`
@@ -173,7 +181,7 @@ msg_type 对照：1文本 2图片 3文件 4视频 5链接卡片（中间方只�
 
 | action | 参数 | 说明 |
 |---|---|---|
-| fetch_contacts_list / get_fetch_contacts_list | - | 拉通讯录 |
+| fetch_contacts_list / get_fetch_contacts_list | - | 拉通讯录（好友、已保存群、公众号） |
 | fetch_contacts_list_cache / get_fetch_contacts_list_cache | - | 拉缓存版通讯录 |
-| contact_detail_info / get_contact_detail_info | wxids（单次最多 20 个） | 联系人详情 |
-| brief_info / get_brief_info | - | 简要信息 |
+| contact_detail_info / get_contact_detail_info | wxids（逗号分隔，单次最多 20 个） | 联系人详情 |
+| brief_info / get_brief_info | wxids（逗号分隔，单次最多 20 个） | 简要信息（get_ 查询只传 openid+uuid） |
