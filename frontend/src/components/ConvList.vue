@@ -8,6 +8,11 @@ function fmtTime(t) {
   if (!t) return ''
   return t.slice(5, 16) // MM-DD HH:MM
 }
+
+function first(c) {
+  const s = c.name || c.wxid || '?'
+  return s.slice(0, 1).toUpperCase()
+}
 </script>
 
 <template>
@@ -26,15 +31,21 @@ function fmtTime(t) {
         @click="chat.selectConversation(c.id)"
       >
         <div class="row1">
-          <span class="name">
-            {{ c.name || c.wxid }}
-            <el-tag v-if="c.chat_type === 2" size="small" type="info" effect="plain">群</el-tag>
-          </span>
+          <div class="who">
+            <span class="avatar" :class="{ group: c.chat_type === 2 }">{{ first(c) }}</span>
+            <span class="name">
+              {{ c.name || c.wxid }}
+              <el-tag v-if="c.chat_type === 2" size="small" type="info" effect="plain">群</el-tag>
+            </span>
+          </div>
           <span class="time">{{ fmtTime(c.last_msg_at) }}</span>
         </div>
         <div class="row2">
           <span class="preview">{{ c.last_msg || '（暂无消息）' }}</span>
-          <span v-if="c.unread_count > 0" class="badge">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</span>
+          <span class="flags">
+            <span v-if="c.pinned" class="pin">置顶</span>
+            <span v-if="c.unread_count > 0" class="badge">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</span>
+          </span>
         </div>
       </div>
 
@@ -60,13 +71,31 @@ function fmtTime(t) {
 .item.active { background: var(--c-bg); border-left-color: var(--c-primary); }
 
 .row1 { display: flex; justify-content: space-between; align-items: center; }
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.avatar {
+  width: 36px; height: 36px; flex-shrink: 0;
+  border-radius: var(--r-sm);
+  background: var(--c-primary);
+  color: #fff; font-size: 15px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center;
+}
+.avatar.group { background: #34a853; }
 .name { font-weight: 500; }
-.time { font-size: 12px; color: var(--c-text-sub); }
-.row2 { display: flex; justify-content: space-between; margin-top: 4px; }
+.time { font-size: 12px; color: var(--c-text-sub); flex-shrink: 0; }
+.row2 {
+  display: flex; justify-content: space-between; margin-top: 6px;
+  padding-left: 46px;
+}
 .preview {
   color: var(--c-text-sub); font-size: 13px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-width: 210px;
+  max-width: 180px;
+}
+.flags { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.pin {
+  font-size: 11px; color: var(--c-primary);
+  border: 1px solid var(--c-primary); border-radius: 4px;
+  padding: 0 4px; line-height: 16px;
 }
 .badge {
   min-width: 18px; height: 18px; padding: 0 5px;

@@ -34,7 +34,10 @@ async function onSend() {
 
 <template>
   <div class="chat">
-    <div class="head">{{ chat.currentConv ? (chat.currentConv.name || chat.currentConv.wxid) : '选择左侧会话' }}</div>
+    <div class="head">
+      {{ chat.currentConv ? (chat.currentConv.name || chat.currentConv.wxid) : '选择左侧会话' }}
+      <el-tag v-if="chat.currentConv?.chat_type === 2" size="small" type="info" effect="plain">群聊</el-tag>
+    </div>
 
     <el-scrollbar ref="scroller" class="scroll" @scroll="({ scrollTop }) => scrollTop === 0 && chat.loadOlderMessages()">
       <div v-if="chat.loadingMore" class="tip">加载更早的消息…</div>
@@ -42,7 +45,8 @@ async function onSend() {
       <div v-else class="msgs">
         <div v-for="m in chat.currentMessages" :key="m.id" class="msg" :class="m.direction === 2 ? 'out' : 'in'">
           <div class="bubble">
-            <div v-if="m.msg_type !== 1" class="content type-label">{{ TYPE_LABEL[m.msg_type] || '[未知类型]' }}</div>
+            <div v-if="m.msg_type === 2" class="img-ph">图片 {{ m.content }}</div>
+            <div v-else-if="m.msg_type !== 1" class="content type-label">{{ TYPE_LABEL[m.msg_type] || '[未知类型]' }}</div>
             <div v-else class="content">{{ m.content }}</div>
             <div class="meta">
               <span v-if="m.direction === 2" :class="['st', { fail: m.status === 2 }]">{{ STATUS_LABEL[m.status] }}</span>
@@ -73,7 +77,7 @@ async function onSend() {
   padding: 14px 20px; font-weight: 600;
   border-bottom: 1px solid var(--c-border);
 }
-.scroll { flex: 1; }
+.scroll { flex: 1; background: var(--c-bg); }
 .tip { text-align: center; color: var(--c-text-sub); font-size: 12px; padding: 8px; }
 
 .msgs { padding: 16px 20px; }
@@ -81,11 +85,19 @@ async function onSend() {
 .msg.out { justify-content: flex-end; }
 .bubble {
   max-width: 70%;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-radius: var(--r-lg);
-  background: var(--c-bg);
+  background: var(--c-panel);
+  box-shadow: 0 1px 2px rgba(31, 41, 51, 0.06);
 }
 .msg.out .bubble { background: #e8f0ff; }
+.img-ph {
+  width: 160px; height: 110px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(135deg, #dfe5ee, #c9d3e2);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--c-text-sub); font-size: 12px;
+}
 .content { white-space: pre-wrap; word-break: break-word; }
 .type-label { color: var(--c-primary); }
 .meta {
