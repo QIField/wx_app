@@ -1,27 +1,42 @@
-/* 全局设计令牌：沿用原型定稿风格 */
+/* ===== 微信客服工作台 · 工业配价风 =====
+   紧凑高密度、信号蓝、锐利小圆角；数字用 Bahnschrift（Windows 自带 DIN 风格） */
 :root {
-  --c-primary: #2b6de8;
-  --c-bg: #f2f4f8;
+  --c-bg: #eef1f6;
   --c-panel: #ffffff;
-  --c-text: #1f2933;
-  --c-text-sub: #6b7280;
-  --c-border: #e5e8ef;
+  --c-navy: #14264d;
+  --c-navy-2: #1b3468;
+  --c-primary: #1d5de4;
+  --c-primary-deep: #0f3da8;
+  --c-primary-soft: #e9f0ff;
+  --c-text: #17233a;
+  --c-text-sub: #6b7a93;
+  --c-border: #e3e8f0;
+  --c-border-strong: #c9d2e0;
   --c-danger: #e5484d;
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
+  --c-ok: #18a058;
+  --c-warn: #f0821e;
+
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+
+  --font-ui: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-num: 'Bahnschrift', 'DIN Alternate', 'Segoe UI', sans-serif;
+
+  --shadow-card: 0 1px 2px rgba(23, 35, 58, 0.05), 0 2px 8px rgba(23, 35, 58, 0.04);
 }
 
 * { box-sizing: border-box; }
 
-html, body, #app {
-  height: 100%;
-  margin: 0;
-}
+html, body, #app { height: 100%; }
 
 body {
-  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  font-size: 14px;
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
   color: var(--c-text);
   background: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
 }
+
+.num { font-family: var(--font-num); letter-spacing: 0.2px; }
