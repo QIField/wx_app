@@ -1,0 +1,39 @@
+# ===== Python / Flask 后端 =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 环境变量与密钥（含数据库密码，禁止提交）
+.env
+.env.*
+*.env
+
+# 日志
+logs/
+*.log
+
+# 本地数据库备份
+backups/
+*.sql.bak
+
+# ===== 前端 Vue3 / Node =====
+node_modules/
+frontend/dist/
+frontend/.dist/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== 编辑器 / IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ===== 操作系统文件 =====
+Thumbs.db
+Desktop.ini
+.DS_Store
