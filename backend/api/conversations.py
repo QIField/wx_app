@@ -13,12 +13,13 @@ MAX_PAGE_SIZE = 200
 
 @bp.get("/api/conversations")
 def list_conversations():
-    """会话列表：置顶优先，其余按最后消息时间倒序。"""
+    """会话列表：置顶优先，其余按最后消息时间倒序（NULL 排最后）。"""
     rows = (
         Conversation.query.filter(Conversation.deleted_at.is_(None))
         .order_by(
             Conversation.pinned.desc(),
-            Conversation.last_msg_at.desc().nullslast(),
+            Conversation.last_msg_at.is_(None).asc(),  # 兼容 MySQL 5.7（无 NULLS LAST）
+            Conversation.last_msg_at.desc(),
         )
         .all()
     )
