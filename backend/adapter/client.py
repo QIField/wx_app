@@ -2,14 +2,14 @@
 
 统一规则（见 docs/api.md 附录）：
 - 全部 POST，application/x-www-form-urlencoded
-- 公共参数：openid（设备标识）、uuid（本次调用唯一标识）
+- 公共参数：openid（设备标识，多设备后由调用方按账号绑定传入）、uuid（本次调用唯一标识）
 - 返回统一 {"code": 0, "msg": "success"}，查询接口多一个 data 字段
 """
 import uuid as uuid_lib
 
 import requests
 
-from backend.config import MIDDLE_BASE_URL, MIDDLE_OPENID
+from backend.config import MIDDLE_BASE_URL
 
 TIMEOUT = 10  # 秒
 
@@ -27,17 +27,18 @@ class MiddleApiError(Exception):
         self.msg = msg
 
 
-def call(module, action, params=None, uuid=None):
+def call(module, action, params=None, uuid=None, openid=""):
     """调中间方接口：拼公共参数、发 POST、统一解析返回。
 
     - module：接口模块段（send_api / messag_api / login_api / group_api / contacts_api）
     - action：模块下方法名，形如 post_text_message / get_post_text_message
     - 真实 URL 三段式：{BASE}/wx_app/{module}/{action}
+    - openid：设备标识，多设备同步按账号绑定传入；演示模式下忽略
     - uuid 由调用方传入（发送闭环里下发和确认用同一个）；不传则自动生成
     """
     url = f"{MIDDLE_BASE_URL.rstrip('/')}/wx_app/{module.strip('/')}/{action.strip('/')}"
     form = {
-        "openid": MIDDLE_OPENID,
+        "openid": openid or "",
         "uuid": uuid or str(uuid_lib.uuid4()),
     }
     if params:

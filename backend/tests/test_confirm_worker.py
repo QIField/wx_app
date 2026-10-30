@@ -27,7 +27,7 @@ def make_task(app, conversation, task_status, msg_status):
 def test_confirm_success(app, conversation, monkeypatch):
     """结果成功（processing_result ret=200）：task=成功、message=已发送。"""
 
-    def fake_get_result(action, uuid):
+    def fake_get_result(action, uuid, openid=""):
         return {
             "code": 0,
             "msg": "success",
@@ -47,7 +47,7 @@ def test_confirm_success(app, conversation, monkeypatch):
 def test_confirm_failed(app, conversation, monkeypatch):
     """结果失败（processing_result ret!=200）：task=失败、message=失败。"""
 
-    def fake_get_result(action, uuid):
+    def fake_get_result(action, uuid, openid=""):
         return {
             "code": 0,
             "msg": "success",
@@ -67,7 +67,7 @@ def test_confirm_failed(app, conversation, monkeypatch):
 def test_confirm_result_not_ready_keeps_retrying(app, conversation, monkeypatch):
     """结果还没生成（data 里没有这条 uuid）：不算失败，重试+1。"""
 
-    def fake_get_result(action, uuid):
+    def fake_get_result(action, uuid, openid=""):
         return {"code": 0, "msg": "success", "data": []}
 
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
@@ -84,7 +84,7 @@ def test_confirm_result_not_ready_keeps_retrying(app, conversation, monkeypatch)
 def test_confirm_query_error_keeps_retrying(app, conversation, monkeypatch):
     """查询本身失败：状态不变、重试次数+1，不到兜底次数不标失败。"""
 
-    def boom(action, uuid):
+    def boom(action, uuid, openid=""):
         raise ConnectionError("超时")
 
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", boom)
@@ -101,7 +101,7 @@ def test_confirm_query_error_keeps_retrying(app, conversation, monkeypatch):
 def test_confirm_gives_up_after_max_retry(app, conversation, monkeypatch):
     """重试到兜底次数：按失败收尾。"""
 
-    def boom(action, uuid):
+    def boom(action, uuid, openid=""):
         raise ConnectionError("超时")
 
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", boom)
@@ -120,7 +120,7 @@ def test_confirm_skips_non_dispatched(app, conversation, monkeypatch):
     """非"已下发"状态的任务不参与确认。"""
     called = []
 
-    def fake_get_result(action, uuid):
+    def fake_get_result(action, uuid, openid=""):
         called.append(uuid)
         return {"code": 0, "data": {}}
 

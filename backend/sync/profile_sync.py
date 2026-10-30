@@ -1,4 +1,9 @@
-"""会话资料解析：群名 + 好友昵称/头像（10 分钟一轮的低频后台任务）。
+"""会话资料解析：群名 + 好友昵称/头像。
+
+两条链路：
+- 兜底扫描（30 分钟一轮）：全量找缺资料的会话补拉；
+- 立即补拉（refresh_missing_profiles）：收消息轮询发现新消息涉及的会话
+  缺资料时当场同步拉取，前端几秒内就能看到名称头像，不用等兜底轮。
 
 和收消息同套路：uuid 下发任务 → get_ 查询 processing_result。
 字段名以防万一做成多候选取值（真实返回结构联调时校准，见 _pick）。
@@ -8,6 +13,7 @@ import uuid as uuid_lib
 from backend.adapter import client
 from backend.extensions import db
 from backend.models.conversation import Conversation
+from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.ws.hub import broadcast
 
 PROFILE_BATCH = 100          # 每轮最多下发 100 个群资料任务（下发很快；结果下轮收割）
@@ -15,9 +21,10 @@ QUERY_RETRY = 5               # 同步查询时的重试次数（好友列表用
 QUERY_WAIT_SECONDS = 2        # 每次重试间隔（实测约 4 秒内出结果）
 MAX_FAIL_RETRY = 5            # 同一个 wxid 连续失败 5 次后放弃（进程重启清零）
 FRIEND_BATCH = 20             # brief_info 单次最多 20 个 wxid（文档约定）
+GROUP_NOW_LIMIT = 3           # 消息触发的立即补拉：单轮最多同步等 3 个群（防阻塞收消息轮询）
 
-_fail_counts = {}    # wxid -> 连续失败次数（内存即可）
-_pending = {}        # task_uuid -> (conversation_id, wxid)：已下发待收割的群资料任务
+_fail_counts = {}    # (openid, wxid) -> 连续失败次数（内存即可）
+_pending = {}        # task_uuid -> (conversation_id, wxid, openid)：已下发待收割的群资料任务
 _pending_fails = {}  # task_uuid -> 收割失败轮数（超 5 轮丢弃，防永久占坑）
 
 
@@ -35,6 +42,92 @@ def sync_profiles(app):
             _sync_friend_profiles()
         except Exception as exc:  # noqa: BLE001
             app.logger.warning("好友资料解析失败: %s", exc)
+
+
+# ---------- 消息触发的立即补拉 ----------
+
+def refresh_missing_profiles(openid, conv_ids):
+    """收消息轮询触发：本轮新消息涉及的会话若缺资料，立即同步补拉。
+
+    与兜底扫描同口径判定缺资料；群限 GROUP_NOW_LIMIT 个/轮、失败计数复用
+    _fail_counts、已下发流水线中的群跳过。失败只记审计不抛出，不影响收消息。
+    """
+    ids = list(dict.fromkeys(conv_ids))  # 去重保序：同一会话多条消息只查一次
+    if not ids:
+        return
+    convs = (
+        Conversation.query.filter(
+            Conversation.id.in_(ids),
+            Conversation.openid == openid,
+            Conversation.deleted_at.is_(None),
+        )
+        .all()
+    )
+    missing = [c for c in convs if _missing_profile(c)]
+    groups = [c for c in missing if c.chat_type == Conversation.CHAT_GROUP]
+    singles = [c for c in missing if c.chat_type != Conversation.CHAT_GROUP]
+    try:
+        _refresh_groups_now(openid, groups)
+    except Exception as exc:  # noqa: BLE001 补拉失败不影响收消息主链路
+        db.session.rollback()
+        log_action(AuditModule.SYNC, "群资料补拉", f"设备 {openid}",
+                   result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
+    try:
+        _refresh_singles_now(openid, singles)
+    except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
+        log_action(AuditModule.SYNC, "好友资料补拉", f"设备 {openid}",
+                   result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
+
+
+def _missing_profile(conv):
+    """资料是否缺失：名称为空/仍是 wxid 原始编号，或头像为空。"""
+    return conv.name in (None, "", conv.wxid) or not conv.avatar
+
+
+def _refresh_groups_now(openid, groups):
+    """立即补拉群资料：同步下发 + 等待收割，单轮最多 GROUP_NOW_LIMIT 个。"""
+    pending_keys = {(o, w) for _, w, o in _pending.values()}
+    done = 0
+    for conv in groups:
+        if done >= GROUP_NOW_LIMIT:
+            break  # 超出的留给 30 分钟兜底轮，避免阻塞收消息轮询
+        key = (conv.openid, conv.wxid)
+        if key in pending_keys or _fail_counts.get(key, 0) >= MAX_FAIL_RETRY:
+            continue
+        done += 1  # 按尝试次数计数：失败也占用本轮名额
+        task_uuid = _new_task_uuid()
+        client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid},
+                    task_uuid, openid=conv.openid or "")
+        record = _query_record("group_api", "get_chatroom_info", task_uuid, openid)
+        if record is None:
+            _fail_counts[key] = _fail_counts.get(key, 0) + 1
+            continue
+        info = _parse_group_info(record)
+        if info:
+            _apply_group_info(conv.id, conv.wxid, info)
+
+
+def _refresh_singles_now(openid, singles):
+    """立即补拉好友资料：批量 brief_info（≤ FRIEND_BATCH/次），逐个更新广播。"""
+    if not singles:
+        return
+    wxids = [c.wxid for c in singles[:FRIEND_BATCH]]
+    infos = _query_brief_infos(wxids, openid)
+    for conv in singles[:FRIEND_BATCH]:
+        info = infos.get(conv.wxid)
+        if not info:
+            continue
+        changed = False
+        if info.get("nickname") and conv.name in (None, "", conv.wxid):
+            conv.name = info["nickname"]
+            changed = True
+        if info.get("head_img_url") and not conv.avatar:
+            conv.avatar = info["head_img_url"]
+            changed = True
+        if changed:
+            db.session.commit()
+            broadcast("conv_updated", {"conversation_id": conv.id})
 
 
 # ---------- 群名 ----------
@@ -66,13 +159,13 @@ def _sync_group_names():
 def _collect_group_results():
     """收割上一轮下发的任务：结果早已生成，单次查询即命中。"""
     done = []
-    for task_uuid, (conv_id, wxid) in _pending.items():
-        record = _query_record_once("group_api", "get_chatroom_info", task_uuid)
+    for task_uuid, (conv_id, wxid, openid) in _pending.items():
+        record = _query_record_once("group_api", "get_chatroom_info", task_uuid, openid)
         if not record:
             _pending_fails[task_uuid] = _pending_fails.get(task_uuid, 0) + 1
             if _pending_fails[task_uuid] >= 5:
                 # 连续 5 轮没收割到：放弃并计入群失败数（限流，防止重复下发死循环）
-                _fail_counts[wxid] = _fail_counts.get(wxid, 0) + 1
+                _fail_counts[(openid, wxid)] = _fail_counts.get((openid, wxid), 0) + 1
                 done.append(task_uuid)
             continue
         done.append(task_uuid)
@@ -85,19 +178,21 @@ def _collect_group_results():
 
 
 def _dispatch_group_tasks():
-    """给缺资料且未在下发中的群补发 chatroom_info 任务。"""
-    pending_wxids = {wxid for _, wxid in _pending.values()}
+    """给缺资料且未在下发中的群补发 chatroom_info 任务（按会话所属设备下发）。"""
+    pending_wxids = {(openid, wxid) for _, wxid, openid in _pending.values()}
     slots = PROFILE_BATCH - len(_pending)
     if slots <= 0:
         return
     for conv in _unnamed_groups(limit=slots):
-        if conv.wxid in pending_wxids:
+        key = (conv.openid, conv.wxid)
+        if key in pending_wxids:
             continue
-        if _fail_counts.get(conv.wxid, 0) >= MAX_FAIL_RETRY:
+        if _fail_counts.get(key, 0) >= MAX_FAIL_RETRY:
             continue
         task_uuid = _new_task_uuid()
-        client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid}, task_uuid)
-        _pending[task_uuid] = (conv.id, conv.wxid)
+        client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid},
+                    task_uuid, openid=conv.openid or "")
+        _pending[task_uuid] = (conv.id, conv.wxid, conv.openid)
 
 
 def _apply_group_info(conv_id, wxid, info):
@@ -113,7 +208,7 @@ def _apply_group_info(conv_id, wxid, info):
         changed = True
     if changed:
         db.session.commit()
-        _fail_counts.pop(wxid, None)
+        _fail_counts.pop((conv.openid, conv.wxid), None)
         broadcast("conv_updated", {"conversation_id": conv.id})
 
 
@@ -121,7 +216,7 @@ def _new_task_uuid():
     return str(uuid_lib.uuid4())
 
 
-def _query_record(module, get_action, task_uuid):
+def _query_record(module, get_action, task_uuid, openid=""):
     """查询下发结果（带间隔重试，供好友列表等同步场景用；群任务收割不用它等）。
 
     实测（2026-10-29）：data 是任务记录数组，每条含 uuid + processing_result；
@@ -130,7 +225,7 @@ def _query_record(module, get_action, task_uuid):
     import time
 
     for i in range(QUERY_RETRY):
-        row = _query_record_once(module, get_action, task_uuid)
+        row = _query_record_once(module, get_action, task_uuid, openid)
         if row:
             return row
         if i < QUERY_RETRY - 1:
@@ -138,9 +233,9 @@ def _query_record(module, get_action, task_uuid):
     return None
 
 
-def _query_record_once(module, get_action, task_uuid):
+def _query_record_once(module, get_action, task_uuid, openid=""):
     """单次查询，不重试。返回本 uuid 的任务记录或 None。"""
-    body = client.call(module, get_action, {}, uuid=task_uuid)
+    body = client.call(module, get_action, {}, uuid=task_uuid, openid=openid)
     rows = body.get("data") if isinstance(body, dict) else None
     if isinstance(rows, dict):
         rows = rows.get("list") or []
@@ -170,24 +265,50 @@ def _parse_group_info(record):
     }
 
 
-def _query_chatroom_info(chatroom_id):
+def _query_chatroom_info(chatroom_id, openid=""):
     """同步取单个群资料（仅临时调试用；正式链路走两段流水线）。"""
     task_uuid = _new_task_uuid()
-    client.call("group_api", "chatroom_info", {"chatroom_id": chatroom_id}, task_uuid)
-    record = _query_record("group_api", "get_chatroom_info", task_uuid)
+    client.call("group_api", "chatroom_info", {"chatroom_id": chatroom_id},
+                task_uuid, openid=openid)
+    record = _query_record("group_api", "get_chatroom_info", task_uuid, openid)
     return _parse_group_info(record)
 
 
 # ---------- 好友昵称/头像 ----------
 
 def _sync_friend_profiles():
-    """拉好友列表 → 对"已建单聊会话且缺资料"的好友批量查 brief_info。"""
-    friend_wxids = _fetch_friend_wxids()
+    """逐设备拉好友列表 → 对"已建单聊会话且缺资料"的好友批量查 brief_info。"""
+    for openid in _bound_devices():
+        _sync_friend_profiles_of_device(openid)
+
+
+def _bound_devices():
+    """所有绑定微信设备的启用账号的 openid。"""
+    from backend.models.user import User
+
+    rows = (
+        db.session.query(User.open_id)
+        .filter(User.open_id.isnot(None), User.open_id != "", User.status == 1)
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+def _sync_friend_profiles_of_device(openid):
+    """单台设备的好友资料解析；任一步失败不影响其他设备。"""
+    try:
+        friend_wxids = _fetch_friend_wxids(openid)
+    except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
+        log_action(AuditModule.SYNC, "好友资料解析", f"设备 {openid}",
+                   result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
+        return
     if not friend_wxids:
         return
     targets = (
         Conversation.query.filter(
             Conversation.deleted_at.is_(None),
+            Conversation.openid == openid,
             Conversation.chat_type == Conversation.CHAT_SINGLE,
             Conversation.wxid.in_(friend_wxids),
             db.or_(
@@ -201,7 +322,7 @@ def _sync_friend_profiles():
     )
     if not targets:
         return
-    infos = _query_brief_infos([c.wxid for c in targets])
+    infos = _query_brief_infos([c.wxid for c in targets], openid)
     for conv in targets:
         info = infos.get(conv.wxid)
         if not info:
@@ -218,11 +339,11 @@ def _sync_friend_profiles():
             broadcast("conv_updated", {"conversation_id": conv.id})
 
 
-def _fetch_friend_wxids():
+def _fetch_friend_wxids(openid):
     """fetch_contacts_list 下发 → 查询 → friends wxid 列表（2026-10-29 实测）。"""
     task_uuid = _new_task_uuid()
-    client.call("contacts_api", "fetch_contacts_list", {}, task_uuid)
-    record = _query_record("contacts_api", "get_fetch_contacts_list", task_uuid)
+    client.call("contacts_api", "fetch_contacts_list", {}, task_uuid, openid=openid)
+    record = _query_record("contacts_api", "get_fetch_contacts_list", task_uuid, openid)
     if not record:
         return []
     result = _as_dict(record.get("processing_result"))
@@ -233,11 +354,12 @@ def _fetch_friend_wxids():
     return [w for w in friends if isinstance(w, str) and w]
 
 
-def _query_brief_infos(wxids):
+def _query_brief_infos(wxids, openid=""):
     """brief_info 批量（≤20/次）→ {wxid: {nickname, head_img_url}}。"""
     task_uuid = _new_task_uuid()
-    client.call("contacts_api", "brief_info", {"wxids": ",".join(wxids)}, task_uuid)
-    record = _query_record("contacts_api", "get_brief_info", task_uuid)
+    client.call("contacts_api", "brief_info", {"wxids": ",".join(wxids)},
+                task_uuid, openid=openid)
+    record = _query_record("contacts_api", "get_brief_info", task_uuid, openid)
     if not record:
         return {}
     result = _as_dict(record.get("processing_result"))

@@ -26,10 +26,11 @@ def test_call_sends_common_params(monkeypatch):
         return FakeResp({"code": 0, "msg": "success"})
 
     monkeypatch.setattr(client.requests, "post", fake_post)
-    body = client.call("send_api", "post_text_message", {"to_wxid": "wxid_x"}, uuid="u-1")
+    body = client.call("send_api", "post_text_message", {"to_wxid": "wxid_x"},
+                       uuid="u-1", openid="dev01")
 
     assert captured["url"].endswith("/wx_app/send_api/post_text_message")
-    assert captured["data"]["openid"] == client.MIDDLE_OPENID
+    assert captured["data"]["openid"] == "dev01"  # 多设备后按调用方传入
     assert captured["data"]["uuid"] == "u-1"
     assert captured["data"]["to_wxid"] == "wxid_x"
     assert body["code"] == 0

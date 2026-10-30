@@ -1,7 +1,8 @@
-"""收消息轮询：定时向中间方增量拉新消息并入库。
+"""收消息轮询：定时向中间方增量拉新消息并入库（多设备版）。
 
-流程（已确认的《收消息轮询》流程图）：
-读游标 → 调 get_message 拉增量 → 去重 → 入库 + 更新会话 → 推游标。
+每轮遍历所有已绑定微信设备的启用账号，逐设备执行：
+读该设备游标 → 调 get_message 拉增量 → 去重 → 入库 + 更新会话 → 推游标。
+游标按 openid 隔离（sync_cursor.uk_openid_type），互不干扰。
 
 联调实测（2026-10-29）已确认的真实结构：
 - data.list 数组，元素含 from_wxid/to_wxid/msg_type(字符串)/content/create_time(RFC 1123)/raw_json
@@ -12,11 +13,12 @@
 from datetime import datetime, timedelta
 
 from backend.adapter import client as middle_client
-from backend.config import MIDDLE_OPENID
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.sync_cursor import SyncCursor
+from backend.models.user import User
+from backend.services.audit import AuditLog, AuditModule, log_action
 
 PAGE_SIZE = 100        # 每轮拉一页；单轮增量超一页的情况极少，靠下一轮补
 FIRST_HOURS = 1        # 首次运行没有游标时，从最近 1 小时开始拉
@@ -31,60 +33,86 @@ _TYPE_MAP = {
 
 
 def sync_once(app):
-    """跑一轮同步。由定时器或测试触发。"""
+    """跑一轮同步：遍历所有绑定设备的账号，逐设备拉增量。由定时器或测试触发。"""
     with app.app_context():
-        cursor = _get_cursor()
-        params = {
-            "start_create_time": cursor.last_sync_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "page": 1,
-            "page_size": PAGE_SIZE,
-        }
-        try:
-            body = middle_client.call("messag_api", "get_message", params)
-        except Exception:
-            db.session.rollback()  # 拉取失败：游标不动，下一轮重来
-            return
-
-        items = _extract_messages(body)
-        latest = cursor.last_sync_time
-        pushed = []  # 本轮新入库的消息，commit 后统一广播
-        for item in items:
-            saved = _save_message(item)
-            if saved is None:
+        openids = [
+            row[0]
+            for row in db.session.query(User.open_id)
+            .filter(User.open_id.isnot(None), User.open_id != "", User.status == 1)
+            .all()
+        ]
+        for openid in openids:
+            try:
+                pushed = sync_device(openid)
+            except Exception as exc:  # noqa: BLE001 单设备失败不拖垮其他设备
+                db.session.rollback()
+                log_action(AuditModule.SYNC, "消息同步", f"设备 {openid}",
+                           result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
                 continue
-            pushed.append(saved)
-            if saved["create_time"] > latest:
-                latest = saved["create_time"]
+            broadcast_messages(pushed)
+            if pushed:  # 新消息涉及的会话缺名称/头像时立即补拉（函数内部自行容错）
+                from backend.sync.profile_sync import refresh_missing_profiles
 
-        cursor.last_sync_time = latest
-        db.session.commit()
-
-        # commit 之后才广播：保证前端听到推送时库里一定能查到
-        from backend.ws import hub
-        for saved in pushed:
-            hub.broadcast("new_message", {
-                "message_id": saved["message_id"],
-                "conversation_id": saved["conversation_id"],
-                "direction": saved["direction"],
-                "msg_type": saved["msg_type"],
-                "content": saved["content"],
-                "sender_name": saved["sender_name"],
-                "create_time": saved["create_time"].strftime("%Y-%m-%d %H:%M:%S"),
-            })
+                refresh_missing_profiles(openid, [p["conversation_id"] for p in pushed])
 
 
-def _get_cursor():
-    """拿收消息游标，没有就建一行（从最近 1 小时开始）。"""
+def sync_device(openid):
+    """同步单台设备，返回待广播的入库消息列表（commit 已完成）。"""
+    cursor = _get_cursor(openid)
+    params = {
+        "start_create_time": cursor.last_sync_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "page": 1,
+        "page_size": PAGE_SIZE,
+    }
+    try:
+        body = middle_client.call("messag_api", "get_message", params, openid=openid)
+    except Exception:
+        db.session.rollback()  # 拉取失败：游标不动，下一轮重来
+        return []
+
+    items = _extract_messages(body)
+    latest = cursor.last_sync_time
+    pushed = []  # 本轮新入库的消息，commit 后统一广播
+    for item in items:
+        saved = _save_message(openid, item)
+        if saved is None:
+            continue
+        pushed.append(saved)
+        if saved["create_time"] > latest:
+            latest = saved["create_time"]
+
+    cursor.last_sync_time = latest
+    db.session.commit()
+    return pushed
+
+
+def broadcast_messages(pushed):
+    """commit 之后才广播：保证前端听到推送时库里一定能查到。"""
+    if not pushed:
+        return
+    from backend.ws import hub
+    for saved in pushed:
+        hub.broadcast("new_message", {
+            "message_id": saved["message_id"],
+            "conversation_id": saved["conversation_id"],
+            "direction": saved["direction"],
+            "msg_type": saved["msg_type"],
+            "content": saved["content"],
+            "sender_name": saved["sender_name"],
+            "create_time": saved["create_time"].strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+
+def _get_cursor(openid):
+    """拿该设备的收消息游标，没有就建一行（从最近 1 小时开始）。"""
     row = (
-        SyncCursor.query.filter_by(
-            openid=MIDDLE_OPENID, cursor_type=SyncCursor.CURSOR_MSG
-        )
+        SyncCursor.query.filter_by(openid=openid, cursor_type=SyncCursor.CURSOR_MSG)
         .filter(SyncCursor.deleted_at.is_(None))
         .first()
     )
     if row is None:
         row = SyncCursor(
-            openid=MIDDLE_OPENID,
+            openid=openid,
             cursor_type=SyncCursor.CURSOR_MSG,
             last_sync_time=datetime.now() - timedelta(hours=FIRST_HOURS),
         )
@@ -101,7 +129,7 @@ def _extract_messages(body):
     return (data or {}).get("list") or []
 
 
-def _save_message(item):
+def _save_message(openid, item):
     """单条消息入库：去重 → 转字段 → 建/找会话 → 写 message → 更新会话。
 
     返回推送信息字典（commit 后供广播用）；重复或坏数据返回 None。
@@ -120,7 +148,7 @@ def _save_message(item):
         if exists is not None:
             return None
 
-    conv = _get_or_create_conversation(fields["peer_wxid"], fields["chat_type"])
+    conv = _get_or_create_conversation(openid, fields["peer_wxid"], fields["chat_type"])
 
     msg = Message(
         conversation_id=conv.id,
@@ -258,17 +286,15 @@ def _parse_time(value):
     return None
 
 
-def _get_or_create_conversation(peer_wxid, chat_type):
+def _get_or_create_conversation(openid, peer_wxid, chat_type):
     """按 openid+wxid 找会话，没有就建（软删除过滤）。"""
     conv = (
-        Conversation.query.filter_by(openid=MIDDLE_OPENID, wxid=peer_wxid)
+        Conversation.query.filter_by(openid=openid, wxid=peer_wxid)
         .filter(Conversation.deleted_at.is_(None))
         .first()
     )
     if conv is None:
-        conv = Conversation(
-            openid=MIDDLE_OPENID, wxid=peer_wxid, chat_type=chat_type
-        )
+        conv = Conversation(openid=openid, wxid=peer_wxid, chat_type=chat_type)
         db.session.add(conv)
         db.session.flush()
     return conv

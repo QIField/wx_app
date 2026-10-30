@@ -12,7 +12,7 @@ def test_send_text_ok(app, conversation, monkeypatch):
     """发文本：参数拼对、uuid 一致、task=已下发、message=发送中。"""
     captured = {}
 
-    def fake_post(to_wxid, content, ats="", uuid=None):
+    def fake_post(to_wxid, content, ats="", uuid=None, openid=""):
         captured.update(to_wxid=to_wxid, content=content, uuid=uuid)
         return {"code": 0, "msg": "success"}
 
@@ -36,7 +36,7 @@ def test_send_link_ok(app, conversation, monkeypatch):
     """发链接卡片（报价链接走这里）：payload 字段透传。"""
     captured = {}
 
-    def fake_post(to_wxid, title, desc, link_url, thumb_url="", uuid=None):
+    def fake_post(to_wxid, title, desc, link_url, thumb_url="", uuid=None, openid=""):
         captured.update(title=title, link_url=link_url, uuid=uuid)
         return {"code": 0, "msg": "success"}
 

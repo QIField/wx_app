@@ -1,13 +1,22 @@
 """WebSocket 广播单测：不真连浏览器，直接验证广播函数被正确调用。"""
 from queue import Queue
 
+import pytest
+
 from backend.extensions import db
 from backend.models.message import Message
 from backend.models.send_task import SendTask
 from backend.sync import confirm_worker, message_sync
 from backend.ws import hub
 
+from backend.tests.conftest import make_user
 from backend.tests.test_message_sync import make_body, make_item, patch_pull
+
+
+@pytest.fixture(autouse=True)
+def device(app):
+    """同步以绑定 open_id 的启用账号为准，造一台 dev01 设备。"""
+    return make_user(open_id="dev01")
 
 
 def test_broadcast_puts_json_into_every_queue():
@@ -58,7 +67,7 @@ def test_confirm_broadcasts_send_result(app, conversation, monkeypatch):
     events = []
     monkeypatch.setattr(hub, "broadcast", lambda e, d: events.append((e, d)))
 
-    def ok(action, uuid):
+    def ok(action, uuid, openid=""):
         return {"code": 0, "data": [{"uuid": uuid, "processing_result": '{"ret": 200}'}]}
 
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", ok)

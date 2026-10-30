@@ -7,6 +7,7 @@ import json
 
 from backend.adapter import sender as middle_sender
 from backend.extensions import db
+from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.send_task import SendTask
 
@@ -35,9 +36,11 @@ def _confirm_one(task):
     """确认单个任务的结果。
 
     三态处理：True=成功 / False=失败 / None=结果还没出来（下轮再查）。
+    查询要带设备 openid（经 message → conversation 找到会话所属设备）。
     """
+    openid = _task_openid(task)
     try:
-        body = middle_sender.get_result(task.action, task.uuid)
+        body = middle_sender.get_result(task.action, task.uuid, openid=openid or "")
     except Exception:
         task.retry_count += 1
         if task.retry_count >= MAX_RETRY:
@@ -58,6 +61,17 @@ def _confirm_one(task):
     else:
         _mark_failed(task)
         _broadcast(task, Message.ST_FAILED)
+
+
+def _task_openid(task):
+    """任务 → 设备 openid：经 message 找 conversation（查不到返回空串）。"""
+    if task.message_id is None:
+        return ""
+    msg = db.session.get(Message, task.message_id)
+    if msg is None:
+        return ""
+    conv = db.session.get(Conversation, msg.conversation_id)
+    return (conv.openid or "") if conv else ""
 
 
 def _broadcast(task, msg_status):

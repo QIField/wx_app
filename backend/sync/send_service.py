@@ -123,7 +123,7 @@ def send_message(conversation_id, msg_type, content, payload):
 
     try:
         post_fn = getattr(middle_sender, fn_name)
-        post_fn(uuid=task.uuid, **task.request_payload)
+        post_fn(uuid=task.uuid, openid=conv.openid or "", **task.request_payload)
         task.status = SendTask.ST_DISPATCHED
     except Exception as exc:
         task.status = SendTask.ST_FAILED

@@ -2,12 +2,21 @@
 from datetime import datetime, timedelta
 
 import json
+import pytest
 
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.sync_cursor import SyncCursor
 from backend.sync import message_sync
+
+from backend.tests.conftest import make_user
+
+
+@pytest.fixture(autouse=True)
+def device(app):
+    """多设备后：同步以绑定 open_id 的启用账号为准，造一台 dev01 设备。"""
+    return make_user(open_id="dev01")
 
 
 def make_item(**over):
@@ -35,10 +44,11 @@ def patch_pull(monkeypatch, body):
     """替换中间方调用，并记录收到的查询参数。"""
     captured = {}
 
-    def fake_call(module, action, params=None, uuid=None):
+    def fake_call(module, action, params=None, uuid=None, openid=""):
         captured["module"] = module
         captured["action"] = action
         captured["params"] = params
+        captured["openid"] = openid
         return body
 
     monkeypatch.setattr(message_sync.middle_client, "call", fake_call)
@@ -162,7 +172,7 @@ def test_sync_pull_error_silent(app, monkeypatch):
     """拉取失败：不崩、游标不动，下一轮重来。"""
     from backend.adapter.client import MiddleApiError
 
-    def boom(action, params=None, uuid=None):
+    def boom(action, params=None, uuid=None, openid=""):
         raise MiddleApiError("设备离线")
 
     monkeypatch.setattr(message_sync.middle_client, "call", boom)
@@ -174,7 +184,7 @@ def test_sync_pull_error_silent(app, monkeypatch):
 
 
 def test_sync_pull_params(app, monkeypatch):
-    """拉取参数：带 start_create_time 和分页。"""
+    """拉取参数：带 start_create_time 和分页，且带设备 openid。"""
     captured = patch_pull(monkeypatch, make_body([]))
 
     message_sync.sync_once(app)
@@ -183,3 +193,59 @@ def test_sync_pull_params(app, monkeypatch):
     assert captured["action"] == "get_message"
     assert "start_create_time" in captured["params"]
     assert captured["params"]["page_size"] == 100
+    assert captured["openid"] == "dev01"
+
+
+def test_sync_multi_device_isolated(app, monkeypatch):
+    """多设备：两台设备各拉各的游标，会话互不串。"""
+    make_user(username="cs02", name="客服02", open_id="dev02")
+    bodies = {"dev01": make_body([make_item(msg_id="m1")]),
+              "dev02": make_body([make_item(msg_id="m2", from_wxid="wxid_02")])}
+    calls = []
+
+    def fake_call(module, action, params=None, uuid=None, openid=""):
+        calls.append(openid)
+        return bodies[openid]
+
+    monkeypatch.setattr(message_sync.middle_client, "call", fake_call)
+
+    message_sync.sync_once(app)
+
+    assert sorted(calls) == ["dev01", "dev02"]
+    assert Conversation.query.filter_by(openid="dev01", wxid="wxid_customer").count() == 1
+    assert Conversation.query.filter_by(openid="dev02", wxid="wxid_02").count() == 1
+    assert SyncCursor.query.count() == 2  # 两台设备各一条游标
+
+
+def test_sync_triggers_profile_refresh(app, monkeypatch):
+    """新消息入库后触发资料补拉：带本轮会话 id（覆盖 conftest 的全局 mock）。"""
+    from backend.sync import profile_sync
+
+    got = []
+    monkeypatch.setattr(profile_sync, "refresh_missing_profiles",
+                        lambda openid, ids: got.append((openid, list(ids))))
+    patch_pull(monkeypatch, make_body([make_item()]))
+
+    message_sync.sync_once(app)
+
+    assert len(got) == 1
+    openid, ids = got[0]
+    assert openid == "dev01"
+    assert ids == [Conversation.query.one().id]
+
+
+def test_sync_disabled_user_not_polled(app, device, monkeypatch):
+    """停用账号或未绑定设备的账号不参与同步。"""
+    device.status = 0
+    db.session.commit()
+    calls = []
+
+    def fake_call(module, action, params=None, uuid=None, openid=""):
+        calls.append(openid)
+        return make_body([])
+
+    monkeypatch.setattr(message_sync.middle_client, "call", fake_call)
+
+    message_sync.sync_once(app)
+
+    assert calls == []

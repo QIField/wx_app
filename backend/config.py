@@ -26,7 +26,10 @@ DATABASE_URL = _pick_database_url()
 
 # 中间方
 MIDDLE_BASE_URL = os.getenv("MIDDLE_BASE_URL", "")
-MIDDLE_OPENID = os.getenv("MIDDLE_OPENID", "")
+
+# 登录令牌：签名密钥与有效期（小时）；SECRET_KEY 不配则开发期用固定值，生产必须在 .env 配置
+SECRET_KEY = os.getenv("SECRET_KEY", "wxcs-dev-secret-key-change-me")
+TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "72"))
 
 # 发送总开关：false 时前端发送接口直接拒绝（防止联调收消息阶段误发真消息）
 SEND_ENABLED = os.getenv("SEND_ENABLED", "false").lower() in ("1", "true", "yes")
@@ -35,5 +38,6 @@ SEND_ENABLED = os.getenv("SEND_ENABLED", "false").lower() in ("1", "true", "yes"
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "2"))
 # 发送结果确认轮询间隔（秒）
 SEND_CONFIRM_INTERVAL = int(os.getenv("SEND_CONFIRM_INTERVAL", "1"))
-# 会话资料解析间隔（秒）：群名+好友昵称头像，10 分钟一轮
-PROFILE_INTERVAL_SECONDS = int(os.getenv("PROFILE_INTERVAL_SECONDS", "600"))
+# 会话资料解析间隔（秒）：群名+好友昵称头像，30 分钟一轮兜底
+# （新消息触发的立即补拉见 profile_sync.refresh_missing_profiles）
+PROFILE_INTERVAL_SECONDS = int(os.getenv("PROFILE_INTERVAL_SECONDS", "1800"))
