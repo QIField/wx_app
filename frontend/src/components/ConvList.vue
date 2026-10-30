@@ -31,7 +31,8 @@ function first(c) {
         :style="{ animationDelay: i * 35 + 'ms' }"
         @click="chat.selectConversation(c.id)"
       >
-        <span class="avatar" :class="{ group: c.chat_type === 2 }">{{ first(c) }}</span>
+        <img v-if="c.avatar" class="avatar img" :src="c.avatar" alt="" referrerpolicy="no-referrer" />
+        <span v-else class="avatar" :class="{ group: c.chat_type === 2 }">{{ first(c) }}</span>
         <div class="body">
           <div class="row1">
             <span class="name">{{ c.name || c.wxid }}</span>
@@ -94,6 +95,7 @@ function first(c) {
   display: flex; align-items: center; justify-content: center;
 }
 .avatar.group { background: var(--c-ok); }
+.avatar.img { object-fit: cover; background: var(--c-surface); }
 
 .body { flex: 1; min-width: 0; }
 .row1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

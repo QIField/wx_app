@@ -16,6 +16,7 @@ class Conversation(db.Model, SoftDeleteMixin):
     wxid = db.Column(db.String(64), nullable=False, comment="对方微信ID（个人或群ID）")
     chat_type = db.Column(db.SmallInteger, nullable=False, default=CHAT_SINGLE, comment="1单聊 2群聊")
     name = db.Column(db.String(128), comment="对方昵称/群名")
+    avatar = db.Column(db.String(512), comment="微信头像URL（群头像/好友头像）")
     unread_count = db.Column(db.Integer, nullable=False, default=0, comment="未读数")
     pinned = db.Column(db.SmallInteger, nullable=False, default=0, comment="是否置顶 0否 1是")
     last_msg = db.Column(db.Text, comment="最后一条消息摘要（冗余）")

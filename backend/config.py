@@ -33,6 +33,7 @@ SEND_ENABLED = os.getenv("SEND_ENABLED", "false").lower() in ("1", "true", "yes"
 
 # 收消息轮询间隔（秒）
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "2"))
-
 # 发送结果确认轮询间隔（秒）
 SEND_CONFIRM_INTERVAL = int(os.getenv("SEND_CONFIRM_INTERVAL", "1"))
+# 会话资料解析间隔（秒）：群名+好友昵称头像，10 分钟一轮
+PROFILE_INTERVAL_SECONDS = int(os.getenv("PROFILE_INTERVAL_SECONDS", "600"))

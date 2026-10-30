@@ -49,6 +49,12 @@ function avatarOf(m) {
     : (chat.currentConv?.name || chat.currentConv?.wxid || '?')
   return s.slice(0, 1).toUpperCase()
 }
+
+/* 入方向消息的微信头像：仅单聊有（群成员头像后续接群成员接口） */
+function picOf(m) {
+  if (m.direction === 2) return null
+  return chat.currentConv?.chat_type === 1 ? chat.currentConv?.avatar : null
+}
 function nameOf(m) {
   if (m.direction === 2) return '客服'
   return chat.currentConv?.chat_type === 2 ? (m.sender_name || '成员') : (chat.currentConv?.name || chat.currentConv?.wxid)
@@ -95,7 +101,8 @@ async function onSend() {
             <span>{{ row.label }}</span>
           </div>
           <div v-else class="msg" :class="row.direction === 2 ? 'out' : 'in'">
-            <span class="avatar" :class="row.direction === 2 ? 'agent' : 'client'">{{ avatarOf(row) }}</span>
+            <img v-if="picOf(row)" class="avatar img" :src="picOf(row)" alt="" referrerpolicy="no-referrer" />
+            <span v-else class="avatar" :class="row.direction === 2 ? 'agent' : 'client'">{{ avatarOf(row) }}</span>
             <div class="body">
               <div class="name">{{ nameOf(row) }}</div>
               <div class="bubble">
@@ -175,6 +182,7 @@ async function onSend() {
 }
 .avatar.client { background: var(--c-ok); }
 .avatar.agent { background: var(--c-primary); }
+.avatar.img { object-fit: cover; background: var(--c-surface); }
 
 .body { max-width: 72%; min-width: 0; display: flex; flex-direction: column; }
 .msg.out .body { align-items: flex-end; }

@@ -70,6 +70,7 @@ def _conv_json(c):
         "wxid": c.wxid,
         "chat_type": c.chat_type,
         "name": c.name,
+        "avatar": c.avatar,
         "unread_count": c.unread_count,
         "pinned": c.pinned,
         "last_msg": c.last_msg,

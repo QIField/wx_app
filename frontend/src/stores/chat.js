@@ -78,7 +78,13 @@ export const useChatStore = defineStore('chat', {
       connectWs((event, data) => {
         if (event === 'new_message') this.onNewMessage(data)
         else if (event === 'send_result') this.onSendResult(data)
+        else if (event === 'conv_updated') this.onConvUpdated(data)
       })
+    },
+
+    /** 群名/好友资料解析完成后推送：重拉列表拿最新的名字和头像。 */
+    onConvUpdated() {
+      this.loadConversations()
     },
 
     onNewMessage(d) {
