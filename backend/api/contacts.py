@@ -1,10 +1,14 @@
-"""通讯录 API：好友/群列表（数据来自会话表，排除软删除）。"""
-from flask import Blueprint, jsonify, request
+"""通讯录 API：好友/群列表（数据来自会话表，排除软删除）。
+
+多设备：列表按当前登录人绑定的设备（open_id）过滤。
+"""
+from flask import Blueprint, g, jsonify, request
 from pypinyin import lazy_pinyin, Style
 
 from backend.extensions import db
 from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
+from backend.services.auth import require_role
 
 bp = Blueprint("contacts", __name__)
 
@@ -16,15 +20,19 @@ _TYPE_MAP = {
 
 
 @bp.get("/api/contacts")
+@require_role()
 def list_contacts():
     """通讯录列表：?type=friends|groups&keyword=，按拼音首字母分组排序。"""
     chat_type = _TYPE_MAP.get(request.args.get("type", "friends"))
     if chat_type is None:
         return jsonify(code=400, msg="type 仅支持 friends / groups"), 400
+    if not (g.current_user.open_id or "").strip():
+        return jsonify(code=0, msg="success", data={"list": [], "total": 0})
 
     keyword = (request.args.get("keyword") or "").strip()
     query = Conversation.query.filter(
         Conversation.deleted_at.is_(None),
+        Conversation.openid == g.current_user.open_id,
         Conversation.chat_type == chat_type,
     )
     if keyword:
@@ -67,6 +75,7 @@ def _letter(text):
 
 
 @bp.get("/api/contacts/<wxid>/profile")
+@require_role()
 def get_profile(wxid):
     """联系人档案；无记录返回默认空值。"""
     p = ContactProfile.query.filter_by(wxid=wxid).first()
@@ -74,6 +83,7 @@ def get_profile(wxid):
 
 
 @bp.put("/api/contacts/<wxid>/profile")
+@require_role()
 def put_profile(wxid):
     """保存备注/标签（upsert）。校验超限，标签去重去空。"""
     body = request.get_json(silent=True) or {}

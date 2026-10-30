@@ -1,9 +1,14 @@
-"""会话与聊天记录 API：给前端读库（都过滤软删除）。"""
-from flask import Blueprint, jsonify, request
+"""会话与聊天记录 API：给前端读库（都过滤软删除）。
+
+多设备：所有查询按当前登录人绑定的微信设备（open_id）过滤，
+未绑定设备的账号看到的列表为空。
+"""
+from flask import Blueprint, g, jsonify, request
 
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
+from backend.services.auth import require_role
 
 bp = Blueprint("conversations", __name__)
 
@@ -11,11 +16,36 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
 
+def _my_openid():
+    """当前登录人绑定的设备标识；未绑定为 None。"""
+    return g.current_user.open_id or None
+
+
+def _my_conversation(conversation_id):
+    """取属于当前登录人设备的会话；跨设备/已删除的会话当不存在。"""
+    if _my_openid() is None:
+        return None
+    return (
+        Conversation.query.filter(
+            Conversation.id == conversation_id,
+            Conversation.deleted_at.is_(None),
+            Conversation.openid == _my_openid(),
+        ).first()
+    )
+
+
 @bp.get("/api/conversations")
+@require_role()
 def list_conversations():
-    """会话列表：置顶优先，其余按最后消息时间倒序（NULL 排最后）。"""
+    """会话列表：本设备内 置顶优先，其余按最后消息时间倒序（NULL 排最后）。"""
+    if _my_openid() is None:
+        return jsonify(code=0, msg="success", data=[])
+
     rows = (
-        Conversation.query.filter(Conversation.deleted_at.is_(None))
+        Conversation.query.filter(
+            Conversation.deleted_at.is_(None),
+            Conversation.openid == _my_openid(),
+        )
         .order_by(
             Conversation.pinned.desc(),
             Conversation.last_msg_at.is_(None).asc(),  # 兼容 MySQL 5.7（无 NULLS LAST）
@@ -27,14 +57,10 @@ def list_conversations():
 
 
 @bp.get("/api/conversations/<int:conversation_id>/messages")
+@require_role()
 def list_messages(conversation_id):
     """聊天记录：时间正序，?before_id 游标翻页（拿上一页最小 id 往前翻）。"""
-    conv = (
-        Conversation.query.filter(
-            Conversation.id == conversation_id,
-            Conversation.deleted_at.is_(None),
-        ).first()
-    )
+    conv = _my_conversation(conversation_id)
     if conv is None:
         return jsonify(code=404, msg="会话不存在"), 404
 
