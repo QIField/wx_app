@@ -58,24 +58,26 @@ onMounted(async () => {
     </header>
 
     <div class="layout">
-      <!-- 左侧导航栏（微信式图标栏） -->
-      <nav class="rail">
-        <button class="rail-btn" :class="{ on: activeView === 'chat' }" title="会话" @click="activeView = 'chat'">
-          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
-          </svg>
-          <span v-if="totalUnread" class="rail-badge num">{{ totalUnread > 99 ? '99+' : totalUnread }}</span>
-        </button>
-        <button class="rail-btn" :class="{ on: activeView === 'contacts' }" title="通讯录" @click="activeView = 'contacts'">
-          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-        </button>
-      </nav>
-      <aside class="col-side">
-        <ConvList v-if="activeView === 'chat'" />
-        <ContactsPanel v-else />
-      </aside>
+      <!-- 左侧：图标导航栏 + 列表，无缝拼成一块整体面板 -->
+      <div class="side-unit">
+        <nav class="rail">
+          <button class="rail-btn" :class="{ on: activeView === 'chat' }" title="会话" @click="activeView = 'chat'">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+            </svg>
+            <span v-if="totalUnread" class="rail-badge num">{{ totalUnread > 99 ? '99+' : totalUnread }}</span>
+          </button>
+          <button class="rail-btn" :class="{ on: activeView === 'contacts' }" title="通讯录" @click="activeView = 'contacts'">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          </button>
+        </nav>
+        <aside class="col-side">
+          <ConvList v-if="activeView === 'chat'" />
+          <ContactsPanel v-else />
+        </aside>
+      </div>
       <main class="col-main">
         <ChatPanel v-if="activeView === 'chat'" />
         <ContactDetail v-else @enter-chat="activeView = 'chat'" />
@@ -145,13 +147,19 @@ onMounted(async () => {
   padding: 8px;
   min-height: 0;
 }
-.col-side {
-  width: 264px;
-  background: var(--c-panel);
+/* 侧栏整体（导航 + 列表）共用一张卡片的阴影与圆角，中间无缝 */
+.side-unit {
+  display: flex;
+  flex-shrink: 0;
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   overflow: hidden;
-  flex-shrink: 0;
+}
+
+.col-side {
+  width: 264px;
+  background: var(--c-panel);
+  overflow: hidden;
 }
 
 /* 左侧导航栏（微信式图标栏）：与顶栏同色系，激活用信号蓝 */
@@ -164,7 +172,6 @@ onMounted(async () => {
   gap: 6px;
   padding: 10px 0;
   background: linear-gradient(180deg, var(--c-navy), var(--c-navy-2));
-  border-radius: var(--r-md);
 }
 .rail-btn {
   position: relative;
