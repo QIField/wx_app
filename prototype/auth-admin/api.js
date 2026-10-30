@@ -4,6 +4,18 @@
 const delay = (ms = 500) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * 审计日志：后台每个写操作落一条记录（真实后端由服务端写入 audit_log 表）
+ * 记录谁(当前登录人) / 何时 / 在哪个模块 / 做了什么 / 对谁 / 结果
+ */
+function addLog(module, action, target, result = 'success', me = null) {
+  const who = me || (typeof Auth !== 'undefined' && Auth.user()) || { name: '系统', role: 'developer' };
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const time = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  DB.logs.unshift({ id: Date.now(), time, operator: who.name, role: who.role, module, action, target, ip: '10.8.0.12', result });
+}
+
+/**
  * 登录
  * POST /api/auth/login  { username, password }
  * → 200 { token, user } / 401 { message }
@@ -17,8 +29,9 @@ async function apiLogin({ username, password } = {}) {
   if (u.status !== 'active') {
     throw new Error('账号已停用，请联系管理员');
   }
+  addLog('认证', '登录系统', '管理后台', 'success', { name: u.name, role: u.role });
   // TODO: replace with fetch('/api/auth/login', { method: 'POST', body: form }) — keep the shape identical
-  return { token: 'mock-token-' + u.id, user: { id: u.id, username: u.username, name: u.name, role: u.role, dept: u.dept } };
+  return { token: 'mock-token-' + u.id, user: { id: u.id, username: u.username, name: u.name, role: u.role } };
 }
 
 /**
@@ -28,7 +41,7 @@ async function apiLogin({ username, password } = {}) {
 async function apiFetchStats() {
   await delay(400);
   // TODO: replace with fetch('/api/admin/stats')
-  return DB.stats;
+  return { ...DB.stats };
 }
 
 /**
@@ -42,8 +55,8 @@ async function apiFetchUsers() {
 }
 
 /**
- * 新增账号
- * POST /api/admin/users  { username, name, role, dept, phone }
+ * 新增账号（初始密码统一 123456，由后端生成）
+ * POST /api/admin/users  { username, name, role }
  * → 200 { user } / 409 { message: 账号已存在 }
  */
 async function apiCreateUser(payload) {
@@ -51,27 +64,50 @@ async function apiCreateUser(payload) {
   if (DB.users.some((u) => u.username === payload.username)) {
     throw new Error('登录账号已存在');
   }
+  const openId = (payload.open_id || '').trim();
+  if (openId) {
+    const me = typeof Auth !== 'undefined' ? Auth.user() : null;
+    if (!me || me.role !== 'developer') {
+      throw new Error('微信设备绑定仅开发者可操作');
+    }
+    if (DB.users.some((u) => u.open_id === openId)) {
+      throw new Error('该微信设备已绑定其他账号');
+    }
+  }
   const id = Math.max(...DB.users.map((u) => u.id)) + 1;
   const user = {
-    id, status: 'active', created: '2026-10-30',
-    last_login: '—',
-    ...payload,
+    id, username: payload.username, name: payload.name, role: payload.role,
+    open_id: openId || null,
+    status: 'active', created: '2026-10-30', last_login: '—',
   };
   DB.users.push(user);
+  addLog('账号管理', '新增账号', `${payload.username} · ${payload.name}`);
   // TODO: replace with fetch('/api/admin/users', { method: 'POST', ... })
   return { ...user };
 }
 
 /**
- * 编辑账号
- * PUT /api/admin/users/:id  { name?, role?, dept?, phone? }
- * → 200 { user }
+ * 编辑账号（姓名 / 微信设备绑定）
+ * PUT /api/admin/users/:id  { name?, open_id? }
+ * → 200 { user } / 409 { message: 设备已绑定 }
  */
 async function apiUpdateUser(id, patch) {
   await delay(450);
+  const me = typeof Auth !== 'undefined' ? Auth.user() : null;
+  if (patch.open_id !== undefined && (!me || me.role !== 'developer')) {
+    throw new Error('微信设备绑定仅开发者可操作');
+  }
   const u = DB.users.find((x) => x.id === id);
   if (!u) throw new Error('账号不存在');
-  Object.assign(u, patch);
+  if (patch.name !== undefined) u.name = patch.name.trim();
+  if (patch.open_id !== undefined) {
+    const v = (patch.open_id || '').trim();
+    if (v && DB.users.some((x) => x.open_id === v && x.id !== id)) {
+      throw new Error('该微信设备已绑定其他账号');
+    }
+    u.open_id = v || null;
+  }
+  addLog('账号管理', '编辑账号', `${u.username} · 设备 ${u.open_id || '未绑定'}`);
   // TODO: replace with fetch(`/api/admin/users/${id}`, { method: 'PUT', ... })
   return { ...u };
 }
@@ -86,46 +122,35 @@ async function apiToggleUser(id, status) {
   const u = DB.users.find((x) => x.id === id);
   if (!u) throw new Error('账号不存在');
   u.status = status;
+  addLog('账号管理', `${status === 'active' ? '启用' : '停用'}账号`, `${u.username} · ${u.name}`);
   // TODO: replace with fetch(`/api/admin/users/${id}/status`, { method: 'PUT', ... })
   return { ...u };
 }
 
 /**
- * 权限矩阵
- * GET /api/admin/permissions → 200 { permissions }
+ * 重置密码为初始密码 123456
+ * POST /api/admin/users/:id/password-reset
+ * → 200 { user }
  */
-async function apiFetchPermissions() {
-  await delay(400);
-  // TODO: replace with fetch('/api/admin/permissions')
-  return DB.permissions.map((p) => ({ ...p, roles: { ...p.roles } }));
-}
-
-/**
- * 保存权限矩阵（仅开发者）
- * PUT /api/admin/permissions  { permissions: [...] }
- * → 200 { permissions }
- */
-async function apiSavePermissions(permissions) {
-  await delay(600);
-  DB.permissions = permissions.map((p) => ({ ...p, roles: { ...p.roles } }));
-  // TODO: replace with fetch('/api/admin/permissions', { method: 'PUT', ... })
-  return apiFetchPermissions();
-}
-
-/**
- * 操作日志（分页）
- * GET /api/admin/logs?page=1&pageSize=8&module=&operator=
- * → 200 { logs, total, page, pageSize }
- */
-const PAGE_SIZE = 8;
-async function apiFetchLogs({ page = 1, module = '', operator = '', keyword = '' } = {}) {
+async function apiResetPassword(id) {
   await delay(450);
-  let list = DB.logs.filter((l) => {
-    if (module && l.module !== module) return false;
-    if (operator && l.operator !== operator) return false;
-    if (keyword && !(l.action + l.target + l.operator).includes(keyword)) return false;
-    return true;
-  });
-  // TODO: replace with fetch(`/api/admin/logs?page=${page}&pageSize=${PAGE_SIZE}...`)
-  return { logs: list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), total: list.length, page, pageSize: PAGE_SIZE };
+  const u = DB.users.find((x) => x.id === id);
+  if (!u) throw new Error('账号不存在');
+  addLog('账号管理', '重置密码', `${u.username} · ${u.name}`);
+  // TODO: replace with fetch(`/api/admin/users/${id}/password-reset`, { method: 'POST' })
+  return { ...u };
+}
+
+/**
+ * 操作日志（关键词过滤，全量返回）
+ * GET /api/admin/logs?keyword=
+ * → 200 { logs, total }
+ */
+async function apiFetchLogs({ keyword = '' } = {}) {
+  await delay(450);
+  const list = DB.logs.filter((l) =>
+    !keyword || (l.action + l.target + l.operator + l.module).includes(keyword)
+  );
+  // TODO: replace with fetch(`/api/admin/logs?keyword=${encodeURIComponent(keyword)}`)
+  return { logs: list.map((l) => ({ ...l })), total: list.length };
 }

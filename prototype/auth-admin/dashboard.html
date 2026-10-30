@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>总览 · 微信客服系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="dashboard">
+  <div class="frame">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">微</div>
+        <div class="brand-text">
+          <span class="name">微信客服系统</span>
+          <span class="sub">WXCS ADMIN CONSOLE</span>
+        </div>
+      </div>
+      <div class="right">
+        <span class="env-chip num">DEV</span>
+        <span class="status hide-sm"><span class="dot"></span>中间方已连接</span>
+        <div class="user-chip">
+          <div class="user-avatar num" id="ucAvatar">—</div>
+          <div class="user-meta">
+            <span class="user-name" id="ucName">—</span>
+            <span class="user-role" id="ucRole">—</span>
+          </div>
+          <button class="icon-btn" id="ucLogout" title="退出登录" aria-label="退出登录">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <div class="layout">
+      <aside class="app-side">
+        <nav class="app-nav">
+          <div class="nav-label">管理后台</div>
+          <a class="nav-item" data-nav="dashboard" data-roles="developer,admin" href="dashboard.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span><span class="nav-text">总览</span>
+          </a>
+          <a class="nav-item" data-nav="accounts" data-roles="developer,admin" href="accounts.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-text">账号管理</span>
+          </a>
+          <a class="nav-item" data-nav="logs" data-roles="developer" href="logs.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span><span class="nav-text">操作日志</span>
+          </a>
+          <div class="nav-label">快捷入口</div>
+          <a class="nav-item" data-nav="workbench" href="../contacts/index.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg></span><span class="nav-text">消息工作台</span>
+          </a>
+        </nav>
+        <div class="nav-foot num">WXCS v2.4.0</div>
+      </aside>
+      <main class="app-content">
+        <div class="page-head">
+          <div>
+            <h1>总览</h1>
+            <div class="desc">2026-10-30 · 核心运行指标</div>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="card stat-card rise rise-1">
+            <div class="stat-top">
+              <span>今日消息量</span>
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg></span>
+            </div>
+            <div class="stat-val" id="statMsg"><span class="skeleton" style="display:inline-block;width:92px;height:24px;">&nbsp;</span></div>
+            <div class="stat-foot" id="statMsgFoot"><span class="skeleton" style="display:inline-block;width:104px;height:12px;">&nbsp;</span></div>
+          </div>
+          <div class="card stat-card rise rise-2">
+            <div class="stat-top">
+              <span>在线客服</span>
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+            </div>
+            <div class="stat-val" id="statAgents"><span class="skeleton" style="display:inline-block;width:64px;height:24px;">&nbsp;</span></div>
+            <div class="stat-foot">高峰时段 09:00 - 11:00</div>
+          </div>
+          <div class="card stat-card rise rise-3">
+            <div class="stat-top">
+              <span>今日新增客户</span>
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>
+            </div>
+            <div class="stat-val" id="statCustomers"><span class="skeleton" style="display:inline-block;width:40px;height:24px;">&nbsp;</span></div>
+            <div class="stat-foot">较昨日 +2 人</div>
+          </div>
+          <div class="card stat-card rise rise-4">
+            <div class="stat-top">
+              <span>发送成功率</span>
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg></span>
+            </div>
+            <div class="stat-val" id="statRate"><span class="skeleton" style="display:inline-block;width:76px;height:24px;">&nbsp;</span></div>
+            <div class="stat-foot">重试后挽回 2 条</div>
+          </div>
+        </div>
+
+        <div class="card rise rise-5" id="miniLogCard">
+          <div class="card-head">
+            <div class="card-title"><span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg></span>最新操作</div>
+            <a class="btn btn-subtle btn-sm" href="logs.html">查看全部 →</a>
+          </div>
+          <div class="card-body" id="miniLogs"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+  <script>
+  // ===== 总览页逻辑：角色守卫 / 统计填充 / 迷你日志 =====
+  (function () {
+    const user = Auth.require(['developer', 'admin']);
+    if (!user) return;
+
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => Number(n).toLocaleString('en-US');
+
+    // 操作日志仅开发者可见：管理员隐藏「最新操作」卡
+    if (user.role !== 'developer') $('miniLogCard').style.display = 'none';
+
+    const IC_UP = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>';
+    const IC_DOWN = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 9.5 8.5 14.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>';
+
+    function renderStats(s) {
+      $('statMsg').textContent = fmt(s.msgToday);
+      const up = s.msgDelta >= 0;
+      $('statMsgFoot').innerHTML =
+        `<span class="${up ? 'trend-up' : 'trend-down'}" style="display:inline-flex;align-items:center;gap:3px;">${up ? IC_UP : IC_DOWN}${up ? '+' : ''}${s.msgDelta}%</span>vs 昨日`;
+      $('statAgents').innerHTML = `${s.agentsOnline}<small>/${s.agentsTotal}</small>`;
+      $('statCustomers').textContent = s.newCustomers;
+      $('statRate').innerHTML = `${s.successRate}<small>%</small>`;
+    }
+
+    // 骨架 → fetch → 填充
+    (async () => {
+      renderStats(await apiFetchStats());
+    })();
+
+    // 最新操作：DB.logs 前 5（同步数据，无需骨架）
+    $('miniLogs').innerHTML = DB.logs.slice(0, 5).map((l) => `
+      <div class="mini-log">
+        <span class="m-time">${l.time.slice(11, 16)}</span>
+        <div class="m-body"><b>${l.operator}</b> ${l.action} · ${l.target}</div>
+      </div>`).join('');
+  })();
+  </script>
+</body>
+</html>

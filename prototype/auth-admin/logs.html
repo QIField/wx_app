@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>操作日志 · 微信客服系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="logs">
+  <div class="frame">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">微</div>
+        <div class="brand-text">
+          <span class="name">微信客服系统</span>
+          <span class="sub">WXCS ADMIN CONSOLE</span>
+        </div>
+      </div>
+      <div class="right">
+        <span class="env-chip num">DEV</span>
+        <span class="status hide-sm"><span class="dot"></span>中间方已连接</span>
+        <div class="user-chip">
+          <div class="user-avatar num" id="ucAvatar">—</div>
+          <div class="user-meta">
+            <span class="user-name" id="ucName">—</span>
+            <span class="user-role" id="ucRole">—</span>
+          </div>
+          <button class="icon-btn" id="ucLogout" title="退出登录" aria-label="退出登录">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <div class="layout">
+      <aside class="app-side">
+        <nav class="app-nav">
+          <div class="nav-label">管理后台</div>
+          <a class="nav-item" data-nav="dashboard" data-roles="developer,admin" href="dashboard.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span><span class="nav-text">总览</span>
+          </a>
+          <a class="nav-item" data-nav="accounts" data-roles="developer,admin" href="accounts.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-text">账号管理</span>
+          </a>
+          <a class="nav-item" data-nav="logs" data-roles="developer" href="logs.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span><span class="nav-text">操作日志</span>
+          </a>
+          <div class="nav-label">快捷入口</div>
+          <a class="nav-item" data-nav="workbench" href="../contacts/index.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg></span><span class="nav-text">消息工作台</span>
+          </a>
+        </nav>
+        <div class="nav-foot num">WXCS v2.4.0</div>
+      </aside>
+      <main class="app-content">
+        <div class="page-head">
+          <div>
+            <h1>操作日志</h1>
+            <div class="desc">记录后台全部写操作 · 仅开发者可见 · 保留 180 天</div>
+          </div>
+        </div>
+
+        <div class="card rise rise-1">
+          <div class="card-head">
+            <div class="card-title"><span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg></span>审计记录</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span id="logCount" style="font-size:12px;color:var(--c-text-sub);">共 — 条</span>
+              <div class="search">
+                <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
+                <input id="fKeyword" type="text" placeholder="搜索动作 / 对象 / 操作人">
+              </div>
+            </div>
+          </div>
+          <div class="tbl-wrap" id="tblWrap">
+            <div class="skeleton" id="tblSkeleton" style="height:336px;margin:12px 14px;">&nbsp;</div>
+            <table class="tbl" id="logTbl" style="display:none;">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>操作人</th>
+                  <th>模块</th>
+                  <th>动作</th>
+                  <th>对象</th>
+                  <th>IP 地址</th>
+                  <th>结果</th>
+                </tr>
+              </thead>
+              <tbody id="logBody"></tbody>
+            </table>
+            <div class="empty" id="tblEmpty" style="display:none;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <span>没有符合条件的日志</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+  <script>
+  // ===== 操作日志页逻辑：角色守卫 / 关键词搜索 / 全量列表 / 空态 =====
+  (function () {
+    const user = Auth.require(['developer']);
+    if (!user) return;
+
+    const $ = (id) => document.getElementById(id);
+    const state = { keyword: '' };
+
+    const resultTag = (r) => r === 'success'
+      ? '<span class="tag tag-ok">成功</span>'
+      : '<span class="tag tag-danger">失败</span>';
+
+    function renderTable(data) {
+      const { logs, total } = data;
+      const sk = $('tblSkeleton');
+      if (sk) sk.remove();
+
+      $('logCount').textContent = `共 ${total} 条`;
+      if (!total) {
+        $('logTbl').style.display = 'none';
+        $('tblEmpty').style.display = 'flex';
+        return;
+      }
+      $('tblEmpty').style.display = 'none';
+      $('logTbl').style.display = '';
+      $('logBody').innerHTML = logs.map((l) => `
+        <tr>
+          <td class="num">${l.time}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="avatar sm">${l.operator.slice(0, 1)}</span>
+              <span class="cell-main">${l.operator}</span>
+              ${roleBadge(l.role)}
+            </div>
+          </td>
+          <td><span class="tag tag-gray">${l.module}</span></td>
+          <td>${l.action}</td>
+          <td><span class="cell-sub">${l.target}</span></td>
+          <td class="num">${l.ip}</td>
+          <td>${resultTag(l.result)}</td>
+        </tr>`).join('');
+    }
+
+    function setLoading(on) {
+      $('tblWrap').style.opacity = on ? '0.45' : '';
+      $('tblWrap').style.pointerEvents = on ? 'none' : '';
+    }
+
+    async function load() {
+      setLoading(true);
+      renderTable(await apiFetchLogs({ keyword: state.keyword.trim() }));
+      setLoading(false);
+    }
+
+    // 输入即搜（回车同样触发）
+    $('fKeyword').addEventListener('input', (e) => { state.keyword = e.target.value; load(); });
+    $('fKeyword').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+
+    load();
+  })();
+  </script>
+</body>
+</html>
