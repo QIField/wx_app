@@ -1,11 +1,15 @@
-"""profile_sync 单测：群名/好友资料解析（mock 中间方，不真调接口）。"""
+"""profile_sync 单测：群名/好友资料解析（mock 中间方，不真调接口）。
+
+重构说明：实现拆到 group_profile / friend_profile，门面 profile_sync 只编排，
+patch 目标相应指向实现模块。
+"""
 import json
 
 import pytest
 
 from backend.extensions import db
 from backend.models.conversation import Conversation
-from backend.sync import profile_sync
+from backend.sync import friend_profile, group_profile, profile_sync
 
 from backend.tests.conftest import make_user
 
@@ -13,9 +17,9 @@ from backend.tests.conftest import make_user
 @pytest.fixture(autouse=True)
 def clean_fail_counts():
     """每个用例前清空失败计数（模块级状态）。"""
-    profile_sync._fail_counts.clear()
+    group_profile._fail_counts.clear()
     yield
-    profile_sync._fail_counts.clear()
+    group_profile._fail_counts.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -45,14 +49,16 @@ def single_conv(app):
 
 
 def _patch_broadcast(monkeypatch, bucket):
-    monkeypatch.setattr(profile_sync, "broadcast", lambda event, data: bucket.append((event, data)))
+    fn = lambda event, data: bucket.append((event, data))  # noqa: E731
+    monkeypatch.setattr(group_profile, "broadcast", fn)
+    monkeypatch.setattr(friend_profile, "broadcast", fn)
 
 
 def test_group_name_synced(app, group_conv, monkeypatch):
     """群名+群头像解析成功（2026-10-30 实测结构）：写库 + 广播。"""
     bucket = []
     _patch_broadcast(monkeypatch, bucket)
-    monkeypatch.setattr(profile_sync.client, "call", lambda *a, **k: {})
+    monkeypatch.setattr(group_profile.client, "call", lambda *a, **k: {})
     real_result = json.dumps({
         "ret": 200, "msg": "操作成功",
         "data": {
@@ -63,7 +69,7 @@ def test_group_name_synced(app, group_conv, monkeypatch):
         },
     })
     monkeypatch.setattr(
-        profile_sync, "_query_record_once",
+        group_profile, "query_record_once",
         lambda module, action, u, openid="": {"uuid": u, "processing_result": real_result},
     )
 
@@ -86,26 +92,26 @@ def test_group_fail_retry_cap(app, group_conv, monkeypatch):
         return {}
 
     _patch_broadcast(monkeypatch, [])
-    monkeypatch.setattr(profile_sync.client, "call", fake_call)
-    monkeypatch.setattr(profile_sync, "_query_record_once",
+    monkeypatch.setattr(group_profile.client, "call", fake_call)
+    monkeypatch.setattr(group_profile, "query_record_once",
                         lambda module, action, u, openid="": None)
-    monkeypatch.setattr(profile_sync, "_fetch_friend_wxids", lambda openid: [])
+    monkeypatch.setattr(friend_profile, "fetch_friend_wxids", lambda openid: [])
 
     for _ in range(8):
         profile_sync.sync_profiles(app)
 
     # 反复失败后被限流：下发总量不超过 MAX_FAIL_RETRY 次
-    assert len(calls) <= profile_sync.MAX_FAIL_RETRY
+    assert len(calls) <= group_profile.MAX_FAIL_RETRY
 
 
 def test_friend_profile_synced(app, single_conv, monkeypatch):
-    """好友昵称+头像批量更新（brief_info 结构未知，靠 _pick 兜底）。"""
+    """好友昵称+头像批量更新（brief_info 结构未知，靠 pick 兜底）。"""
     bucket = []
     _patch_broadcast(monkeypatch, bucket)
-    monkeypatch.setattr(profile_sync.client, "call", lambda *a, **k: {})
-    monkeypatch.setattr(profile_sync, "_fetch_friend_wxids", lambda openid: ["wxid_friend"])
+    monkeypatch.setattr(friend_profile.client, "call", lambda *a, **k: {})
+    monkeypatch.setattr(friend_profile, "fetch_friend_wxids", lambda openid: ["wxid_friend"])
     monkeypatch.setattr(
-        profile_sync, "_query_brief_infos",
+        friend_profile, "query_brief_infos",
         lambda wxids, openid="": {"wxid_friend": {"nickname": "张师傅", "head_img_url": "http://a/x.jpg"}},
     )
 
@@ -119,15 +125,15 @@ def test_friend_profile_synced(app, single_conv, monkeypatch):
 def test_friend_not_in_list_skipped(app, single_conv, monkeypatch):
     """好友列表里没有的会话不处理（不是好友的单聊不拉资料）。"""
     _patch_broadcast(monkeypatch, [])
-    monkeypatch.setattr(profile_sync.client, "call", lambda *a, **k: {})
-    monkeypatch.setattr(profile_sync, "_fetch_friend_wxids", lambda openid: ["wxid_other"])
+    monkeypatch.setattr(friend_profile.client, "call", lambda *a, **k: {})
+    monkeypatch.setattr(friend_profile, "fetch_friend_wxids", lambda openid: ["wxid_other"])
     called = {"brief": False}
 
     def fake_brief(wxids, openid=""):
         called["brief"] = True
         return {}
 
-    monkeypatch.setattr(profile_sync, "_query_brief_infos", fake_brief)
+    monkeypatch.setattr(friend_profile, "query_brief_infos", fake_brief)
 
     profile_sync.sync_profiles(app)
 
@@ -152,9 +158,9 @@ def test_refresh_single_on_message(app, single_conv, monkeypatch, real_refresh):
     """消息触发补拉：缺资料的单聊立即批量查询并更新 + 广播。"""
     bucket = []
     _patch_broadcast(monkeypatch, bucket)
-    monkeypatch.setattr(profile_sync.client, "call", lambda *a, **k: {})
+    monkeypatch.setattr(friend_profile.client, "call", lambda *a, **k: {})
     monkeypatch.setattr(
-        profile_sync, "_query_brief_infos",
+        friend_profile, "query_brief_infos",
         lambda wxids, openid="": {"wxid_friend": {"nickname": "李师傅", "head_img_url": "http://a/1.jpg"}},
     )
 
@@ -176,7 +182,8 @@ def test_refresh_skips_complete_profile(app, monkeypatch, real_refresh):
     def boom(*a, **k):
         raise AssertionError("资料齐全不应发起请求")
 
-    monkeypatch.setattr(profile_sync.client, "call", boom)
+    monkeypatch.setattr(group_profile.client, "call", boom)
+    monkeypatch.setattr(friend_profile.client, "call", boom)
 
     profile_sync.refresh_missing_profiles("o1", [conv.id])
 
@@ -194,13 +201,13 @@ def test_refresh_group_limit_three(app, monkeypatch, real_refresh):
             dispatched.append(params["chatroom_id"])
         return {}
 
-    monkeypatch.setattr(profile_sync.client, "call", fake_call)
-    monkeypatch.setattr(profile_sync, "_query_record",
+    monkeypatch.setattr(group_profile.client, "call", fake_call)
+    monkeypatch.setattr(group_profile, "query_record",
                         lambda module, action, u, openid="": None)
 
     profile_sync.refresh_missing_profiles("o1", [c.id for c in convs])
 
-    assert len(dispatched) == profile_sync.GROUP_NOW_LIMIT
+    assert len(dispatched) == group_profile.GROUP_NOW_LIMIT
 
 
 def test_refresh_skip_failed_and_pending(app, group_conv, monkeypatch, real_refresh):
@@ -208,8 +215,8 @@ def test_refresh_skip_failed_and_pending(app, group_conv, monkeypatch, real_refr
     conv2 = Conversation(openid="o1", wxid="2@chatroom", chat_type=2)
     db.session.add(conv2)
     db.session.commit()
-    profile_sync._fail_counts[(group_conv.openid, group_conv.wxid)] = profile_sync.MAX_FAIL_RETRY
-    profile_sync._pending["u1"] = (conv2.id, conv2.wxid, conv2.openid)
+    group_profile._fail_counts[(group_conv.openid, group_conv.wxid)] = group_profile.MAX_FAIL_RETRY
+    group_profile._pending["u1"] = (conv2.id, conv2.wxid, conv2.openid)
     dispatched = []
     _patch_broadcast(monkeypatch, [])
 
@@ -218,7 +225,7 @@ def test_refresh_skip_failed_and_pending(app, group_conv, monkeypatch, real_refr
             dispatched.append(params["chatroom_id"])
         return {}
 
-    monkeypatch.setattr(profile_sync.client, "call", fake_call)
+    monkeypatch.setattr(group_profile.client, "call", fake_call)
 
     profile_sync.refresh_missing_profiles("o1", [group_conv.id, conv2.id])
 
@@ -228,14 +235,14 @@ def test_refresh_skip_failed_and_pending(app, group_conv, monkeypatch, real_refr
 def test_refresh_dedup_same_conversation(app, single_conv, monkeypatch, real_refresh):
     """同一会话多条消息只补拉一次（conv_id 去重）。"""
     _patch_broadcast(monkeypatch, [])
-    monkeypatch.setattr(profile_sync.client, "call", lambda *a, **k: {})
+    monkeypatch.setattr(friend_profile.client, "call", lambda *a, **k: {})
     brief_calls = []
 
     def fake_brief(wxids, openid=""):
         brief_calls.append(list(wxids))
         return {}
 
-    monkeypatch.setattr(profile_sync, "_query_brief_infos", fake_brief)
+    monkeypatch.setattr(friend_profile, "query_brief_infos", fake_brief)
 
     profile_sync.refresh_missing_profiles("o1", [single_conv.id, single_conv.id])
 

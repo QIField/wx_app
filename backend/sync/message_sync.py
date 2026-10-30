@@ -17,8 +17,8 @@ from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.sync_cursor import SyncCursor
-from backend.models.user import User
 from backend.services.audit import AuditLog, AuditModule, log_action
+from backend.services.devices import active_bound_devices
 
 PAGE_SIZE = 100        # 每轮拉一页；单轮增量超一页的情况极少，靠下一轮补
 FIRST_HOURS = 1        # 首次运行没有游标时，从最近 1 小时开始拉
@@ -35,13 +35,7 @@ _TYPE_MAP = {
 def sync_once(app):
     """跑一轮同步：遍历所有绑定设备的账号，逐设备拉增量。由定时器或测试触发。"""
     with app.app_context():
-        openids = [
-            row[0]
-            for row in db.session.query(User.open_id)
-            .filter(User.open_id.isnot(None), User.open_id != "", User.status == 1)
-            .all()
-        ]
-        for openid in openids:
+        for openid in active_bound_devices():
             try:
                 pushed = sync_device(openid)
             except Exception as exc:  # noqa: BLE001 单设备失败不拖垮其他设备

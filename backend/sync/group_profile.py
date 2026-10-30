@@ -1,0 +1,159 @@
+"""群资料解析：群名 + 群头像（两段流水线）。
+
+本轮收割上一轮下发的结果（结果早已生成，秒级命中）+ 给缺资料的群补发
+新任务，不同步等待中间方（结果约 4 秒内生成）。消息触发的立即补拉链路
+（refresh_groups_now）由 profile_sync 门面编排，失败计数/流水线状态共享。
+"""
+from backend.adapter import client
+from backend.extensions import db
+from backend.models.conversation import Conversation
+from backend.sync.task_query import (
+    as_dict,
+    new_task_uuid,
+    pick,
+    query_record,
+    query_record_once,
+    unwrap_result,
+)
+from backend.ws.hub import broadcast
+
+PROFILE_BATCH = 100   # 每轮最多下发 100 个群资料任务（下发很快；结果下轮收割）
+MAX_FAIL_RETRY = 5    # 同一个 wxid 连续失败 5 次后放弃（进程重启清零）
+GROUP_NOW_LIMIT = 3   # 消息触发的立即补拉：单轮最多同步等 3 个群（防阻塞收消息轮询）
+
+_fail_counts = {}    # (openid, wxid) -> 连续失败次数（内存即可）
+_pending = {}        # task_uuid -> (conversation_id, wxid, openid)：已下发待收割的群资料任务
+_pending_fails = {}  # task_uuid -> 收割失败轮数（超 5 轮丢弃，防永久占坑）
+
+
+def missing_profile(conv):
+    """资料是否缺失：名称为空/仍是 wxid 原始编号，或头像为空。"""
+    return conv.name in (None, "", conv.wxid) or not conv.avatar
+
+
+def sync_group_names():
+    collect_group_results()
+    dispatch_group_tasks()
+
+
+def collect_group_results():
+    """收割上一轮下发的任务：结果早已生成，单次查询即命中。"""
+    done = []
+    for task_uuid, (conv_id, wxid, openid) in _pending.items():
+        record = query_record_once("group_api", "get_chatroom_info", task_uuid, openid)
+        if not record:
+            _pending_fails[task_uuid] = _pending_fails.get(task_uuid, 0) + 1
+            if _pending_fails[task_uuid] >= 5:
+                # 连续 5 轮没收割到：放弃并计入群失败数（限流，防止重复下发死循环）
+                _fail_counts[(openid, wxid)] = _fail_counts.get((openid, wxid), 0) + 1
+                done.append(task_uuid)
+            continue
+        done.append(task_uuid)
+        info = parse_group_info(record)
+        if info:
+            apply_group_info(conv_id, wxid, info)
+    for task_uuid in done:
+        _pending.pop(task_uuid, None)
+        _pending_fails.pop(task_uuid, None)
+
+
+def dispatch_group_tasks():
+    """给缺资料且未在下发中的群补发 chatroom_info 任务（按会话所属设备下发）。"""
+    pending_wxids = {(openid, wxid) for _, wxid, openid in _pending.values()}
+    slots = PROFILE_BATCH - len(_pending)
+    if slots <= 0:
+        return
+    for conv in unnamed_groups(limit=slots):
+        key = (conv.openid, conv.wxid)
+        if key in pending_wxids:
+            continue
+        if _fail_counts.get(key, 0) >= MAX_FAIL_RETRY:
+            continue
+        task_uuid = new_task_uuid()
+        client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid},
+                    task_uuid, openid=conv.openid or "")
+        _pending[task_uuid] = (conv.id, conv.wxid, conv.openid)
+
+
+def unnamed_groups(limit):
+    """没有名字的群会话（name 为空或还显示着 wxid 原始编号）。"""
+    return (
+        Conversation.query.filter(
+            Conversation.deleted_at.is_(None),
+            Conversation.chat_type == Conversation.CHAT_GROUP,
+            db.or_(Conversation.name.is_(None), Conversation.name == Conversation.wxid),
+        )
+        # MySQL 5.7 不支持 NULLS LAST，用 IS NULL 布尔排序两端方言通吃（空值排最后）
+        .order_by(
+            Conversation.last_msg_at.is_(None),
+            Conversation.last_msg_at.desc(),
+            Conversation.id,
+        )
+        .limit(limit)
+        .all()
+    )
+
+
+def refresh_groups_now(openid, groups):
+    """立即补拉群资料：同步下发 + 等待收割，单轮最多 GROUP_NOW_LIMIT 个。"""
+    pending_keys = {(o, w) for _, w, o in _pending.values()}
+    done = 0
+    for conv in groups:
+        if done >= GROUP_NOW_LIMIT:
+            break  # 超出的留给 30 分钟兜底轮，避免阻塞收消息轮询
+        key = (conv.openid, conv.wxid)
+        if key in pending_keys or _fail_counts.get(key, 0) >= MAX_FAIL_RETRY:
+            continue
+        done += 1  # 按尝试次数计数：失败也占用本轮名额
+        task_uuid = new_task_uuid()
+        client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid},
+                    task_uuid, openid=conv.openid or "")
+        record = query_record("group_api", "get_chatroom_info", task_uuid, openid)
+        if record is None:
+            _fail_counts[key] = _fail_counts.get(key, 0) + 1
+            continue
+        info = parse_group_info(record)
+        if info:
+            apply_group_info(conv.id, conv.wxid, info)
+
+
+def apply_group_info(conv_id, wxid, info):
+    conv = db.session.get(Conversation, conv_id)
+    if not conv:
+        return
+    changed = False
+    if info.get("nickname"):
+        conv.name = info["nickname"]
+        changed = True
+    if info.get("avatar") and not conv.avatar:
+        conv.avatar = info["avatar"]
+        changed = True
+    if changed:
+        db.session.commit()
+        _fail_counts.pop((conv.openid, conv.wxid), None)
+        broadcast("conv_updated", {"conversation_id": conv.id})
+
+
+def parse_group_info(record):
+    """任务记录 → {nickname, avatar}。
+
+    2026-10-30 实测 processing_result.data：
+    nickName=群名, smallHeadImgUrl=群头像, memberList=成员(含昵称，后续接)。
+    """
+    data_raw = unwrap_result(record)
+    if data_raw is None:
+        return None
+    data = as_dict(data_raw)
+    return {
+        "nickname": pick(data, ("nickName", "nickname", "chatroom_name", "name")),
+        "avatar": pick(data, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "avatar")),
+    }
+
+
+def query_chatroom_info(chatroom_id, openid=""):
+    """同步取单个群资料（仅临时调试用；正式链路走两段流水线）。"""
+    task_uuid = new_task_uuid()
+    client.call("group_api", "chatroom_info", {"chatroom_id": chatroom_id},
+                task_uuid, openid=openid)
+    record = query_record("group_api", "get_chatroom_info", task_uuid, openid)
+    return parse_group_info(record)
