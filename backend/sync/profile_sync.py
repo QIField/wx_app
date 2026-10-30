@@ -10,10 +10,10 @@ from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.ws.hub import broadcast
 
-MAX_GROUPS_PER_ROUND = 10     # 每轮最多解析 10 个群名（10 分钟一轮，频率极低打不爆）
+MAX_GROUPS_PER_ROUND = 30     # 每轮最多解析 30 个群（10 分钟一轮，实测查询约5秒/个）
 QUERY_RETRY = 5               # 下发后结果不是立即生成，查询重试次数
 QUERY_WAIT_SECONDS = 2        # 每次重试间隔（实测约 4 秒内出结果）
-MAX_FAIL_RETRY = 3            # 同一个 wxid 连续失败 3 次后放弃（进程重启清零）
+MAX_FAIL_RETRY = 5            # 同一个 wxid 连续失败 5 次后放弃（进程重启清零）
 FRIEND_BATCH = 20             # brief_info 单次最多 20 个 wxid（文档约定）
 
 _fail_counts = {}  # wxid -> 连续失败次数（内存即可）
