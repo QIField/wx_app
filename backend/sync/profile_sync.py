@@ -10,7 +10,7 @@ from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.ws.hub import broadcast
 
-MAX_GROUPS_PER_ROUND = 3      # 每轮最多解析 3 个群名，避免打爆中间方
+MAX_GROUPS_PER_ROUND = 10     # 每轮最多解析 10 个群名（10 分钟一轮，频率极低打不爆）
 MAX_FAIL_RETRY = 3            # 同一个 wxid 连续失败 3 次后放弃（进程重启清零）
 FRIEND_BATCH = 20             # brief_info 单次最多 20 个 wxid（文档约定）
 
