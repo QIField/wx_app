@@ -50,14 +50,21 @@ def _sync_group_names():
     for conv in _unnamed_groups():
         if _fail_counts.get(conv.wxid, 0) >= MAX_FAIL_RETRY:
             continue
-        name = _query_chatroom_name(conv.wxid)
-        if name:
-            conv.name = name
+        info = _query_chatroom_info(conv.wxid)
+        if not info:
+            _fail_counts[conv.wxid] = _fail_counts.get(conv.wxid, 0) + 1
+            continue
+        changed = False
+        if info.get("nickname"):
+            conv.name = info["nickname"]
+            changed = True
+        if info.get("avatar") and not conv.avatar:
+            conv.avatar = info["avatar"]
+            changed = True
+        if changed:
             db.session.commit()
             _fail_counts.pop(conv.wxid, None)
             broadcast("conv_updated", {"conversation_id": conv.id})
-        else:
-            _fail_counts[conv.wxid] = _fail_counts.get(conv.wxid, 0) + 1
 
 
 def _new_task_uuid():
@@ -81,18 +88,25 @@ def _query_record(module, get_action, task_uuid):
     return None
 
 
-def _query_chatroom_name(chatroom_id):
-    """chatroom_info 下发 → 查结果 → 提取群名。拿不到返回 None。"""
+def _query_chatroom_info(chatroom_id):
+    """chatroom_info 下发 → 查结果 → {nickname, avatar}。
+
+    2026-10-30 实测 processing_result.data：
+    nickName=群名, smallHeadImgUrl=群头像, memberList=成员(含昵称，后续接)。
+    """
     task_uuid = _new_task_uuid()
     client.call("group_api", "chatroom_info", {"chatroom_id": chatroom_id}, task_uuid)
     record = _query_record("group_api", "get_chatroom_info", task_uuid)
     if not record:
         return None
-    result = record.get("processing_result")
-    result = _as_dict(result)
+    result = _as_dict(record.get("processing_result"))
     if result.get("ret") != 200:
         return None
-    return _pick(result, ("nickname", "nick_name", "nickName", "chatroom_name", "name", "group_name"))
+    data = _as_dict(result.get("data"))
+    return {
+        "nickname": _pick(data, ("nickName", "nickname", "chatroom_name", "name")),
+        "avatar": _pick(data, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "avatar")),
+    }
 
 
 # ---------- 好友昵称/头像 ----------
@@ -170,8 +184,8 @@ def _query_brief_infos(wxids):
         wxid = row.get("wxid") or row.get("username") or ""
         if wxid:
             infos[wxid] = {
-                "nickname": _pick(row, ("nickname", "nick_name", "nickName", "name")),
-                "head_img_url": _pick(row, ("head_img_url", "headImgUrl", "avatar", "big_head_url")),
+                "nickname": _pick(row, ("nickName", "nickname", "nick_name", "name")),
+                "head_img_url": _pick(row, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "headImgUrl", "avatar")),
             }
     return infos
 

@@ -18,20 +18,22 @@ def clean_fail_counts():
 
 @pytest.fixture
 def group_conv(app):
-    with app.app_context():
-        conv = Conversation(openid="o1", wxid="123@chatroom", chat_type=2)
-        db.session.add(conv)
-        db.session.commit()
-        yield conv
+    # 不再嵌套 with app.app_context()：复用 app fixture 的上下文，
+    # 保证和被测代码同一 session（Flask-SQLAlchemy 3 按 app context 分 session）。
+    conv = Conversation(openid="o1", wxid="123@chatroom", chat_type=2)
+    db.session.add(conv)
+    db.session.commit()
+    yield conv
+    db.session.expire_all()
 
 
 @pytest.fixture
 def single_conv(app):
-    with app.app_context():
-        conv = Conversation(openid="o1", wxid="wxid_friend", chat_type=1)
-        db.session.add(conv)
-        db.session.commit()
-        yield conv
+    conv = Conversation(openid="o1", wxid="wxid_friend", chat_type=1)
+    db.session.add(conv)
+    db.session.commit()
+    yield conv
+    db.session.expire_all()
 
 
 def _patch_broadcast(monkeypatch, bucket):
@@ -39,18 +41,30 @@ def _patch_broadcast(monkeypatch, bucket):
 
 
 def test_group_name_synced(app, group_conv, monkeypatch):
-    """群名解析成功：写 name + 广播 conv_updated。"""
+    """群名+群头像解析成功（2026-10-30 实测结构）：写库 + 广播。"""
     bucket = []
     _patch_broadcast(monkeypatch, bucket)
     monkeypatch.setattr(profile_sync.client, "call", lambda *a, **k: {})
+    real_result = json.dumps({
+        "ret": 200, "msg": "操作成功",
+        "data": {
+            "chatroomId": group_conv.wxid,
+            "nickName": "佛山万拓&巴博瑞报价群",
+            "smallHeadImgUrl": "https://wx.qlogo.cn/mmcrhead/xx/0",
+            "memberList": [{"wxid": "wxid_a", "nickName": "成员甲"}],
+        },
+    })
     monkeypatch.setattr(
         profile_sync, "_query_record",
-        lambda module, action, u: {"uuid": u, "processing_result": json.dumps({"ret": 200, "nickname": "华胜配价群"})},
+        lambda module, action, u: {"uuid": u, "processing_result": real_result},
     )
 
     profile_sync.sync_profiles(app)
 
-    assert group_conv.name == "华胜配价群"
+    db.session.expire_all()  # 强制重新加载，读到 sync_profiles 提交的最新值
+
+    assert group_conv.name == "佛山万拓&巴博瑞报价群"
+    assert group_conv.avatar == "https://wx.qlogo.cn/mmcrhead/xx/0"
     assert ("conv_updated", {"conversation_id": group_conv.id}) in bucket
 
 
