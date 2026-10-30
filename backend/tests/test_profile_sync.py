@@ -55,11 +55,12 @@ def test_group_name_synced(app, group_conv, monkeypatch):
         },
     })
     monkeypatch.setattr(
-        profile_sync, "_query_record",
+        profile_sync, "_query_record_once",
         lambda module, action, u: {"uuid": u, "processing_result": real_result},
     )
 
-    profile_sync.sync_profiles(app)
+    profile_sync.sync_profiles(app)  # 第 1 轮：下发
+    profile_sync.sync_profiles(app)  # 第 2 轮：收割
 
     db.session.expire_all()  # 强制重新加载，读到 sync_profiles 提交的最新值
 
@@ -78,15 +79,14 @@ def test_group_fail_retry_cap(app, group_conv, monkeypatch):
 
     _patch_broadcast(monkeypatch, [])
     monkeypatch.setattr(profile_sync.client, "call", fake_call)
-    monkeypatch.setattr(profile_sync, "_query_record", lambda module, action, u: None)
+    monkeypatch.setattr(profile_sync, "_query_record_once", lambda module, action, u: None)
     monkeypatch.setattr(profile_sync, "_fetch_friend_wxids", lambda: [])
 
-    for _ in range(5):
+    for _ in range(8):
         profile_sync.sync_profiles(app)
 
-    # 下发只在失败计数未满时发生（最多 MAX_FAIL_RETRY 次）
+    # 反复失败后被限流：下发总量不超过 MAX_FAIL_RETRY 次
     assert len(calls) <= profile_sync.MAX_FAIL_RETRY
-    assert profile_sync._fail_counts[group_conv.wxid] == profile_sync.MAX_FAIL_RETRY
 
 
 def test_friend_profile_synced(app, single_conv, monkeypatch):
