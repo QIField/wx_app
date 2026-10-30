@@ -1,7 +1,20 @@
 /** 后端接口封装：所有调后端的代码只写在这。 */
 import axios from 'axios'
 
+const TOKEN_KEY = 'wxcs_token'
+
+export const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
+export const setToken = (t) =>
+  t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY)
+
 const http = axios.create({ baseURL: '/api', timeout: 10000 })
+
+// 请求拦截：自动带登录令牌
+http.interceptors.request.use((cfg) => {
+  const token = getToken()
+  if (token) cfg.headers.Authorization = `Bearer ${token}`
+  return cfg
+})
 
 // 统一拆包：后端返回 {code, msg, data}，code!=0 视为业务错误
 http.interceptors.response.use(
@@ -10,8 +23,57 @@ http.interceptors.response.use(
     if (body && body.code !== 0) return Promise.reject(new Error(body.msg))
     return body ? body.data : null
   },
-  (err) => Promise.reject(new Error(err.response?.data?.msg || err.message))
+  (err) => {
+    const data = err.response?.data
+    // 初始密码强制改密：广播给 App.vue 弹窗（改密接口与 /me 自身不受拦）
+    if (err.response?.status === 403 && data?.err === 'PASSWORD_CHANGE_REQUIRED') {
+      window.dispatchEvent(new CustomEvent('need-change-password'))
+      return Promise.reject(
+        Object.assign(new Error(data.msg || '请先修改初始密码'), { code: 'PASSWORD_CHANGE_REQUIRED' })
+      )
+    }
+    // 令牌失效：清掉回登录页（/auth/me 交给启动流程自己处理，避免刷新循环）
+    if (err.response?.status === 401 && err.config?.url !== '/auth/me') {
+      setToken('')
+      location.replace('/')
+      return new Promise(() => {})
+    }
+    return Promise.reject(new Error(data?.msg || err.message))
+  }
 )
+
+/* ===== 认证 ===== */
+
+export const apiLogin = (username, password) =>
+  http.post('/auth/login', { username, password })
+
+export const fetchMe = () => http.get('/auth/me')
+
+/** 自助修改密码（初始密码账号的强制改密也走这里）。 */
+export const apiChangePassword = (oldPassword, newPassword) =>
+  http.put('/auth/password', { old_password: oldPassword, new_password: newPassword })
+
+/* ===== 账号管理 ===== */
+
+export const fetchAccounts = () => http.get('/accounts')
+
+export const createAccount = (payload) => http.post('/accounts', payload)
+
+export const updateAccount = (id, payload) => http.put(`/accounts/${id}`, payload)
+
+export const toggleAccountStatus = (id, status) =>
+  http.put(`/accounts/${id}/status`, { status })
+
+export const resetAccountPassword = (id) => http.put(`/accounts/${id}/password`)
+
+/* ===== 审计日志 / 总览 ===== */
+
+export const fetchAuditLogs = (keyword) =>
+  http.get('/audit-logs', { params: keyword ? { keyword } : {} })
+
+export const fetchAdminStats = () => http.get('/admin/stats')
+
+/* ===== 工作台 ===== */
 
 export const fetchConversations = () => http.get('/conversations')
 
