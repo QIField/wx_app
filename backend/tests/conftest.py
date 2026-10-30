@@ -1,4 +1,4 @@
-"""测试公共夹具：内存数据库 + 干净的 app 实例。"""
+"""测试公共夹具：内存数据库 + 干净的 app 实例 + 登录态客户端。"""
 import pytest
 from sqlalchemy.pool import StaticPool
 
@@ -26,9 +26,69 @@ def real_middle_mode(monkeypatch):
     monkeypatch.setattr(client, "DEMO_MODE", False)
 
 
+@pytest.fixture(autouse=True)
+def no_profile_refresh(monkeypatch):
+    """收消息单测不真跑资料补拉（避免同步等待中间方）；补拉行为在 test_profile_sync 专测。"""
+    from backend.sync import profile_sync
+
+    monkeypatch.setattr(profile_sync, "refresh_missing_profiles", lambda openid, ids: [])
+
+
 @pytest.fixture()
 def client(app):
-    return app.test_client()
+    """已登录默认客服账号（open_id=dev01）的测试客户端。
+
+    通过自定义 test_client_class 给所有请求自动带 Bearer 令牌；
+    会话数据沿用既有约定的 openid=dev01。
+    """
+    from flask.testing import FlaskClient
+
+    from backend.models.user import User
+    from backend.services.auth import create_token
+
+    class BearerClient(FlaskClient):
+        """所有请求默认带上登录令牌；单测里传 headers= 可覆盖。"""
+
+        auth_headers = {}
+
+        def open(self, *args, **kwargs):
+            headers = {**self.auth_headers, **(kwargs.pop("headers", None) or {})}
+            return super().open(*args, headers=headers, **kwargs)
+
+    make_user(open_id="dev01")
+    user = User.query.filter_by(username="cs01").one()
+    token, _ = create_token(user)
+
+    app.test_client_class = BearerClient
+    c = app.test_client()
+    c.auth_headers = {"Authorization": f"Bearer {token}"}
+    return c
+
+
+def make_user(**over):
+    """测试造号工厂：默认客服角色 cs01/123456，可覆盖任意字段。"""
+    from backend.models.user import ROLE_AGENT, User
+    from werkzeug.security import generate_password_hash
+
+    fields = dict(
+        username="cs01",
+        name="客服01",
+        role=ROLE_AGENT,
+        password_hash=generate_password_hash("123456"),
+    )
+    fields.update(over)
+    user = User(**fields)
+    _db.session.add(user)
+    _db.session.commit()
+    return user
+
+
+def login_headers(user):
+    """指定账号的登录令牌头（多角色用例用）。"""
+    from backend.services.auth import create_token
+
+    token, _ = create_token(user)
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture()
