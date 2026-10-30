@@ -1,6 +1,6 @@
-/** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项。搜索为本地过滤（即时高亮）。 */
+/** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项、联系人档案（备注/标签）。 */
 import { defineStore } from 'pinia'
-import { fetchContacts } from '../api'
+import { fetchContacts, fetchContactProfile, saveContactProfile } from '../api'
 
 export const useContactsStore = defineStore('contacts', {
   state: () => ({
@@ -10,6 +10,7 @@ export const useContactsStore = defineStore('contacts', {
     groups: [],
     loading: false,
     selected: null,  // { type: 'friend' | 'group', id }
+    profile: null,   // 选中联系人的档案 {remark, tags}
   }),
 
   getters: {
@@ -65,6 +66,17 @@ export const useContactsStore = defineStore('contacts', {
 
     select(type, id) {
       this.selected = { type, id }
+      this.profile = null
+    },
+
+    /** 拉取选中联系人的档案（备注/标签）。 */
+    async loadProfile(wxid) {
+      this.profile = await fetchContactProfile(wxid)
+    },
+
+    /** 保存备注/标签（upsert），成功后本地同步。 */
+    async saveProfile(wxid, payload) {
+      this.profile = await saveContactProfile(wxid, payload)
     },
   },
 })

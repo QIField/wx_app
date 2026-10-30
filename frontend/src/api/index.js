@@ -31,6 +31,12 @@ export const sendTextMessage = (convId, content) =>
 export const fetchContacts = (type, keyword) =>
   http.get('/contacts', { params: { type, keyword: keyword || undefined } })
 
+/** 联系人档案：备注/标签（业务自建，按 wxid，好友与群通用）。 */
+export const fetchContactProfile = (wxid) => http.get(`/contacts/${wxid}/profile`)
+
+export const saveContactProfile = (wxid, payload) =>
+  http.put(`/contacts/${wxid}/profile`, payload)
+
 /** WebSocket 长连接：收到推送回调 onEvent(event, data)。 */
 export function connectWs(onEvent) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
