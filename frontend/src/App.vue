@@ -1,6 +1,6 @@
 <script setup>
-/** 三栏工作台：深色顶栏 + 会话列表/通讯录（切换）/ 聊天窗 / 报价处理台（可收起、可拖宽）。 */
-import { onMounted, ref } from 'vue'
+/** 三栏工作台：深色顶栏 + 微信式图标侧栏（会话/通讯录）+ 列表 / 聊天窗 / 报价处理台。 */
+import { computed, onMounted, ref } from 'vue'
 import { useChatStore } from './stores/chat'
 import ConvList from './components/ConvList.vue'
 import ContactsPanel from './components/ContactsPanel.vue'
@@ -11,6 +11,10 @@ import InfoPanel from './components/InfoPanel.vue'
 const chat = useChatStore()
 
 const activeView = ref('chat') // chat | contacts
+
+/* 侧栏「会话」按钮的未读总数角标 */
+const totalUnread = computed(() =>
+  chat.conversations.reduce((n, c) => n + (c.unread_count || 0), 0))
 
 const infoOpen = ref(true)
 const infoW = ref(316)
@@ -54,15 +58,23 @@ onMounted(async () => {
     </header>
 
     <div class="layout">
+      <!-- 左侧导航栏（微信式图标栏） -->
+      <nav class="rail">
+        <button class="rail-btn" :class="{ on: activeView === 'chat' }" title="会话" @click="activeView = 'chat'">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+          </svg>
+          <span v-if="totalUnread" class="rail-badge num">{{ totalUnread > 99 ? '99+' : totalUnread }}</span>
+        </button>
+        <button class="rail-btn" :class="{ on: activeView === 'contacts' }" title="通讯录" @click="activeView = 'contacts'">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+        </button>
+      </nav>
       <aside class="col-side">
-        <div class="view-tabs">
-          <button :class="{ on: activeView === 'chat' }" @click="activeView = 'chat'">会话</button>
-          <button :class="{ on: activeView === 'contacts' }" @click="activeView = 'contacts'">通讯录</button>
-        </div>
-        <div class="view-body">
-          <ConvList v-if="activeView === 'chat'" />
-          <ContactsPanel v-else />
-        </div>
+        <ConvList v-if="activeView === 'chat'" />
+        <ContactsPanel v-else />
       </aside>
       <main class="col-main">
         <ChatPanel v-if="activeView === 'chat'" />
@@ -140,34 +152,39 @@ onMounted(async () => {
   box-shadow: var(--shadow-card);
   overflow: hidden;
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
 }
 
-/* 左栏顶部：会话 | 通讯录 切换 */
-.view-tabs {
-  display: flex;
+/* 左侧导航栏（微信式图标栏）：与顶栏同色系，激活用信号蓝 */
+.rail {
+  width: 46px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+  background: linear-gradient(180deg, var(--c-navy), var(--c-navy-2));
+  border-radius: var(--r-md);
 }
-.view-tabs button {
-  flex: 1;
-  padding: 9px 0;
-  font-size: 13px;
-  color: var(--c-text-sub);
+.rail-btn {
+  position: relative;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--r-sm);
   background: none;
-  border: none;
+  color: rgba(255, 255, 255, 0.55);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
-.view-tabs button:hover { color: var(--c-text); }
-.view-tabs button.on {
-  color: var(--c-primary);
-  font-weight: 600;
-  border-bottom-color: var(--c-primary);
+.rail-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.rail-btn.on { background: var(--c-primary); color: #fff; }
+.rail-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 8px; background: var(--c-danger); color: #fff;
+  font-size: 10px; line-height: 15px; text-align: center;
+  box-shadow: 0 0 0 2px var(--c-navy);
 }
-.view-body { flex: 1; min-height: 0; }
 
 .col-main {
   flex: 1;
