@@ -92,3 +92,54 @@ def test_letter_pinyin_and_fallback(client):
     letters = [(c["letter"], c["name"]) for c in data["list"]]
 
     assert letters == [("B", "白云"), ("C", "陈国斌"), ("#", "139****9515")]
+
+
+# ---------- 联系人档案（备注/标签） ----------
+
+
+def test_profile_default_empty(client):
+    """无档案记录时返回默认空值。"""
+    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+
+    assert data == {"remark": "", "tags": []}
+
+
+def test_profile_put_then_get(client):
+    """PUT 创建档案后 GET 可读回。"""
+    r = client.put("/api/contacts/wxid_a/profile", json={"remark": "月结客户", "tags": ["奔驰超豪", "月结"]})
+
+    assert r.get_json()["code"] == 0
+    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+
+    assert data == {"remark": "月结客户", "tags": ["奔驰超豪", "月结"]}
+
+
+def test_profile_put_updates_existing(client):
+    """重复 PUT 走更新而非新建。"""
+    client.put("/api/contacts/wxid_a/profile", json={"remark": "旧备注", "tags": ["a"]})
+    client.put("/api/contacts/wxid_a/profile", json={"remark": "新备注", "tags": ["a", "b"]})
+
+    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+
+    assert data["remark"] == "新备注"
+    assert data["tags"] == ["a", "b"]
+
+
+def test_profile_rejects_over_limits(client):
+    """备注超 100 字 / 标签超 10 个 / 单标签超 12 字均拒绝。"""
+    r1 = client.put("/api/contacts/wxid_a/profile", json={"remark": "x" * 101, "tags": []})
+    r2 = client.put("/api/contacts/wxid_b/profile", json={"remark": "", "tags": [f"t{i}" for i in range(11)]})
+    r3 = client.put("/api/contacts/wxid_c/profile", json={"remark": "", "tags": ["x" * 13]})
+
+    assert r1.get_json()["code"] == 400
+    assert r2.get_json()["code"] == 400
+    assert r3.get_json()["code"] == 400
+
+
+def test_profile_tags_dedupe_and_trim(client):
+    """标签自动去空白、去重、去空项。"""
+    client.put("/api/contacts/wxid_a/profile", json={"remark": "", "tags": [" 月结 ", "月结", "", "奔驰"]})
+
+    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+
+    assert data["tags"] == ["月结", "奔驰"]

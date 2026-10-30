@@ -3,6 +3,7 @@ from flask import Blueprint, jsonify, request
 from pypinyin import lazy_pinyin, Style
 
 from backend.extensions import db
+from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
 
 bp = Blueprint("contacts", __name__)
@@ -60,3 +61,43 @@ def _letter(text):
     tokens = lazy_pinyin(text, style=Style.FIRST_LETTER)
     ch = (tokens[0][:1] if tokens else text[:1]).upper()
     return ch if "A" <= ch <= "Z" else "#"
+
+
+# ---------- 联系人档案（备注/标签，业务自建，不写回微信） ----------
+
+
+@bp.get("/api/contacts/<wxid>/profile")
+def get_profile(wxid):
+    """联系人档案；无记录返回默认空值。"""
+    p = ContactProfile.query.filter_by(wxid=wxid).first()
+    return jsonify(code=0, msg="success", data=p.to_json() if p else {"remark": "", "tags": []})
+
+
+@bp.put("/api/contacts/<wxid>/profile")
+def put_profile(wxid):
+    """保存备注/标签（upsert）。校验超限，标签去重去空。"""
+    body = request.get_json(silent=True) or {}
+    remark = str(body.get("remark") or "").strip()
+
+    if len(remark) > ContactProfile.MAX_REMARK_LEN:
+        return jsonify(code=400, msg=f"备注不能超过 {ContactProfile.MAX_REMARK_LEN} 字"), 400
+
+    tags_in = body.get("tags") if isinstance(body.get("tags"), list) else []
+    tags = []
+    for t in tags_in:
+        t = str(t).strip()
+        if t and t not in tags:
+            tags.append(t)
+    if len(tags) > ContactProfile.MAX_TAGS:
+        return jsonify(code=400, msg=f"标签最多 {ContactProfile.MAX_TAGS} 个"), 400
+    if any(len(t) > ContactProfile.MAX_TAG_LEN for t in tags):
+        return jsonify(code=400, msg=f"单个标签不能超过 {ContactProfile.MAX_TAG_LEN} 字"), 400
+
+    p = ContactProfile.query.filter_by(wxid=wxid).first()
+    if p is None:
+        p = ContactProfile(wxid=wxid)
+        db.session.add(p)
+    p.remark = remark
+    p.tags = tags
+    db.session.commit()
+    return jsonify(code=0, msg="success", data=p.to_json())
