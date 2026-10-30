@@ -6,4 +6,5 @@ flask-sock>=0.7
 APScheduler>=3.10
 python-dotenv>=1.0
 requests>=2.31
+pypinyin>=0.51
 pytest>=8.0

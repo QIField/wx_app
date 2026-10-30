@@ -31,11 +31,13 @@ def create_app() -> Flask:
 
 
 def register_routes(app: Flask) -> None:
+    from backend.api.contacts import bp as contacts_bp
     from backend.api.conversations import bp as conversations_bp
     from backend.api.messages import bp as messages_bp
 
     app.register_blueprint(messages_bp)
     app.register_blueprint(conversations_bp)
+    app.register_blueprint(contacts_bp)
 
     import backend.ws.hub  # noqa: F401 注册 /ws WebSocket 路由
 
