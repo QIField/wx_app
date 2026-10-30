@@ -87,7 +87,6 @@ async function onSend() {
       <template v-if="chat.currentConv">
         <span class="peer">{{ chat.currentConv.name || chat.currentConv.wxid }}</span>
         <el-tag v-if="chat.currentConv.chat_type === 2" size="small" type="info" effect="plain">群聊</el-tag>
-        <span class="wxid num">{{ chat.currentConv.wxid }}</span>
       </template>
       <span v-else>选择左侧会话</span>
     </div>
@@ -152,7 +151,6 @@ async function onSend() {
   background: var(--c-panel);
 }
 .peer { font-weight: 600; font-size: 14px; }
-.wxid { font-size: 11px; color: var(--c-text-sub); }
 .scroll { flex: 1; background: var(--c-bg); }
 .tip { text-align: center; color: var(--c-text-sub); font-size: 12px; padding: 8px; }
 
