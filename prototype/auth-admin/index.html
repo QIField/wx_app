@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 · 微信客服系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="login-body">
+  <div class="login-wrap">
+
+    <!-- 左侧品牌区 -->
+    <section class="login-brand">
+      <div class="brand-row rise">
+        <div class="big-logo">微</div>
+        <div>
+          <div class="big-name">微信客服系统</div>
+          <div class="big-sub">WXCS · CUSTOMER SERVICE CONSOLE</div>
+        </div>
+      </div>
+      <h1 class="rise rise-1">消息自动同步，客服<em>只管对话</em></h1>
+      <p class="slogan rise rise-2">后端轮询中间方接口增量拉新消息，存库后经 WebSocket 实时推送到工作台；发送任务带状态确认，失败可追踪。</p>
+
+      <div class="feat-list">
+        <div class="feat rise rise-3">
+          <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span>
+          <div><b>增量轮询同步</b><span>游标式拉取新消息，断线自动重试</span></div>
+        </div>
+        <div class="feat rise rise-4">
+          <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg></span>
+          <div><b>实时 WebSocket 推送</b><span>新消息毫秒级到达三栏工作台</span></div>
+        </div>
+        <div class="feat rise rise-5">
+          <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <div><b>三级权限分级</b><span>开发者 › 管理员 › 客服，职责边界清晰</span></div>
+        </div>
+      </div>
+
+      <div class="login-meta rise rise-6">
+        <span class="m-chip num">v2.4.0</span>
+        <span class="m-chip num">ENV · DEV</span>
+        <span class="m-chip num">中间方接口 v1.3</span>
+      </div>
+    </section>
+
+    <!-- 右侧登录卡 -->
+    <section class="login-card rise rise-2" id="loginCard">
+      <div class="card-tag">
+        <h2>登录</h2>
+        <span class="latin">Sign in</span>
+      </div>
+      <p class="hint">使用管理员分配的账号登录，按角色进入对应工作台</p>
+
+      <form class="login-form" id="loginForm" novalidate>
+        <div class="field">
+          <label for="username">账号</label>
+          <div class="input-group">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+            <input class="input" id="username" type="text" placeholder="如：admin01" autocomplete="username">
+          </div>
+        </div>
+        <div class="field">
+          <label for="password">密码</label>
+          <div class="input-group">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg></span>
+            <input class="input" id="password" type="password" placeholder="演示密码统一 123456" autocomplete="current-password">
+            <button type="button" class="icon-btn eye-btn" id="eyeBtn" aria-label="显示或隐藏密码">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-err" id="formErr">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <span id="formErrMsg">账号或密码错误</span>
+        </div>
+
+        <button class="btn btn-primary btn-block" id="submitBtn" type="submit">登 录</button>
+      </form>
+
+      <div class="login-div">演示账号 · 点击填充</div>
+      <div class="demo-accounts" id="demoAccounts"></div>
+
+      <p class="login-foot num">WXCS v2.4.0 · DEV · 本原型数据均为模拟</p>
+    </section>
+  </div>
+
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script>
+    // ===== 登录页逻辑（登录走 apiLogin 桩；成功后按角色路由） =====
+    (function () {
+      // 已登录直接进入对应界面
+      try {
+        const saved = JSON.parse(sessionStorage.getItem('wxcs_user'));
+        if (saved && saved.role) {
+          location.replace(saved.role === 'agent' ? '../contacts/index.html' : 'dashboard.html');
+          return;
+        }
+      } catch (e) { /* ignore */ }
+
+      const demo = [
+        { username: 'dev',     name: '陈屿',   role: 'developer', desc: '开发者 · 最高权限，可进管理后台' },
+        { username: 'admin01', name: '林晚',   role: 'admin',     desc: '管理员 · 账号 / 会话 / 日志' },
+        { username: 'cs01',    name: '苏小棠', role: 'agent',     desc: '客服 · 登录后直接进入消息工作台' },
+      ];
+      const $ = (s) => document.querySelector(s);
+      const form = $('#loginForm');
+      const err = $('#formErr');
+      const errMsg = $('#formErrMsg');
+      const btn = $('#submitBtn');
+
+      // 演示账号快捷填充
+      $('#demoAccounts').innerHTML = demo.map((d) => `
+        <button type="button" class="demo-acc" data-u="${d.username}">
+          <span class="avatar">${d.name.slice(0, 1)}</span>
+          <span class="acc-info"><b>${d.name}</b><span>${d.desc}</span></span>
+          <span class="acc-user">${d.username}</span>
+        </button>`).join('');
+      $('#demoAccounts').addEventListener('click', (e) => {
+        const item = e.target.closest('.demo-acc');
+        if (!item) return;
+        $('#username').value = item.dataset.u;
+        $('#password').value = '123456';
+        err.classList.remove('show');
+        $('#username').focus();
+      });
+
+      // 密码可见切换
+      $('#eyeBtn').addEventListener('click', () => {
+        const p = $('#password');
+        p.type = p.type === 'password' ? 'text' : 'password';
+      });
+
+      function setErr(msg) {
+        errMsg.textContent = msg;
+        err.classList.add('show');
+        $('#loginCard').classList.remove('shake');
+        void $('#loginCard').offsetWidth; // 重触发动画
+        $('#loginCard').classList.add('shake');
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = $('#username').value.trim();
+        const password = $('#password').value;
+        if (!username || !password) { setErr('请输入账号和密码'); return; }
+
+        err.classList.remove('show');
+        btn.classList.add('loading');
+        btn.disabled = true;
+        try {
+          const res = await apiLogin({ username, password }); // TODO: 换成真实 /api/auth/login
+          Auth.save(res.user);
+          // 角色路由：客服 → 消息工作台；开发者/管理员 → 管理后台
+          location.replace(res.user.role === 'agent' ? '../contacts/index.html' : 'dashboard.html');
+        } catch (ex) {
+          setErr(ex.message || '登录失败，请重试');
+          btn.classList.remove('loading');
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

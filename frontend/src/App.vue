@@ -1,12 +1,16 @@
 <script setup>
-/** 三栏工作台：深色顶栏 + 会话列表 / 聊天窗 / 报价处理台（可收起、可拖宽）。 */
+/** 三栏工作台：深色顶栏 + 会话列表/通讯录（切换）/ 聊天窗 / 报价处理台（可收起、可拖宽）。 */
 import { onMounted, ref } from 'vue'
 import { useChatStore } from './stores/chat'
 import ConvList from './components/ConvList.vue'
+import ContactsPanel from './components/ContactsPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
+import ContactDetail from './components/ContactDetail.vue'
 import InfoPanel from './components/InfoPanel.vue'
 
 const chat = useChatStore()
+
+const activeView = ref('chat') // chat | contacts
 
 const infoOpen = ref(true)
 const infoW = ref(316)
@@ -50,8 +54,20 @@ onMounted(async () => {
     </header>
 
     <div class="layout">
-      <aside class="col-side"><ConvList /></aside>
-      <main class="col-main"><ChatPanel /></main>
+      <aside class="col-side">
+        <div class="view-tabs">
+          <button :class="{ on: activeView === 'chat' }" @click="activeView = 'chat'">会话</button>
+          <button :class="{ on: activeView === 'contacts' }" @click="activeView = 'contacts'">通讯录</button>
+        </div>
+        <div class="view-body">
+          <ConvList v-if="activeView === 'chat'" />
+          <ContactsPanel v-else />
+        </div>
+      </aside>
+      <main class="col-main">
+        <ChatPanel v-if="activeView === 'chat'" />
+        <ContactDetail v-else @enter-chat="activeView = 'chat'" />
+      </main>
       <aside v-if="infoOpen" class="col-info" :style="{ width: infoW + 'px' }">
         <div class="info-resizer" title="拖拽调整宽度" @mousedown.prevent="onResizeDown"><i></i></div>
         <InfoPanel />
@@ -124,7 +140,35 @@ onMounted(async () => {
   box-shadow: var(--shadow-card);
   overflow: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
 }
+
+/* 左栏顶部：会话 | 通讯录 切换 */
+.view-tabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--c-border);
+}
+.view-tabs button {
+  flex: 1;
+  padding: 9px 0;
+  font-size: 13px;
+  color: var(--c-text-sub);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.view-tabs button:hover { color: var(--c-text); }
+.view-tabs button.on {
+  color: var(--c-primary);
+  font-weight: 600;
+  border-bottom-color: var(--c-primary);
+}
+.view-body { flex: 1; min-height: 0; }
+
 .col-main {
   flex: 1;
   background: var(--c-panel);

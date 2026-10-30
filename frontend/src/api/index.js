@@ -27,6 +27,10 @@ export const sendTextMessage = (convId, content) =>
     payload: {},
   })
 
+/** 通讯录：好友/群列表（type: friends | groups，keyword 可选）。 */
+export const fetchContacts = (type, keyword) =>
+  http.get('/contacts', { params: { type, keyword: keyword || undefined } })
+
 /** WebSocket 长连接：收到推送回调 onEvent(event, data)。 */
 export function connectWs(onEvent) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'

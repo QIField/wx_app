@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>权限管理 · 微信客服系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="roles">
+  <div class="frame">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">微</div>
+        <div class="brand-text">
+          <span class="name">微信客服系统</span>
+          <span class="sub">WXCS ADMIN CONSOLE</span>
+        </div>
+      </div>
+      <div class="right">
+        <span class="env-chip num">DEV</span>
+        <span class="status hide-sm"><span class="dot"></span>中间方已连接</span>
+        <div class="user-chip">
+          <div class="user-avatar num" id="ucAvatar">—</div>
+          <div class="user-meta">
+            <span class="user-name" id="ucName">—</span>
+            <span class="user-role" id="ucRole">—</span>
+          </div>
+          <button class="icon-btn" id="ucLogout" title="退出登录" aria-label="退出登录">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <div class="layout">
+      <aside class="app-side">
+        <nav class="app-nav">
+          <div class="nav-label">管理后台</div>
+          <a class="nav-item" data-nav="dashboard" data-roles="developer,admin" href="dashboard.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span><span class="nav-text">总览</span>
+          </a>
+          <a class="nav-item" data-nav="accounts" data-roles="developer,admin" href="accounts.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-text">账号管理</span>
+          </a>
+          <a class="nav-item" data-nav="roles" data-roles="developer,admin" href="roles.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="nav-text">权限管理</span>
+          </a>
+          <a class="nav-item" data-nav="logs" data-roles="developer,admin" href="logs.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span><span class="nav-text">操作日志</span>
+          </a>
+          <div class="nav-label">快捷入口</div>
+          <a class="nav-item" data-nav="workbench" href="../contacts/index.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg></span><span class="nav-text">消息工作台</span>
+          </a>
+        </nav>
+        <div class="nav-foot num">WXCS v2.4.0</div>
+      </aside>
+      <main class="app-content">
+        <div class="page-head rise">
+          <div>
+            <h1>权限管理</h1>
+            <div class="desc">三级权限：开发者 › 管理员 › 客服，上层权限包含下层全部能力</div>
+          </div>
+          <div class="page-actions" id="headWarn"></div>
+        </div>
+
+        <div class="role-cards rise rise-1">
+          <div class="card role-card rc-dev">
+            <div class="rc-top"><h3>开发者</h3><span class="rc-rank">L1 · 最高权限</span></div>
+            <div class="rc-count" id="cntDeveloper">—<small> 人</small></div>
+            <p>系统与接口的最终责任人：中间方密钥、同步任务、权限矩阵、全部账号</p>
+          </div>
+          <div class="hier-arrow">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+          <div class="card role-card rc-adm">
+            <div class="rc-top"><h3>管理员</h3><span class="rc-rank">L2 · 中层管理</span></div>
+            <div class="rc-count" id="cntAdmin">—<small> 人</small></div>
+            <p>运营与调度：客服账号、会话分配、日志审计与数据导出</p>
+          </div>
+          <div class="hier-arrow">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+          <div class="card role-card rc-agt">
+            <div class="rc-top"><h3>客服</h3><span class="rc-rank">L3 · 一线执行</span></div>
+            <div class="rc-count" id="cntAgent">—<small> 人</small></div>
+            <p>消息工作台：收发消息、维护客户电话/城市/标签/备注</p>
+          </div>
+        </div>
+
+        <div class="card rise rise-2">
+          <div class="card-head">
+            <div class="card-title">
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span>
+              功能权限矩阵
+            </div>
+            <div id="permActions" style="display:none;gap:8px;">
+              <button type="button" class="btn btn-primary btn-sm" id="btnSavePerms">保存修改</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnDiscardPerms">放弃</button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th>功能</th>
+                  <th>权限键</th>
+                  <th style="text-align:center;">开发者</th>
+                  <th style="text-align:center;">管理员</th>
+                  <th style="text-align:center;">客服</th>
+                </tr>
+              </thead>
+              <tbody id="permTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+  <script>
+  // ===== 权限管理页逻辑：角色层级统计 / 权限矩阵查看与编辑（开发者专属） =====
+  (function () {
+    const me = Auth.require(['developer', 'admin']);
+    if (!me) return;
+
+    const $ = (s) => document.querySelector(s);
+    const state = { perms: null, dirty: false };
+    const permTbody = $('#permTbody');
+    const permActions = $('#permActions');
+    const btnSave = $('#btnSavePerms');
+    const btnDiscard = $('#btnDiscardPerms');
+
+    // 编辑规则：仅开发者可改矩阵；管理员只读
+    const canEdit = me.role === 'developer';
+
+    // 管理员视角：页头提示（开发者隐藏）
+    if (me.role === 'admin') {
+      $('#headWarn').innerHTML = '<span class="tag tag-warn">权限矩阵为开发者专属编辑</span>';
+    }
+
+    // 角色人数（DB.users 实时统计）
+    const cnt = (r) => DB.users.filter((u) => u.role === r).length;
+    $('#cntDeveloper').innerHTML = `${cnt('developer')}<small> 人</small>`;
+    $('#cntAdmin').innerHTML = `${cnt('admin')}<small> 人</small>`;
+    $('#cntAgent').innerHTML = `${cnt('agent')}<small> 人</small>`;
+
+    /* ===== 骨架 ===== */
+    function renderSkeleton() {
+      permTbody.innerHTML = Array.from({ length: 6 }, () =>
+        '<tr>' +
+        '<td><div class="skeleton" style="width:150px;height:12px"></div></td>' +
+        '<td><div class="skeleton" style="width:96px;height:12px"></div></td>' +
+        Array.from({ length: 3 }, () => '<td class="perm-cell"><div class="skeleton" style="width:16px;height:16px"></div></td>').join('') +
+        '</tr>'
+      ).join('');
+    }
+
+    /* ===== 矩阵渲染（按 group 分组，一次渲染） ===== */
+    function renderMatrix() {
+      let lastGroup = null;
+      permTbody.innerHTML = state.perms.map((p) => {
+        const groupRow = p.group !== lastGroup
+          ? `<tr class="perm-group-row"><td colspan="5">${p.group}</td></tr>`
+          : '';
+        lastGroup = p.group;
+        const cells = ['developer', 'admin', 'agent'].map((r) =>
+          `<td class="perm-cell"><input type="checkbox" class="chk"${p.roles[r] ? ' checked' : ''} data-key="${p.key}" data-role="${r}"${canEdit ? '' : ' disabled'}></td>`
+        ).join('');
+        return `${groupRow}
+          <tr>
+            <td class="perm-name"><b>${p.name}</b><span>${p.desc}</span></td>
+            <td class="perm-key">${p.key}</td>
+            ${cells}
+          </tr>`;
+      }).join('');
+    }
+
+    /* ===== dirty 状态：控制保存/放弃按钮显隐 ===== */
+    function setDirty(v) {
+      state.dirty = v;
+      permActions.style.display = (canEdit && v) ? 'flex' : 'none';
+    }
+
+    // 勾选变更：更新本地副本 + 标记 dirty（事件委托）
+    permTbody.addEventListener('change', (e) => {
+      const chk = e.target.closest('input.chk');
+      if (!chk || chk.disabled) return;
+      const p = state.perms.find((x) => x.key === chk.dataset.key);
+      if (!p) return;
+      p.roles[chk.dataset.role] = chk.checked;
+      setDirty(true);
+    });
+
+    // 保存：loading → apiSavePermissions → toast → 刷新
+    btnSave.addEventListener('click', async () => {
+      btnSave.classList.add('loading');
+      try {
+        state.perms = await apiSavePermissions(state.perms);
+        setDirty(false);
+        renderMatrix();
+        toast('权限矩阵已保存并即时生效（演示）');
+      } catch (ex) {
+        toast(ex.message || '保存失败，请重试', 'danger');
+      }
+      btnSave.classList.remove('loading');
+    });
+
+    // 放弃：还原为 DB 数据
+    btnDiscard.addEventListener('click', async () => {
+      state.perms = await apiFetchPermissions();
+      setDirty(false);
+      renderMatrix();
+      toast('已放弃修改，矩阵已还原（演示）', 'info');
+    });
+
+    /* ===== 数据流：骨架 → await api → 渲染 ===== */
+    renderSkeleton();
+    (async () => {
+      state.perms = await apiFetchPermissions();
+      renderMatrix();
+    })();
+  })();
+  </script>
+</body>
+</html>

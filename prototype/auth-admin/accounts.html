@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>账号管理 · 微信客服系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="accounts">
+  <div class="frame">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">微</div>
+        <div class="brand-text">
+          <span class="name">微信客服系统</span>
+          <span class="sub">WXCS ADMIN CONSOLE</span>
+        </div>
+      </div>
+      <div class="right">
+        <span class="env-chip num">DEV</span>
+        <span class="status hide-sm"><span class="dot"></span>中间方已连接</span>
+        <div class="user-chip">
+          <div class="user-avatar num" id="ucAvatar">—</div>
+          <div class="user-meta">
+            <span class="user-name" id="ucName">—</span>
+            <span class="user-role" id="ucRole">—</span>
+          </div>
+          <button class="icon-btn" id="ucLogout" title="退出登录" aria-label="退出登录">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <div class="layout">
+      <aside class="app-side">
+        <nav class="app-nav">
+          <div class="nav-label">管理后台</div>
+          <a class="nav-item" data-nav="dashboard" data-roles="developer,admin" href="dashboard.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span><span class="nav-text">总览</span>
+          </a>
+          <a class="nav-item" data-nav="accounts" data-roles="developer,admin" href="accounts.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-text">账号管理</span>
+          </a>
+          <a class="nav-item" data-nav="roles" data-roles="developer,admin" href="roles.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="nav-text">权限管理</span>
+          </a>
+          <a class="nav-item" data-nav="logs" data-roles="developer,admin" href="logs.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span><span class="nav-text">操作日志</span>
+          </a>
+          <div class="nav-label">快捷入口</div>
+          <a class="nav-item" data-nav="workbench" href="../contacts/index.html">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg></span><span class="nav-text">消息工作台</span>
+          </a>
+        </nav>
+        <div class="nav-foot num">WXCS v2.4.0</div>
+      </aside>
+      <main class="app-content">
+        <div class="page-head rise">
+          <div>
+            <h1>账号管理</h1>
+            <div class="desc">客服与管理员账号的新增、启停用与角色分配<span id="descWarn"></span></div>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-primary" id="btnAdd">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><path d="M19 16v6"/><path d="M22 19h-6"/></svg>
+              新增账号
+            </button>
+          </div>
+        </div>
+
+        <div class="card rise rise-1" style="display:flex;align-items:center;gap:8px;padding:10px 14px;margin-bottom:10px;">
+          <div class="search">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
+            <input id="fltKw" type="text" placeholder="搜索账号 / 姓名">
+          </div>
+          <select class="select" id="fltRole" style="width:132px;flex:none;">
+            <option value="">全部角色</option>
+            <option value="developer">开发者</option>
+            <option value="admin">管理员</option>
+            <option value="agent">客服</option>
+          </select>
+          <select class="select" id="fltStatus" style="width:120px;flex:none;">
+            <option value="">全部状态</option>
+            <option value="active">启用</option>
+            <option value="disabled">停用</option>
+          </select>
+        </div>
+
+        <div class="card rise rise-2">
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th>登录账号</th>
+                  <th>成员</th>
+                  <th>角色</th>
+                  <th>手机号</th>
+                  <th>状态</th>
+                  <th>最近登录</th>
+                  <th style="text-align:right;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="userTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+  <script>
+  // ===== 账号管理页逻辑：列表/筛选/启停用/新增编辑/越权演示 =====
+  (function () {
+    const me = Auth.require(['developer', 'admin']);
+    if (!me) return;
+
+    const $ = (s) => document.querySelector(s);
+    const tbody = $('#userTbody');
+    const state = { list: [], editing: null, filter: { kw: '', role: '', status: '' } };
+
+    /* 内联图标（Lucide · 16px · stroke 2） */
+    const ICONS = {
+      pencil: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>',
+      key: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>',
+      users: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    };
+
+    /* ===== 越权门控（核心演示）：基于当前登录人 me ===== */
+    const isSelf = (u) => u.id === me.id;
+    const devLocked = (u) => me.role === 'admin' && u.role === 'developer';
+
+    // 管理员视角：页头追加提示标签
+    if (me.role === 'admin') {
+      $('#descWarn').innerHTML = ' <span class="tag tag-warn" style="margin-left:8px;">管理员不可修改开发者账号</span>';
+    }
+
+    /* ===== 骨架 ===== */
+    function renderSkeleton() {
+      const w = [96, 150, 56, 100, 66, 116, 64];
+      tbody.innerHTML = Array.from({ length: 6 }, () =>
+        '<tr>' + w.map((x) => `<td><div class="skeleton" style="width:${x}px;height:12px"></div></td>`).join('') + '</tr>'
+      ).join('');
+    }
+
+    /* ===== 表格渲染 ===== */
+    function rowHtml(u) {
+      const on = u.status === 'active';
+      const swLock = isSelf(u) || devLocked(u);
+      const opLock = devLocked(u);
+      const lockTip = '管理员无权操作开发者账号';
+      const swTitle = isSelf(u) ? '不能停用当前登录账号' : devLocked(u) ? lockTip : (on ? '点击停用该账号' : '点击启用该账号');
+      return `
+        <tr>
+          <td><div class="cell-main num">${u.username}</div><div class="cell-sub num">创建于 ${u.created}</div></td>
+          <td><div style="display:flex;align-items:center;gap:8px;"><span class="avatar sm">${u.name.slice(0, 1)}</span><div><div class="cell-main">${u.name}</div><div class="cell-sub">${u.dept}</div></div></div></td>
+          <td>${roleBadge(u.role)}</td>
+          <td class="num">${u.phone}</td>
+          <td><div style="display:flex;align-items:center;gap:8px;">
+            <button type="button" class="switch${on ? ' on' : ''}" data-id="${u.id}"${swLock ? ' disabled' : ''} title="${swTitle}"></button>
+            <span class="tag ${on ? 'tag-ok' : 'tag-gray'}">${on ? '启用' : '停用'}</span>
+          </div></td>
+          <td class="num">${u.last_login}</td>
+          <td><div class="ops">
+            <button type="button" class="icon-btn" data-act="edit" data-id="${u.id}"${opLock ? ' disabled' : ''} title="${opLock ? lockTip : '编辑账号'}">${ICONS.pencil}</button>
+            <button type="button" class="icon-btn" data-act="reset" data-id="${u.id}"${opLock ? ' disabled' : ''} title="${opLock ? lockTip : '重置为初始密码'}">${ICONS.key}</button>
+          </div></td>
+        </tr>`;
+    }
+
+    function renderTable() {
+      const f = state.filter;
+      const kw = f.kw.trim().toLowerCase();
+      const rows = state.list.filter((u) =>
+        (!f.role || u.role === f.role) &&
+        (!f.status || u.status === f.status) &&
+        (!kw || u.username.toLowerCase().includes(kw) || u.name.toLowerCase().includes(kw))
+      );
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7"><div class="empty">${ICONS.users}<span>没有符合条件的账号</span></div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map(rowHtml).join('');
+    }
+
+    /* ===== 新增 / 编辑弹窗 ===== */
+    const mask = $('#userModal');
+    const umTitle = $('#umTitle');
+    const umUsername = $('#umUsername');
+    const umName = $('#umName');
+    const umRole = $('#umRole');
+    const umDept = $('#umDept');
+    const umPhone = $('#umPhone');
+    const umPwdTip = $('#umPwdTip');
+    const umErr = $('#umErr');
+    const umErrMsg = $('#umErrMsg');
+    const umSave = $('#umSave');
+
+    function fillRoleOptions(current) {
+      // 越权演示：管理员的下拉里没有"开发者"这一项
+      const opts = me.role === 'developer'
+        ? [['developer', '开发者'], ['admin', '管理员'], ['agent', '客服']]
+        : [['admin', '管理员'], ['agent', '客服']];
+      umRole.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+      if (current) umRole.value = current;
+    }
+
+    function openModal(mode, u) {
+      state.editing = mode === 'edit' ? u : null;
+      umTitle.textContent = mode === 'edit' ? '编辑账号' : '新增账号';
+      umUsername.value = u ? u.username : '';
+      umUsername.disabled = mode === 'edit';
+      umName.value = u ? u.name : '';
+      fillRoleOptions(u ? u.role : 'agent');
+      umDept.value = u ? u.dept : '客服一组';
+      umPhone.value = u ? u.phone : '';
+      umPwdTip.style.display = mode === 'edit' ? 'none' : '';
+      umErr.classList.remove('show');
+      umUsername.classList.remove('invalid');
+      umName.classList.remove('invalid');
+      mask.classList.add('show');
+    }
+
+    function closeModal() {
+      mask.classList.remove('show');
+      state.editing = null;
+    }
+
+    $('#btnAdd').addEventListener('click', () => openModal('create'));
+    $('#umClose').addEventListener('click', closeModal);
+    $('#umCancel').addEventListener('click', closeModal);
+
+    // 必填校验：输入即清错
+    [umUsername, umName].forEach((el) => el.addEventListener('input', () => {
+      el.classList.remove('invalid');
+      umErr.classList.remove('show');
+    }));
+
+    umSave.addEventListener('click', async () => {
+      const username = umUsername.value.trim();
+      const name = umName.value.trim();
+      let bad = false;
+      if (!username) { umUsername.classList.add('invalid'); bad = true; }
+      if (!name) { umName.classList.add('invalid'); bad = true; }
+      if (bad) {
+        umErrMsg.textContent = '请填写登录账号与姓名';
+        umErr.classList.add('show');
+        return;
+      }
+      umErr.classList.remove('show');
+      umSave.classList.add('loading');
+      umSave.disabled = true;
+      try {
+        const payload = { name, role: umRole.value, dept: umDept.value, phone: umPhone.value.trim() };
+        if (state.editing) {
+          await apiUpdateUser(state.editing.id, payload);
+          toast(`已保存 ${name} 的账号信息（演示）`);
+        } else {
+          await apiCreateUser({ username, ...payload });
+          toast(`已新增账号 ${username}（演示）`);
+        }
+        closeModal();
+        state.list = await apiFetchUsers();
+        renderTable();
+      } catch (ex) {
+        umErrMsg.textContent = ex.message || '保存失败，请重试';
+        umErr.classList.add('show');
+      }
+      umSave.classList.remove('loading');
+      umSave.disabled = false;
+    });
+
+    /* ===== 表格交互（事件委托） ===== */
+    tbody.addEventListener('click', async (e) => {
+      // 启用 / 停用开关
+      const sw = e.target.closest('.switch');
+      if (sw) {
+        if (sw.disabled) return;
+        const id = Number(sw.dataset.id);
+        const u = state.list.find((x) => x.id === id);
+        if (!u) return;
+        const next = u.status === 'active' ? 'disabled' : 'active';
+        sw.disabled = true;
+        try {
+          await apiToggleUser(id, next);
+          u.status = next;
+          renderTable();
+          toast(`${next === 'active' ? '已启用' : '已停用'} ${u.username}（演示）`);
+        } catch (ex) {
+          sw.disabled = false;
+          toast(ex.message || '操作失败', 'danger');
+        }
+        return;
+      }
+      // 编辑 / 重置密码
+      const btn = e.target.closest('.icon-btn[data-act]');
+      if (!btn || btn.disabled) return;
+      const u = state.list.find((x) => x.id === Number(btn.dataset.id));
+      if (!u) return;
+      if (btn.dataset.act === 'edit') {
+        openModal('edit', u);
+      } else if (btn.dataset.act === 'reset') {
+        if (confirm(`确认将 ${u.username}（${u.name}）的密码重置为初始密码？`)) {
+          toast('已重置为初始密码 123456（演示）', 'info');
+        }
+      }
+    });
+
+    /* ===== 筛选（纯前端过滤已拉取列表） ===== */
+    $('#fltKw').addEventListener('input', (e) => { state.filter.kw = e.target.value; renderTable(); });
+    $('#fltRole').addEventListener('change', (e) => { state.filter.role = e.target.value; renderTable(); });
+    $('#fltStatus').addEventListener('change', (e) => { state.filter.status = e.target.value; renderTable(); });
+
+    /* ===== 数据流：骨架 → await api → 渲染 ===== */
+    renderSkeleton();
+    (async () => {
+      state.list = await apiFetchUsers();
+      renderTable();
+    })();
+  })();
+  </script>
+
+  <!-- 新增 / 编辑账号弹窗 -->
+  <div class="modal-mask" id="userModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="umTitle">新增账号</h3>
+        <button type="button" class="icon-btn" id="umClose" title="关闭" aria-label="关闭">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="umUsername">登录账号</label>
+          <input class="input" id="umUsername" type="text" placeholder="如：cs10">
+        </div>
+        <div class="field">
+          <label for="umName">姓名</label>
+          <input class="input" id="umName" type="text" placeholder="成员真实姓名">
+        </div>
+        <div class="field">
+          <label for="umRole">角色</label>
+          <select class="select" id="umRole"></select>
+        </div>
+        <div class="field">
+          <label for="umDept">所属部门</label>
+          <select class="select" id="umDept">
+            <option>技术部</option>
+            <option>客服中心 · 运营组</option>
+            <option>客服中心 · 质检组</option>
+            <option>客服一组</option>
+            <option>客服二组</option>
+            <option>客服三组</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="umPhone">手机号</label>
+          <input class="input num" id="umPhone" type="text" placeholder="138****2210">
+        </div>
+        <div id="umPwdTip" style="display:none;">
+          <span class="tag tag-gray">初始密码统一为 123456，首次登录建议修改</span>
+        </div>
+        <div class="form-err" id="umErr">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <span id="umErrMsg">请填写完整必填项</span>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" id="umCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="umSave">保存</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

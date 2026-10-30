@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>通讯录 · 微信客服工作台（原型）</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- App Shell：顶栏与工作台 App.vue 完全一致，便于后续无缝并入 -->
+  <div class="frame">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">微</span>
+        <div class="brand-text">
+          <span class="name">微信客服工作台</span>
+          <span class="sub num">WX-DESK v0.1</span>
+        </div>
+      </div>
+      <div class="right">
+        <span class="env-chip">演示数据</span>
+        <span class="status"><span class="dot"></span>设备在线</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- 左栏：通讯录（好友 / 群聊 + 搜索） -->
+      <aside class="col-side">
+        <div class="contacts">
+          <div class="head">
+            <span class="title">通讯录</span>
+            <span class="path num">CONTACTS</span>
+          </div>
+
+          <div class="tabs" id="tabs">
+            <button class="tab on" data-tab="friends" type="button">
+              好友 <em class="num" id="cnt-friends">-</em>
+            </button>
+            <button class="tab" data-tab="groups" type="button">
+              群聊 <em class="num" id="cnt-groups">-</em>
+            </button>
+          </div>
+
+          <div class="search">
+            <span class="s-icon" id="icon-search"></span>
+            <input id="q" type="text" placeholder="搜索好友 / 群聊（按 / 聚焦）" autocomplete="off" />
+            <button id="q-clear" class="s-clear" title="清空" type="button" hidden></button>
+          </div>
+
+          <div class="cross-hint" id="cross-hint" hidden></div>
+
+          <div class="scroll" id="list"></div>
+          <div class="footnote">演示数据 · 后端接口后续接入</div>
+        </div>
+      </aside>
+
+      <!-- 中栏：资料详情 -->
+      <main class="col-main" id="detail"></main>
+    </div>
+  </div>
+
+  <div class="toast num" id="toast" hidden></div>
+
+  <script src="./mock.js"></script>
+  <script src="./api.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
