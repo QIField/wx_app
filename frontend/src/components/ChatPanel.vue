@@ -106,7 +106,7 @@ async function onSend() {
             <div class="body">
               <div class="name">{{ nameOf(row) }}</div>
               <div class="bubble">
-                <div v-if="row.msg_type === 2" class="img-ph">图片 {{ row.content }}</div>
+                <div v-if="row.msg_type === 2" class="img-ph">[图片消息]</div>
                 <div v-else-if="row.msg_type !== 1" class="content type-label">{{ TYPE_LABEL[row.msg_type] || '[未知类型]' }}</div>
                 <div v-else class="content">{{ row.content }}</div>
                 <div class="meta">
