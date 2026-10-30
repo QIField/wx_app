@@ -11,6 +11,8 @@ from backend.models.conversation import Conversation
 from backend.ws.hub import broadcast
 
 MAX_GROUPS_PER_ROUND = 10     # 每轮最多解析 10 个群名（10 分钟一轮，频率极低打不爆）
+QUERY_RETRY = 5               # 下发后结果不是立即生成，查询重试次数
+QUERY_WAIT_SECONDS = 2        # 每次重试间隔（实测约 4 秒内出结果）
 MAX_FAIL_RETRY = 3            # 同一个 wxid 连续失败 3 次后放弃（进程重启清零）
 FRIEND_BATCH = 20             # brief_info 单次最多 20 个 wxid（文档约定）
 
@@ -40,7 +42,12 @@ def _unnamed_groups():
             Conversation.chat_type == Conversation.CHAT_GROUP,
             db.or_(Conversation.name.is_(None), Conversation.name == Conversation.wxid),
         )
-        .order_by(Conversation.last_msg_at.desc().nullslast(), Conversation.id)
+        # MySQL 5.7 不支持 NULLS LAST，用 IS NULL 布尔排序两端方言通吃（空值排最后）
+        .order_by(
+            Conversation.last_msg_at.is_(None),
+            Conversation.last_msg_at.desc(),
+            Conversation.id,
+        )
         .limit(MAX_GROUPS_PER_ROUND)
         .all()
     )
@@ -72,19 +79,24 @@ def _new_task_uuid():
 
 
 def _query_record(module, get_action, task_uuid):
-    """查询下发结果，返回本 uuid 对应的任务记录（找不到返回 None）。
+    """查询下发结果，返回本 uuid 对应的任务记录（超时没出结果返回 None）。
 
-    实测（2026-10-29）：data 是任务记录数组，每条含 uuid + processing_result。
+    实测（2026-10-29）：data 是任务记录数组，每条含 uuid + processing_result；
+    结果不是立即生成（约 4 秒内），所以带间隔重试。
     """
-    body = client.call(module, get_action, {}, uuid=task_uuid)
-    rows = body.get("data") if isinstance(body, dict) else None
-    if isinstance(rows, dict):
-        rows = rows.get("list") or []
-    if not isinstance(rows, list):
-        return None
-    for row in rows:
-        if isinstance(row, dict) and row.get("uuid") == task_uuid:
-            return row
+    import time
+
+    for i in range(QUERY_RETRY):
+        body = client.call(module, get_action, {}, uuid=task_uuid)
+        rows = body.get("data") if isinstance(body, dict) else None
+        if isinstance(rows, dict):
+            rows = rows.get("list") or []
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict) and row.get("uuid") == task_uuid:
+                    return row
+        if i < QUERY_RETRY - 1:
+            time.sleep(QUERY_WAIT_SECONDS)
     return None
 
 
