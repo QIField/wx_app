@@ -81,6 +81,14 @@ export const fetchConversations = () => http.get('/conversations')
 export const openConversation = (wxid, chatType) =>
   http.post('/conversations', { wxid, chat_type: chatType })
 
+/** 会话操作：置顶（{pinned:0|1}）/ 清未读（{read:true}）。 */
+export const updateConversation = (convId, payload) =>
+  http.patch(`/conversations/${convId}`, payload)
+
+/** 清零未读数（落库）：避免重拉列表时旧未读数把红点又盖回来。 */
+export const markConversationRead = (convId) =>
+  updateConversation(convId, { read: true })
+
 export const fetchMessages = (convId, beforeId) =>
   http.get(`/conversations/${convId}/messages`, {
     params: beforeId ? { before_id: beforeId } : {},

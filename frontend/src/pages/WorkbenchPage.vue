@@ -8,6 +8,7 @@ import ContactsPanel from '../components/ContactsPanel.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ContactDetail from '../components/ContactDetail.vue'
 import InfoPanel from '../components/InfoPanel.vue'
+import UnreadBadge from '../components/UnreadBadge.vue'
 
 const props = defineProps({
   me: { type: Object, required: true },
@@ -86,7 +87,7 @@ onMounted(async () => {
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
             </svg>
-            <span v-if="totalUnread" class="rail-badge num">{{ totalUnread > 99 ? '99+' : totalUnread }}</span>
+            <UnreadBadge :count="totalUnread" variant="rail" />
           </button>
           <button class="rail-btn" :class="{ on: activeView === 'contacts' }" title="通讯录" @click="activeView = 'contacts'">
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -211,14 +212,6 @@ onMounted(async () => {
 }
 .rail-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
 .rail-btn.on { background: var(--c-primary); color: #fff; }
-.rail-badge {
-  position: absolute; top: -4px; right: -4px;
-  min-width: 15px; height: 15px; padding: 0 3px;
-  border-radius: 8px; background: var(--c-danger); color: #fff;
-  font-size: 10px; line-height: 15px; text-align: center;
-  box-shadow: 0 0 0 2px var(--c-navy);
-}
-
 .col-main {
   flex: 1;
   background: var(--c-panel);

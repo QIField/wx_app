@@ -196,3 +196,50 @@ def test_open_conversation_validates_params(client):
     assert r1.status_code == 400
     assert r2.status_code == 400
     assert r3.status_code == 400
+
+
+# ---------- 会话操作（PATCH /api/conversations/{id}） ----------
+
+
+def test_patch_marks_read(client):
+    """read=true：未读数落库清零（否则重拉列表会把红点带回来）。"""
+    conv = make_conv(wxid="wxid_read", unread_count=5)
+
+    resp = client.patch(f"/api/conversations/{conv.id}", json={"read": True})
+    body = resp.get_json()
+
+    assert resp.status_code == 200
+    assert body["data"]["unread_count"] == 0
+    assert Conversation.query.filter_by(id=conv.id).one().unread_count == 0
+
+
+def test_patch_pins_and_read(client):
+    """置顶与清未读可以同时提交。"""
+    conv = make_conv(wxid="wxid_pin", unread_count=2)
+
+    data = client.patch(
+        f"/api/conversations/{conv.id}", json={"pinned": 1, "read": True}
+    ).get_json()["data"]
+
+    assert data["pinned"] == 1
+    assert Conversation.query.filter_by(id=conv.id).one().unread_count == 0
+
+
+def test_patch_conv_not_found(client):
+    """会话不存在/跨设备：404。"""
+    resp = client.patch("/api/conversations/999", json={"read": True})
+
+    assert resp.status_code == 404
+
+
+def test_patch_validates_params(client):
+    """空 body、非法 pinned、非法 read：400。"""
+    conv = make_conv(wxid="wxid_v", unread_count=1)
+
+    r1 = client.patch(f"/api/conversations/{conv.id}", json={})
+    r2 = client.patch(f"/api/conversations/{conv.id}", json={"pinned": 2})
+    r3 = client.patch(f"/api/conversations/{conv.id}", json={"read": "yes"})
+
+    assert r1.status_code == 400
+    assert r2.status_code == 400
+    assert r3.status_code == 400

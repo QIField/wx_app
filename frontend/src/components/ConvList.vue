@@ -1,6 +1,7 @@
 <script setup>
 /** 左栏：会话列表（紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。 */
 import { useChatStore } from '../stores/chat'
+import UnreadBadge from './UnreadBadge.vue'
 
 const chat = useChatStore()
 
@@ -19,7 +20,6 @@ function first(c) {
   <div class="conv-list">
     <div class="head">
       <span class="title">会话 <em class="num">{{ chat.conversations.length }}</em></span>
-      <el-button text size="small" @click="chat.loadConversations()">刷新</el-button>
     </div>
 
     <el-scrollbar class="scroll">
@@ -42,7 +42,7 @@ function first(c) {
             <span class="preview">{{ c.last_msg || '（暂无消息）' }}</span>
             <span class="flags">
               <span v-if="c.pinned" class="pin">置顶</span>
-              <span v-if="c.unread_count > 0" class="badge num">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</span>
+              <UnreadBadge :count="c.unread_count" />
             </span>
           </div>
         </div>
@@ -116,10 +116,5 @@ function first(c) {
   font-size: 10px; color: var(--c-primary);
   border: 1px solid var(--c-primary);
   border-radius: 3px; padding: 0 3px; line-height: 14px;
-}
-.badge {
-  min-width: 16px; height: 16px; padding: 0 4px;
-  border-radius: 8px; background: var(--c-danger); color: #fff;
-  font-size: 11px; line-height: 16px; text-align: center;
 }
 </style>

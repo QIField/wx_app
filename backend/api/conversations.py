@@ -90,6 +90,45 @@ def open_conversation():
     return jsonify(code=0, msg="success", data=_conv_json(conv))
 
 
+@bp.patch("/api/conversations/<int:conversation_id>")
+@require_role()
+def update_conversation(conversation_id):
+    """会话操作：置顶 / 清未读。
+
+    body: {"pinned": 0|1} 和/或 {"read": true}；read=true 清零未读数。
+    未读必须落库，否则重拉列表会把旧的未读数盖回来（前端红点反复出现）。
+    """
+    conv = _my_conversation(conversation_id)
+    if conv is None:
+        return jsonify(code=404, msg="会话不存在"), 404
+
+    body = request.get_json(silent=True) or {}
+    changed = False
+
+    if "pinned" in body:
+        try:
+            pinned = int(body["pinned"])
+        except (TypeError, ValueError):
+            pinned = -1
+        if pinned not in (0, 1):
+            return jsonify(code=400, msg="pinned 仅支持 0/1"), 400
+        conv.pinned = pinned
+        changed = True
+
+    if "read" in body:
+        if not isinstance(body["read"], bool):
+            return jsonify(code=400, msg="read 仅支持 true/false"), 400
+        if body["read"]:
+            conv.unread_count = 0
+            changed = True
+
+    if not changed:
+        return jsonify(code=400, msg="没有可更新的字段"), 400
+
+    db.session.commit()
+    return jsonify(code=0, msg="success", data=_conv_json(conv))
+
+
 @bp.get("/api/conversations/<int:conversation_id>/messages")
 @require_role()
 def list_messages(conversation_id):

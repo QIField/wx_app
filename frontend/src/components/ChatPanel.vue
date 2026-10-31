@@ -111,7 +111,8 @@ async function onReEdit(content) {
 </script>
 
 <template>
-  <div class="chat">
+  <!-- 鼠标在会话窗口内任意位置按下即算已读（含标题栏、消息区、空白、输入框、拖拽条） -->
+  <div class="chat" @mousedown="chat.markCurrentRead()">
     <div class="head">
       <template v-if="chat.currentConv">
         <span class="peer">{{ chat.currentConv.name || chat.currentConv.wxid }}</span>

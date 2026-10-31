@@ -1,6 +1,14 @@
 /** 聊天共享状态（Pinia）：会话列表、当前会话、消息、WebSocket 事件分发。 */
 import { defineStore } from 'pinia'
-import { connectWs, fetchConversations, fetchMessages, openConversation, sendTextMessage } from '../api'
+import { connectWs, fetchConversations, fetchMessages, markConversationRead, openConversation, sendTextMessage } from '../api'
+
+/** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
+function nowStamp() {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+    + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -18,6 +26,7 @@ export const useChatStore = defineStore('chat', {
 
   actions: {
     async loadConversations() {
+      // 未读一律以后端为准：不因"正在打开"而清除，只有用户点击会话窗口内容才算已读
       this.conversations = await fetchConversations()
     },
 
@@ -36,8 +45,8 @@ export const useChatStore = defineStore('chat', {
 
     async selectConversation(id) {
       this.currentId = id
-      const conv = this.conversations.find((c) => c.id === id)
-      if (conv) conv.unread_count = 0 // 打开即清未读
+      // 点列表选择会话也标记已读：红点立即消失并落库（点击会话窗口内容同样清零）
+      this.markCurrentRead()
 
       // 先清残留再拉数据：面板立刻切骨架屏，避免旧会话消息撑到新数据到达才被替换
       this.currentMessages = []
@@ -51,6 +60,14 @@ export const useChatStore = defineStore('chat', {
       } finally {
         this.loadingMessages = false
       }
+    },
+
+    /** 用户点击了会话窗口范围内的内容：当前会话才算已读（本地清零并落库）。 */
+    markCurrentRead() {
+      const conv = this.currentConv
+      if (!conv || !conv.unread_count) return
+      conv.unread_count = 0
+      markConversationRead(conv.id).catch(() => {})
     },
 
     /** 往前翻更早的记录（滚动到顶时调）。 */
@@ -87,7 +104,23 @@ export const useChatStore = defineStore('chat', {
         })
       }
       const conv = this.conversations.find((c) => c.id === convId)
-      if (conv) conv.last_msg = content
+      if (conv) {
+        conv.last_msg = content
+        conv.last_msg_at = nowStamp() // 自己发的消息也按最后消息时间置顶
+        this.sortConversations()
+      }
+    },
+
+    /** 按后端同一规则重排：置顶优先，其余按最后消息时间倒序（无时间排最后）。 */
+    sortConversations() {
+      this.conversations.sort((a, b) => {
+        const pa = a.pinned || 0
+        const pb = b.pinned || 0
+        if (pa !== pb) return pb - pa
+        const ta = a.last_msg_at || ''
+        const tb = b.last_msg_at || ''
+        return ta < tb ? 1 : ta > tb ? -1 : 0
+      })
     },
 
     /** 连接 WebSocket 并分发推送。 */
@@ -117,7 +150,9 @@ export const useChatStore = defineStore('chat', {
         const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
         conv.last_msg = d.payload?.system || isXml ? '[系统消息]' : d.content
         conv.last_msg_at = d.create_time
-        if (d.conversation_id !== this.currentId) conv.unread_count += 1
+        // 打开着的会话同样累计未读：只有用户点击会话窗口内容才清零
+        if (d.direction === 1) conv.unread_count = (conv.unread_count || 0) + 1
+        this.sortConversations() // 新消息必须置顶（置顶会话除外，按时间倒序）
       } else {
         this.loadConversations() // 新联系人的会话不在列表里，重拉
       }

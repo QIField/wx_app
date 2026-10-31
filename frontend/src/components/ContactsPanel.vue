@@ -3,6 +3,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useContactsStore } from '../stores/contacts'
 import { fmtTime, highlight } from '../utils/format'
+import UnreadBadge from './UnreadBadge.vue'
 
 const contacts = useContactsStore()
 const qInput = ref(null)
@@ -126,7 +127,7 @@ function isSelected(type, id) {
               </div>
               <div class="row2">
                 <span class="preview num" v-html="highlight(c.wxid, contacts.keyword)"></span>
-                <span v-if="c.unread_count > 0" class="badge num">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</span>
+                <UnreadBadge :count="c.unread_count" />
               </div>
             </div>
           </div>
@@ -155,7 +156,7 @@ function isSelected(type, id) {
             </div>
             <div class="row2">
               <span class="preview num" v-html="highlight(c.wxid, contacts.keyword)"></span>
-              <span v-if="c.unread_count > 0" class="badge num">{{ c.unread_count > 99 ? '99+' : c.unread_count }}</span>
+              <UnreadBadge :count="c.unread_count" />
             </div>
           </div>
         </div>
@@ -302,11 +303,6 @@ function isSelected(type, id) {
   font-size: 10px; color: var(--c-primary);
   border: 1px solid var(--c-primary);
   border-radius: 3px; padding: 0 3px; line-height: 14px;
-}
-.badge {
-  min-width: 16px; height: 16px; padding: 0 4px;
-  border-radius: 8px; background: var(--c-danger); color: #fff;
-  font-size: 11px; line-height: 16px; text-align: center;
 }
 
 /* 骨架屏 */
