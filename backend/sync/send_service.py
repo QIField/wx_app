@@ -5,6 +5,7 @@
   → 调中间方 post_xxx → 成功：task=已下发
                       → 失败：task=失败 + message=失败，抛 SendDispatchError
 """
+from datetime import datetime
 from uuid import uuid4
 
 from flask import abort
@@ -14,6 +15,7 @@ from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.send_task import SendTask
+from backend.sync.message_sync import _short_summary  # 收发共用同一套摘要规则
 
 
 class SendDispatchError(Exception):
@@ -130,6 +132,10 @@ def send_message(conversation_id, msg_type, content, payload):
         msg.status = Message.ST_FAILED
         db.session.commit()
         raise SendDispatchError(str(exc)) from exc
+
+    # 下发成功才刷新会话摘要（失败时预览不动，避免误导已发出）
+    conv.last_msg = _short_summary(msg_type, content)
+    conv.last_msg_at = datetime.now()
 
     db.session.commit()
     return msg

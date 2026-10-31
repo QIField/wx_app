@@ -50,6 +50,39 @@ def test_send_link_ok(app, conversation, monkeypatch):
     assert msg.content == "宝马320报价"  # 摘要取 title
 
 
+def test_send_refreshes_conversation_summary(app, conversation, monkeypatch):
+    """发送成功后会话摘要更新为刚发的内容；非文本显示标签。"""
+    monkeypatch.setattr(
+        send_service.middle_sender, "post_text",
+        lambda *a, **k: {"code": 0, "msg": "success"},
+    )
+    send_service.send_message(conversation.id, Message.MSG_TEXT, "好的马上安排", {})
+    assert conversation.last_msg == "好的马上安排"
+    assert conversation.last_msg_at is not None
+
+    monkeypatch.setattr(
+        send_service.middle_sender, "post_image",
+        lambda *a, **k: {"code": 0, "msg": "success"},
+    )
+    send_service.send_message(conversation.id, Message.MSG_IMAGE, "", {"img_url": "https://x/1.png"})
+    assert conversation.last_msg == "[图片]"
+
+
+def test_send_fail_keeps_conversation_summary(app, conversation, monkeypatch):
+    """下发失败时会话摘要保持原样（预览不动）。"""
+    conversation.last_msg = "旧消息"
+    db.session.commit()
+
+    def boom(**kwargs):
+        raise ConnectionError("网络断了")
+
+    monkeypatch.setattr(send_service.middle_sender, "post_text", boom)
+    with pytest.raises(SendDispatchError):
+        send_service.send_message(conversation.id, Message.MSG_TEXT, "hi", {})
+
+    assert conversation.last_msg == "旧消息"
+
+
 def test_send_dispatch_fail_marks_failed(app, conversation, monkeypatch):
     """下发失败：task=失败、message=失败，并抛 SendDispatchError。"""
 
