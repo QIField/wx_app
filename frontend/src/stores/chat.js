@@ -39,6 +39,10 @@ export const useChatStore = defineStore('chat', {
       const conv = this.conversations.find((c) => c.id === id)
       if (conv) conv.unread_count = 0 // 打开即清未读
 
+      // 先清残留再拉数据：面板立刻切骨架屏，避免旧会话消息撑到新数据到达才被替换
+      this.currentMessages = []
+      this.hasMore = false
+
       this.loadingMessages = true
       try {
         const data = await fetchMessages(id)

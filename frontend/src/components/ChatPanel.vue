@@ -12,6 +12,9 @@ const composerEl = ref(null)
 const composerH = ref(52)
 const previewUrl = ref('') // 图片全屏预览地址
 
+/* 骨架屏气泡宽度序列（错落更像真实对话） */
+const SK = [200, 128, 168, 224, 96, 176]
+
 /* 顶部拖拽拉伸：按住输入框上边缘上下拖，向上拖=变高 */
 let drag = null
 function onGrabDown(e) {
@@ -47,7 +50,21 @@ function stickBottom() {
   if (w) w.scrollTop = w.scrollHeight
 }
 
-/* 切会话→定位到最新一条；追加新消息→跟到底；上翻加载旧消息→保持视野不动。
+/* 是否贴在底部（±120px 容差）：媒体异步加载撑高时，只有贴底才重新锚定 */
+let nearBottom = true
+function maybeStickBottom() {
+  if (nearBottom) stickBottom()
+}
+
+function onScroll({ scrollTop }) {
+  if (scrollTop === 0) chat.loadOlderMessages()
+  const w = scroller.value?.wrapRef
+  if (w) nearBottom = w.scrollHeight - scrollTop - w.clientHeight < 120
+}
+
+/* 媒体加载完成由 MessageRow emit mediaload 通知，贴底锚定见 maybeStickBottom */
+
+/* 切会话→定位到最新一条；追加新消息→贴底才跟随；上翻加载旧消息→保持视野不动。
    监听数组引用而非仅长度：切会话时新旧消息数量常相同，只看长度不会触发。
    flush 默认 pre：DOM 更新前先量旧高度，供加载旧消息后做高度补偿。 */
 watch(
@@ -60,8 +77,9 @@ watch(
     const appended =
       !switched && msgs[msgs.length - 1]?.id !== prevMsgs?.[prevMsgs.length - 1]?.id
     if (switched || appended) {
+      if (switched) nearBottom = true
       await nextTick()
-      stickBottom()
+      switched ? stickBottom() : maybeStickBottom()
     } else if (msgs[0]?.id !== prevMsgs?.[0]?.id) {
       const prevH = wrap.scrollHeight
       const prevTop = wrap.scrollTop
@@ -102,10 +120,16 @@ async function onReEdit(content) {
       <span v-else>选择左侧会话</span>
     </div>
 
-    <el-scrollbar ref="scroller" class="scroll" @scroll="({ scrollTop }) => scrollTop === 0 && chat.loadOlderMessages()">
+    <el-scrollbar ref="scroller" class="scroll" @scroll="onScroll">
       <div v-if="chat.loadingMore" class="tip">加载更早的消息…</div>
-      <el-empty v-if="!chat.currentId" description="← 先选一个会话" :image-size="80" />
-      <div v-else class="msgs">
+      <div v-if="chat.loadingMessages" class="skeleton" aria-hidden="true">
+        <div v-for="(s, i) in SK" :key="i" class="sk-row" :class="i % 2 ? 'out' : 'in'">
+          <span class="sk-ava"></span>
+          <span class="sk-bubble" :style="{ width: s + 'px' }"></span>
+        </div>
+      </div>
+      <el-empty v-else-if="!chat.currentId" description="← 先选一个会话" :image-size="80" />
+      <div v-else class="msgs" :key="chat.currentId">
         <template v-for="row in timeline" :key="row.id">
           <div v-if="row.type === 'time'" class="time-line num">
             <span>{{ row.label }}</span>
@@ -116,6 +140,7 @@ async function onReEdit(content) {
             :conv="chat.currentConv"
             @preview="previewUrl = $event"
             @reedit="onReEdit"
+            @mediaload="maybeStickBottom"
           />
         </template>
       </div>
@@ -174,7 +199,22 @@ async function onReEdit(content) {
   content: ''; flex: 1; height: 1px; background: #c9dbff;
 }
 
-.msgs { padding: 4px 16px 16px; }
+/* 骨架屏：进会话先给呼吸占位，避免白屏后整批气泡突现 */
+.skeleton { padding: 18px 16px 4px; }
+.sk-row { display: flex; gap: 8px; margin-bottom: 18px; }
+.sk-row.out { flex-direction: row-reverse; }
+.sk-ava { width: 30px; height: 30px; flex-shrink: 0; border-radius: var(--r-sm); }
+.sk-bubble { height: 34px; border-radius: var(--r-lg); }
+.sk-ava, .sk-bubble {
+  background: linear-gradient(100deg, #e2e8f2 40%, #f3f6fb 50%, #e2e8f2 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.1s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* 数据到位后容器整体淡入（:key 切会话重挂载触发）；之后单条新消息仍走 .msg 的 pop */
+.msgs { padding: 4px 16px 16px; animation: list-in 0.18s ease-out; }
+@keyframes list-in { from { opacity: 0; } to { opacity: 1; } }
 
 .editor { border-top: 1px solid var(--c-border); background: var(--c-panel); padding: 0 12px 10px; }
 .grab-bar {

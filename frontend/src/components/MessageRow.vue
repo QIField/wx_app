@@ -4,7 +4,7 @@
  * 灰条三类来源：撤回通知（自己撤回的可"重新编辑"）、后端兜底系统行、
  * 残留的微信系统 XML（拍一拍等）。图片点击交给父组件做全屏预览。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { getToken } from '../api'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml } from '../utils/message'
 
@@ -12,7 +12,7 @@ const props = defineProps({
   msg: { type: Object, required: true }, // timeline 展开后的单条消息
   conv: { type: Object, default: null }, // 当前会话（头像/昵称取值用）
 })
-const emit = defineEmits(['preview', 'reedit'])
+const emit = defineEmits(['preview', 'reedit', 'mediaload'])
 
 const STATUS_LABEL = { 0: '发送中', 1: '已发送', 2: '失败' }
 
@@ -66,6 +66,16 @@ const fileTitle = computed(() => (props.msg.msg_type === 3 ? fileTitleOf(props.m
 /* 图片/表情/视频撑满气泡：去掉内边距（微信样式） */
 const isTight = computed(() => [2, 4, 7].includes(props.msg.msg_type))
 
+/* 媒体加载状态：加载前 shimmer 占位块，加载完淡入（组件按消息 id 复用，状态不串行） */
+const loaded = ref(false)
+/* @load/@error 共用：坏图也撤占位，避免永远闪 shimmer；并通知父组件重新锚定底部 */
+function onMediaOk() {
+  if (!loaded.value) {
+    loaded.value = true
+    emit('mediaload')
+  }
+}
+
 function onReEdit() {
   emit('reedit', props.msg.content)
 }
@@ -84,18 +94,34 @@ function onReEdit() {
     <div class="body">
       <div class="name">{{ nameOf(msg) }}</div>
       <div class="bubble" :class="{ tight: isTight }">
-        <img
-          v-if="msg.msg_type === 2"
-          class="media img"
-          :src="mediaUrl(msg)"
-          alt="图片消息"
-          title="点击查看大图"
-          referrerpolicy="no-referrer"
-          @click="emit('preview', mediaUrl(msg))"
-        />
+        <span v-if="msg.msg_type === 2" class="ph ph-img" :class="{ on: loaded }">
+          <img
+            class="media img fade"
+            :class="{ ok: loaded }"
+            :src="mediaUrl(msg)"
+            alt="图片消息"
+            title="点击查看大图"
+            referrerpolicy="no-referrer"
+            decoding="async"
+            @load="onMediaOk"
+            @error="onMediaOk"
+            @click="emit('preview', mediaUrl(msg))"
+          />
+        </span>
         <audio v-else-if="msg.msg_type === 6" class="media audio" :src="mediaUrl(msg)" controls preload="none"></audio>
-        <video v-else-if="msg.msg_type === 4" class="media video" :src="mediaUrl(msg)" controls preload="metadata"></video>
-        <img v-else-if="msg.msg_type === 7" class="media emoji" :src="mediaUrl(msg)" alt="表情" referrerpolicy="no-referrer" />
+        <video v-else-if="msg.msg_type === 4" class="media video" :src="mediaUrl(msg)" controls preload="metadata" @loadeddata="emit('mediaload')"></video>
+        <span v-else-if="msg.msg_type === 7" class="ph ph-emoji" :class="{ on: loaded }">
+          <img
+            class="media emoji fade"
+            :class="{ ok: loaded }"
+            :src="mediaUrl(msg)"
+            alt="表情"
+            referrerpolicy="no-referrer"
+            decoding="async"
+            @load="onMediaOk"
+            @error="onMediaOk"
+          />
+        </span>
 
         <!-- 文件卡片：图标 + 文件名 + 下载 -->
         <a v-else-if="msg.msg_type === 3" class="file-card" :href="mediaUrl(msg)" download>
@@ -144,7 +170,7 @@ function onReEdit() {
 
 .msg { display: flex; gap: 8px; margin-bottom: 12px; animation: pop 0.22s both; }
 @keyframes pop {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
 .msg.out { flex-direction: row-reverse; }
@@ -182,6 +208,21 @@ function onReEdit() {
 .media.emoji { width: 120px; }
 .media.audio { width: 240px; height: 36px; }
 .media.video { max-width: 240px; border-radius: var(--r-sm); }
+
+/* 媒体占位：加载前 shimmer 块撑住尺寸，加载完撤掉底纹、图片淡入，高度不再突跳 */
+.ph {
+  display: block;
+  border-radius: var(--r-sm);
+  background: linear-gradient(100deg, #e2e8f2 40%, #f3f6fb 50%, #e2e8f2 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.1s linear infinite;
+}
+.ph.on { background: none; animation: none; }
+.ph-img { min-width: 140px; min-height: 105px; }
+.ph-emoji { width: 120px; min-height: 90px; }
+.media.fade { opacity: 0; transition: opacity 0.2s ease; }
+.media.fade.ok { opacity: 1; }
+@keyframes shimmer { to { background-position: -200% 0; } }
 
 /* 链接/文件卡片 */
 .link-card, .file-card {
