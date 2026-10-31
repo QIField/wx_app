@@ -10,14 +10,14 @@ from backend.extensions import db
 from backend.models.message import Message
 from backend.tests.conftest import login_headers, make_user
 
-from backend.api import media as media_api
+from backend.services import media_fetch
 from backend.models.conversation import Conversation
 
 
 @pytest.fixture()
 def media_dir(tmp_path, monkeypatch):
     """媒体缓存指到临时目录，避免污染 backend/media。"""
-    monkeypatch.setattr(media_api, "MEDIA_DIR", tmp_path)
+    monkeypatch.setattr(media_fetch, "MEDIA_DIR", tmp_path)
     return tmp_path
 
 
@@ -46,6 +46,11 @@ def make_message(conv_id, msg_type, content, middle_msg_id="m1"):
     return msg
 
 
+def cache_dir(tmp_path, msg):
+    """消息对应的日期缓存目录（media_fetch 按消息 create_time 分目录）。"""
+    return tmp_path / msg.create_time.strftime("%Y-%m-%d")
+
+
 def mock_download(monkeypatch, data=b"MEDIABYTES", content_type="image/png"):
     """替换中间方下载调用并记录参数。"""
     captured = {}
@@ -54,7 +59,7 @@ def mock_download(monkeypatch, data=b"MEDIABYTES", content_type="image/png"):
         captured.update(module=module, action=action, params=params, openid=openid)
         return data, content_type
 
-    monkeypatch.setattr(media_api.middle_client, "call_download", fake)
+    monkeypatch.setattr(media_fetch.middle_client, "call_download", fake)
     return captured
 
 
@@ -78,13 +83,13 @@ def test_media_image_demo_placeholder_and_cache(app, client, conv, media_dir, mo
     first = client.get(f"/api/messages/{msg.id}/media")
     assert first.status_code == 200
     assert first.headers["Content-Type"].startswith("image/png")
-    files = list(media_dir.glob(f"{msg.id}_t*.*"))  # 图片缓存带 _t{img_type} 后缀
+    files = list(cache_dir(media_dir, msg).glob(f"{msg.id}_t*.*"))  # 图片缓存带 _t{img_type} 后缀
     assert len(files) == 1
 
     def must_not_call(*a, **k):  # 缓存命中就不该再碰中间方
         raise AssertionError("cache hit should not call middle platform")
 
-    monkeypatch.setattr(media_api.middle_client, "call_download", must_not_call)
+    monkeypatch.setattr(media_fetch.middle_client, "call_download", must_not_call)
     second = client.get(f"/api/messages/{msg.id}/media")
 
     assert second.status_code == 200
@@ -106,7 +111,7 @@ def test_media_voice_download_params(app, client, conv, media_dir, monkeypatch):
     assert captured["action"] == "get_download_voice"
     assert captured["params"] == {"xml": xml, "msg_id": "m99"}
     assert captured["openid"] == "dev01"
-    assert list(media_dir.glob(f"{msg.id}.amr"))
+    assert list(cache_dir(media_dir, msg).glob(f"{msg.id}.amr"))
 
 
 def test_media_emoji_md5_from_xml(app, client, conv, media_dir, monkeypatch):
@@ -135,7 +140,7 @@ def test_media_image_img_type_variants(app, client, conv, media_dir, monkeypatch
 
     assert client.get(f"/api/messages/{msg.id}/media?img_type=1").status_code == 200
     assert captured["params"]["img_type"] == 1
-    assert len(list(media_dir.glob(f"{msg.id}_t*.*"))) == 2  # t2 与 t1 各一份
+    assert len(list(cache_dir(media_dir, msg).glob(f"{msg.id}_t*.*"))) == 2  # t2 与 t1 各一份
 
 
 def test_media_text_type_rejected(app, client, conv):
@@ -157,7 +162,7 @@ def test_media_sniff_real_type(app, client, conv, media_dir, monkeypatch):
 
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("image/jpeg")
-    assert list(media_dir.glob(f"{msg.id}_t2.jpg"))
+    assert list(cache_dir(media_dir, msg).glob(f"{msg.id}_t2.jpg"))
 
 
 def test_media_cross_device_isolated(app, client, conv, media_dir, monkeypatch):
@@ -179,7 +184,7 @@ def test_media_download_failure_audited(app, client, conv, media_dir, monkeypatc
     def boom(module, action, params=None, openid=""):
         raise MiddleApiError("设备离线")
 
-    monkeypatch.setattr(media_api.middle_client, "call_download", boom)
+    monkeypatch.setattr(media_fetch.middle_client, "call_download", boom)
     msg = make_message(conv.id, Message.MSG_VIDEO, "<msg><videomsg aeskey=\"k\" /></msg>")
 
     resp = client.get(f"/api/messages/{msg.id}/media")
@@ -188,3 +193,53 @@ def test_media_download_failure_audited(app, client, conv, media_dir, monkeypatc
     log = AuditLog.query.one()
     assert log.result == AuditLog.RESULT_FAIL
     assert log.action == "媒体下载"
+
+
+def test_media_json_payload_not_cached(app, client, conv, media_dir, monkeypatch):
+    """错误报文被当文件拉回（如「已达上限」JSON）：502 且不落盘冒充媒体。"""
+    body = '{"code":0,"data":{"msg":"已达上限","ret":50003},"msg":"success"}'.encode("utf-8")
+    mock_download(monkeypatch, data=body, content_type="application/json")
+    msg = make_message(conv.id, Message.MSG_IMAGE, "<msg><img aeskey=\"k\" /></msg>")
+
+    resp = client.get(f"/api/messages/{msg.id}/media")
+
+    assert resp.status_code == 502
+    assert not list(media_dir.glob("*"))  # 不允许 .json 落进缓存目录
+
+
+def test_download_serialized_per_device(app, conv, media_dir, monkeypatch):
+    """同设备兜底下载排队串行：并发请求下中间方同时只有 1 个在途下载。"""
+    import threading
+    import time
+
+    inflight = {"n": 0, "max": 0}
+    guard = threading.Lock()
+
+    def slow(module, action, params=None, openid=""):
+        with guard:
+            inflight["n"] += 1
+            inflight["max"] = max(inflight["max"], inflight["n"])
+        time.sleep(0.05)
+        with guard:
+            inflight["n"] -= 1
+        return b"\xff\xd8\xff\xe0JPGDATA", "application/octet-stream"
+
+    monkeypatch.setattr(media_fetch.middle_client, "call_download", slow)
+    msgs = [
+        make_message(conv.id, Message.MSG_IMAGE, '<msg><img aeskey="k" /></msg>',
+                     middle_msg_id=f"m{i}")
+        for i in range(4)
+    ]
+
+    def work(m):
+        with app.app_context():
+            media_fetch.fetch_and_cache(m)
+
+    threads = [threading.Thread(target=work, args=(m,)) for m in msgs]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert inflight["max"] == 1  # 全程从未并发
+    assert len(list(cache_dir(media_dir, msgs[0]).glob("*"))) == 4

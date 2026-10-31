@@ -21,6 +21,7 @@ from backend.services import conversations as conversation_service
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.devices import active_bound_devices
 from backend.sync import msg_xml, revoke
+from backend.sync.media_predownload import predownload_media
 
 PAGE_SIZE = 100        # 每轮拉一页；单轮增量超一页的情况极少，靠下一轮补
 FIRST_HOURS = 1        # 首次运行没有游标时，从最近 1 小时开始拉
@@ -63,6 +64,7 @@ def sync_once(app):
                 from backend.sync.profile_sync import refresh_missing_profiles
 
                 refresh_missing_profiles(openid, [p["conversation_id"] for p in pushed])
+            predownload_media(pushed)  # 新媒体立刻串行预下载（限时，失败不拖同步）
 
 
 def sync_device(openid):
