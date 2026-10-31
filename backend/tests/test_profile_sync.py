@@ -88,7 +88,8 @@ def test_group_fail_retry_cap(app, group_conv, monkeypatch):
     calls = []
 
     def fake_call(module, action, params=None, uuid=None, openid=""):
-        calls.append(action)
+        if action == "chatroom_info":  # 只统计群资料下发（通讯录同步同走 client.call）
+            calls.append(action)
         return {}
 
     _patch_broadcast(monkeypatch, [])

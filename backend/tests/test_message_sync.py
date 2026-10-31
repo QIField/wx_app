@@ -249,3 +249,21 @@ def test_sync_disabled_user_not_polled(app, device, monkeypatch):
     message_sync.sync_once(app)
 
     assert calls == []
+
+
+def test_sync_voice_and_emoji_mapping(app, monkeypatch):
+    """微信 34语音 / 47表情 映射到业务端 6/7（只收不发，V2 文档）。"""
+    items = [
+        make_item(msg_id="m1", msg_type=34,
+                  content='<msg><voicemsg voicelength="3000" aeskey="k" /></msg>'),
+        make_item(msg_id="m2", msg_type=47,
+                  content='<msg><emoji md5="abc123" len="12345" /></msg>'),
+    ]
+    patch_pull(monkeypatch, make_body(items))
+
+    message_sync.sync_once(app)
+
+    types = [m.msg_type for m in Message.query.order_by(Message.id)]
+    assert types == [Message.MSG_VOICE, Message.MSG_EMOJI]
+    conv = Conversation.query.one()
+    assert conv.last_msg == "[表情]"  # 会话摘要显示标签

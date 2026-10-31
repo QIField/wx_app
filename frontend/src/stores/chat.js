@@ -1,6 +1,6 @@
 /** 聊天共享状态（Pinia）：会话列表、当前会话、消息、WebSocket 事件分发。 */
 import { defineStore } from 'pinia'
-import { connectWs, fetchConversations, fetchMessages, sendTextMessage } from '../api'
+import { connectWs, fetchConversations, fetchMessages, openConversation, sendTextMessage } from '../api'
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -19,6 +19,19 @@ export const useChatStore = defineStore('chat', {
   actions: {
     async loadConversations() {
       this.conversations = await fetchConversations()
+    },
+
+    /** 从通讯录发起会话：已有会话直接进，没有就建一个再进。 */
+    async openWithContact(wxid, chatType) {
+      const local = this.conversations.find(
+        (c) => c.wxid === wxid && c.chat_type === chatType)
+      let convId = local?.id
+      if (!convId) {
+        const conv = await openConversation(wxid, chatType)
+        convId = conv.id
+        await this.loadConversations()
+      }
+      await this.selectConversation(convId)
     },
 
     async selectConversation(id) {
@@ -79,6 +92,7 @@ export const useChatStore = defineStore('chat', {
         if (event === 'new_message') this.onNewMessage(data)
         else if (event === 'send_result') this.onSendResult(data)
         else if (event === 'conv_updated') this.onConvUpdated(data)
+        else if (event === 'message_revoked') this.onMessageRevoked(data)
       })
     },
 
@@ -105,6 +119,12 @@ export const useChatStore = defineStore('chat', {
     onSendResult(d) {
       const msg = this.currentMessages.find((m) => m.id === d.message_id)
       if (msg) msg.status = d.status
+    },
+
+    /** 自己发的消息撤回成功：打标记，气泡变"已撤回"。 */
+    onMessageRevoked(d) {
+      const msg = this.currentMessages.find((m) => m.id === d.message_id)
+      if (msg) msg.payload = { ...(msg.payload || {}), revoked: true }
     },
   },
 })

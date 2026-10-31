@@ -2,6 +2,7 @@
 from datetime import datetime
 
 from backend.extensions import db
+from backend.models.contact import Contact
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 
@@ -126,3 +127,72 @@ def test_messages_empty_conversation(client):
 
     assert data["messages"] == []
     assert data["next_before_id"] is None
+
+
+# ---------- 主动发起会话（POST /api/conversations） ----------
+
+
+def test_open_conversation_creates(client):
+    """通讯录里有的联系人：建新会话并返回。"""
+    db.session.add(Contact(openid="dev01", wxid="wxid_new", type=Contact.TYPE_FRIEND))
+    db.session.commit()
+
+    resp = client.post("/api/conversations", json={"wxid": "wxid_new", "chat_type": 1})
+    body = resp.get_json()
+
+    assert resp.status_code == 200
+    assert body["code"] == 0
+    assert body["data"]["wxid"] == "wxid_new"
+    conv = Conversation.query.filter_by(openid="dev01", wxid="wxid_new").one()
+    assert conv.chat_type == Conversation.CHAT_SINGLE
+
+
+def test_open_conversation_returns_existing(client):
+    """已有会话：直接返回既有会话，不重复建。"""
+    conv = make_conv(wxid="wxid_x")
+    db.session.add(Contact(openid="dev01", wxid="wxid_x", type=Contact.TYPE_FRIEND))
+    db.session.commit()
+
+    data = client.post("/api/conversations", json={"wxid": "wxid_x", "chat_type": 1}).get_json()["data"]
+
+    assert data["id"] == conv.id
+    assert Conversation.query.count() == 1
+
+
+def test_open_conversation_group(client):
+    """群聊发起：chat_type=2 匹配群联系人。"""
+    db.session.add(Contact(openid="dev01", wxid="9@chatroom", type=Contact.TYPE_GROUP))
+    db.session.commit()
+
+    data = client.post("/api/conversations", json={"wxid": "9@chatroom", "chat_type": 2}).get_json()["data"]
+
+    assert data["chat_type"] == 2
+
+
+def test_open_conversation_requires_roster(client):
+    """通讯录里没有的 wxid：404 拒绝，防乱造会话。"""
+    resp = client.post("/api/conversations", json={"wxid": "wxid_ghost", "chat_type": 1})
+
+    assert resp.status_code == 404
+    assert Conversation.query.count() == 0
+
+
+def test_open_conversation_type_mismatch(client):
+    """类型不匹配：群 id 按 chat_type=1 发起 → 通讯录查无此类型 → 404。"""
+    db.session.add(Contact(openid="dev01", wxid="9@chatroom", type=Contact.TYPE_GROUP))
+    db.session.commit()
+
+    resp = client.post("/api/conversations", json={"wxid": "9@chatroom", "chat_type": 1})
+
+    assert resp.status_code == 404
+
+
+def test_open_conversation_validates_params(client):
+    """参数缺失/非法：400。"""
+    r1 = client.post("/api/conversations", json={"chat_type": 1})
+    r2 = client.post("/api/conversations", json={"wxid": "a", "chat_type": 9})
+    r3 = client.post("/api/conversations", json={"wxid": "a", "chat_type": "abc"})
+
+    assert r1.status_code == 400
+    assert r2.status_code == 400
+    assert r3.status_code == 400

@@ -77,6 +77,10 @@ export const fetchAdminStats = () => http.get('/admin/stats')
 
 export const fetchConversations = () => http.get('/conversations')
 
+/** 主动发起会话：按 wxid 建/取会话（chat_type: 1好友 2群），联系人须在通讯录里。 */
+export const openConversation = (wxid, chatType) =>
+  http.post('/conversations', { wxid, chat_type: chatType })
+
 export const fetchMessages = (convId, beforeId) =>
   http.get(`/conversations/${convId}/messages`, {
     params: beforeId ? { before_id: beforeId } : {},

@@ -47,16 +47,17 @@ def _confirm_one(task):
             _mark_failed(task)
         return
 
-    verdict = _parse_verdict(body, task.uuid)
-    if verdict is None:
+    result = _parse_result(body, task.uuid)
+    if result is None:
         # 结果未生成：不算失败，累计重试，超过兜底次数才标失败
         task.retry_count += 1
         if task.retry_count >= MAX_RETRY:
             _mark_failed(task)
         return
-    if verdict:
+    if result.get("ret") == 200:
         task.status = SendTask.ST_SUCCESS
         _mark_message(task, Message.ST_SENT)
+        _backfill_send_fields(task, result.get("data"))
         _broadcast(task, Message.ST_SENT)
     else:
         _mark_failed(task)
@@ -100,11 +101,11 @@ def _mark_message(task, status):
         msg.status = status
 
 
-def _parse_verdict(body, want_uuid):
-    """按真实返回判定结果（2026-10-29 联调实测结构）。
+def _parse_result(body, want_uuid):
+    """按真实返回解析结果（2026-10-29 联调实测结构）。
 
     查询接口返回：{"code":0, "data":[{"uuid":"...", "processing_result":"{\"ret\":200,...}"}]}
-    返回三态：True=设备处理成功 / False=设备处理失败 / None=未出结果或查询异常（下轮再查）。
+    返回解析后的 processing_result dict（含 ret/msg/data），或 None=未出结果、查询异常（下轮再查）。
 
     2026-10-31 修正（与群资料同款竞态）：任务记录行可能先于 processing_result
     填充出现，此时既不能当成功也不能判失败，返回 None 交给重试兜底；
@@ -127,6 +128,25 @@ def _parse_verdict(body, want_uuid):
         if isinstance(result, dict):
             if result.get("ret") is None:
                 return None  # 记录行已出现但结果还没生成（实测竞态）
-            return result.get("ret") == 200
+            return result
         return None
     return None
+
+
+def _backfill_send_fields(task, data):
+    """成功后回填发送结果的撤回要素（2026-10-31 实测：驼峰 newMsgId/msgId）。
+
+    实测 send_api 发出的消息不进 get_message 库，撤回参数只能从发送结果拿。
+    文字消息 msgId 恒为 0（不是真实 id），不能当 middle_msg_id 写入。
+    """
+    if task.message_id is None or not isinstance(data, dict):
+        return
+    msg = db.session.get(Message, task.message_id)
+    if msg is None:
+        return
+    new_msg_id = data.get("newMsgId")
+    if new_msg_id and not msg.new_msg_id:
+        msg.new_msg_id = str(new_msg_id)
+    msg_id = data.get("msgId")
+    if msg_id and str(msg_id) != "0" and not msg.middle_msg_id:
+        msg.middle_msg_id = str(msg_id)

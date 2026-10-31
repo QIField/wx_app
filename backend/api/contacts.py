@@ -1,4 +1,4 @@
-"""通讯录 API：好友/群列表（数据来自会话表，排除软删除）。
+"""通讯录 API：好友/群列表（contact 表全量同步 ∪ 历史会话，排除软删除）。
 
 多设备：列表按当前登录人绑定的设备（open_id）过滤。
 """
@@ -6,50 +6,106 @@ from flask import Blueprint, g, jsonify, request
 from pypinyin import lazy_pinyin, Style
 
 from backend.extensions import db
+from backend.models.contact import Contact
 from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
 from backend.services.auth import require_role
 
 bp = Blueprint("contacts", __name__)
 
-# type 参数 → 会话类型
+# type 参数 → 会话/联系人类型
 _TYPE_MAP = {
-    "friends": Conversation.CHAT_SINGLE,
-    "groups": Conversation.CHAT_GROUP,
+    "friends": (Conversation.CHAT_SINGLE, Contact.TYPE_FRIEND),
+    "groups": (Conversation.CHAT_GROUP, Contact.TYPE_GROUP),
 }
 
 
 @bp.get("/api/contacts")
 @require_role()
 def list_contacts():
-    """通讯录列表：?type=friends|groups&keyword=，按拼音首字母分组排序。"""
-    chat_type = _TYPE_MAP.get(request.args.get("type", "friends"))
-    if chat_type is None:
+    """通讯录列表：?type=friends|groups&keyword=，按拼音首字母分组排序。
+
+    主源是 contact 表（全量联系人，聊没聊过都在）；历史会话里有、
+    通讯录还没同步到的作为补集拼上；关键词同时匹配昵称/wxid/备注。
+    """
+    mapped = _TYPE_MAP.get(request.args.get("type", "friends"))
+    if mapped is None:
         return jsonify(code=400, msg="type 仅支持 friends / groups"), 400
-    if not (g.current_user.open_id or "").strip():
+    chat_type, contact_type = mapped
+    openid = (g.current_user.open_id or "").strip()
+    if not openid:
         return jsonify(code=0, msg="success", data={"list": [], "total": 0})
 
     keyword = (request.args.get("keyword") or "").strip()
-    query = Conversation.query.filter(
-        Conversation.deleted_at.is_(None),
-        Conversation.openid == g.current_user.open_id,
-        Conversation.chat_type == chat_type,
-    )
-    if keyword:
-        like = f"%{keyword}%"
-        query = query.filter(db.or_(Conversation.name.ilike(like), Conversation.wxid.ilike(like)))
+    like = f"%{keyword}%"
 
-    items = [_contact_json(c) for c in query.all()]
+    # 主源：通讯录表；备注（业务自建）也参与搜索
+    cq = Contact.query.filter(Contact.openid == openid, Contact.type == contact_type)
+    if keyword:
+        cq = (
+            cq.outerjoin(ContactProfile, ContactProfile.wxid == Contact.wxid)
+            .filter(
+                db.or_(
+                    Contact.name.ilike(like),
+                    Contact.wxid.ilike(like),
+                    ContactProfile.remark.ilike(like),
+                )
+            )
+        )
+    contacts = cq.all()
+
+    # 本设备该类型的全部会话：按 wxid 挂未读/摘要；找不到会话的联系人补集用
+    convs = Conversation.query.filter(
+        Conversation.deleted_at.is_(None),
+        Conversation.openid == openid,
+        Conversation.chat_type == chat_type,
+    ).all()
+    conv_by_wxid = {c.wxid: c for c in convs}
+
+    items = [_contact_json(c, conv_by_wxid.get(c.wxid)) for c in contacts]
+
+    # 补集：会话里有、通讯录还没同步到的老会话（关键词按 昵称/wxid 过滤）
+    known = {c.wxid for c in contacts}
+    kw = keyword.lower()
+    extras = [
+        c for c in convs
+        if c.wxid not in known
+        and (not kw or kw in (c.name or "").lower() or kw in c.wxid.lower())
+    ]
+    items.extend(_conv_contact_json(c) for c in extras)
+
     # 字母升序、# 排最后；同字母内按名字
     items.sort(key=lambda x: (x["letter"] == "#", x["letter"], (x["name"] or "").lower()))
     return jsonify(code=0, msg="success", data={"list": items, "total": len(items)})
 
 
-def _contact_json(c):
-    """会话行 → 通讯录条目；资料未解析（name 为空或还是 wxid）时用 wxid 兜底。"""
+def _contact_json(c, conv):
+    """contact 行 → 通讯录条目；contact 缺资料时回退用会话里已解析的昵称/头像。"""
+    name = c.name if c.name and c.name != c.wxid else None
+    if not name and conv and conv.name and conv.name != c.wxid:
+        name = conv.name
+    avatar = c.avatar or (conv.avatar if conv else None)
+    return {
+        "id": c.id,
+        "conversation_id": conv.id if conv else None,
+        "wxid": c.wxid,
+        "chat_type": conv.chat_type if conv else (Conversation.CHAT_GROUP if c.type == Contact.TYPE_GROUP else Conversation.CHAT_SINGLE),
+        "name": name or c.wxid,
+        "avatar": avatar,
+        "letter": _letter(name or c.wxid),
+        "unread_count": conv.unread_count if conv else 0,
+        "pinned": conv.pinned if conv else 0,
+        "last_msg": conv.last_msg if conv else None,
+        "last_msg_at": conv.last_msg_at.strftime("%Y-%m-%d %H:%M:%S") if conv and conv.last_msg_at else None,
+    }
+
+
+def _conv_contact_json(c):
+    """历史会话行 → 通讯录条目（通讯录未同步到时的补集形态）。"""
     name = c.name if c.name and c.name != c.wxid else None
     return {
         "id": c.id,
+        "conversation_id": c.id,
         "wxid": c.wxid,
         "chat_type": c.chat_type,
         "name": name or c.wxid,

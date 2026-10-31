@@ -34,6 +34,14 @@ def no_profile_refresh(monkeypatch):
     monkeypatch.setattr(profile_sync, "refresh_missing_profiles", lambda openid, ids: [])
 
 
+@pytest.fixture(autouse=True)
+def no_task_query_wait(monkeypatch):
+    """单测不等中间方：任务查询重试间隔清零（重试次数语义不变）。"""
+    from backend.sync import task_query
+
+    monkeypatch.setattr(task_query, "QUERY_WAIT_SECONDS", 0)
+
+
 @pytest.fixture()
 def client(app):
     """已登录默认客服账号（open_id=dev01）的测试客户端。

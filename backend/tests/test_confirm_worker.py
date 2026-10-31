@@ -1,4 +1,6 @@
 """发送结果确认单测：mock get_result，验证任务收尾。"""
+import json
+
 from backend.extensions import db
 from backend.models.message import Message
 from backend.models.send_task import SendTask
@@ -62,6 +64,54 @@ def test_confirm_failed(app, conversation, monkeypatch):
     db.session.expire_all()
     assert task.status == SendTask.ST_FAILED
     assert msg.status == Message.ST_FAILED
+
+
+def test_confirm_backfills_revoke_fields(app, conversation, monkeypatch):
+    """实测回填：成功结果 data 里的 newMsgId/msgId（驼峰）回填消息表。
+
+    文字消息 msgId=0 不是真实 id，不回填（2026-10-31 实测）。
+    """
+    data = {"toWxid": "wxid_customer", "createTime": 1793414601,
+            "msgId": 0, "newMsgId": 8170781315632489325, "type": 1}
+
+    def fake_get_result(action, uuid, openid=""):
+        return {
+            "code": 0,
+            "data": [{"uuid": "u-1", "processing_result":
+                      json.dumps({"ret": 200, "msg": "操作成功", "data": data}, ensure_ascii=False)}],
+        }
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert msg.status == Message.ST_SENT
+    assert msg.new_msg_id == "8170781315632489325"
+    assert not msg.middle_msg_id  # msgId=0 不回填
+
+
+def test_confirm_backfills_real_msg_id(app, conversation, monkeypatch):
+    """链接/图片等消息 msgId 是真实值，正常回填 middle_msg_id。"""
+    data = {"toWxid": "wxid_customer", "createTime": 1793414603,
+            "msgId": 824402483, "newMsgId": 7740053374785325585, "type": 5}
+
+    def fake_get_result(action, uuid, openid=""):
+        return {
+            "code": 0,
+            "data": [{"uuid": "u-1", "processing_result":
+                      json.dumps({"ret": 200, "msg": "操作成功", "data": data}, ensure_ascii=False)}],
+        }
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert msg.middle_msg_id == "824402483"
+    assert msg.new_msg_id == "7740053374785325585"
 
 
 def test_confirm_result_not_ready_keeps_retrying(app, conversation, monkeypatch):

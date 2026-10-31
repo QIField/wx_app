@@ -2,6 +2,7 @@
 /** 中栏：聊天窗 + 输入框。气泡带头像昵称；状态只区分 发送中/已发送/失败。 */
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { getToken } from '../api'
 import { useChatStore } from '../stores/chat'
 
 const chat = useChatStore()
@@ -25,8 +26,13 @@ function onGrabUp() {
   drag = null
 }
 
-const TYPE_LABEL = { 2: '[图片]', 3: '[文件]', 4: '[视频]', 5: '[链接]' }
+const TYPE_LABEL = { 2: '[图片]', 3: '[文件]', 4: '[视频]', 5: '[链接]', 6: '[语音]', 7: '[表情]' }
 const STATUS_LABEL = { 0: '发送中', 1: '已发送', 2: '失败' }
+
+/* 媒体地址：<img>/<audio>/<video> 带不了 Authorization 头，统一走 ?token= 兜底 */
+function mediaUrl(m) {
+  return `/api/messages/${m.id}/media?token=${encodeURIComponent(getToken())}`
+}
 
 /* 相邻消息间隔超过 30 分钟时插一条时间分隔线（参照标准界面蓝色时间线） */
 const timeline = computed(() => {
@@ -105,7 +111,12 @@ async function onSend() {
             <div class="body">
               <div class="name">{{ nameOf(row) }}</div>
               <div class="bubble">
-                <div v-if="row.msg_type === 2" class="img-ph">[图片消息]</div>
+                <div v-if="row.payload?.revoked" class="content revoked">该消息已撤回</div>
+                <img v-else-if="row.msg_type === 2" class="media img" :src="mediaUrl(row)" alt="图片消息" referrerpolicy="no-referrer" />
+                <audio v-else-if="row.msg_type === 6" class="media audio" :src="mediaUrl(row)" controls preload="none"></audio>
+                <video v-else-if="row.msg_type === 4" class="media video" :src="mediaUrl(row)" controls preload="metadata"></video>
+                <img v-else-if="row.msg_type === 7" class="media emoji" :src="mediaUrl(row)" alt="表情" referrerpolicy="no-referrer" />
+                <a v-else-if="row.msg_type === 3" class="content type-label file-link" :href="mediaUrl(row)" download>{{ row.content || '[文件]' }}</a>
                 <div v-else-if="row.msg_type !== 1" class="content type-label">{{ TYPE_LABEL[row.msg_type] || '[未知类型]' }}</div>
                 <div v-else class="content">{{ row.content }}</div>
                 <div class="meta">
@@ -164,6 +175,7 @@ async function onSend() {
 }
 
 .msgs { padding: 4px 16px 16px; }
+.revoked { color: var(--c-text-sub); font-style: italic; }
 .msg { display: flex; gap: 8px; margin-bottom: 12px; animation: pop 0.22s both; }
 @keyframes pop {
   from { opacity: 0; transform: translateY(6px); }
@@ -195,13 +207,14 @@ async function onSend() {
 }
 .msg.in .bubble { border-top-left-radius: 3px; }
 .msg.out .bubble { background: var(--c-primary-soft); border-color: #c9dbff; border-top-right-radius: 3px; }
-.img-ph {
-  width: 150px; height: 100px;
-  border-radius: var(--r-sm);
-  background: linear-gradient(135deg, #dfe5ee, #c9d3e2);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--c-text-sub); font-size: 12px;
-}
+
+/* 媒体消息：图片/表情/语音/视频直接渲染，文件给下载链接 */
+.media { display: block; }
+.media.img { max-width: 200px; max-height: 200px; border-radius: var(--r-sm); object-fit: cover; }
+.media.emoji { width: 120px; }
+.media.audio { width: 240px; height: 36px; }
+.media.video { max-width: 240px; border-radius: var(--r-sm); }
+.file-link { text-decoration: underline; }
 .content { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
 .type-label { color: var(--c-primary); }
 .meta {

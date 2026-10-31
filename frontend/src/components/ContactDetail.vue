@@ -72,20 +72,22 @@ async function saveEdit() {
   }
 }
 
-/** 发消息：按 wxid+类型 匹配现有会话并切换；无会话时行内提示。 */
+/** 发消息：本地已有会话直接进；没有就按 wxid 建会话（后端校验通讯录）再进。 */
+const opening = ref(false)
 async function enterChat() {
   const c = contact.value
-  if (!c) return
-  const conv = chat.conversations.find(
-    (x) => x.wxid === c.wxid && x.chat_type === c.chat_type)
-  if (!conv) {
-    hint.value = '该联系人暂无会话记录'
+  if (!c || opening.value) return
+  opening.value = true
+  try {
+    await chat.openWithContact(c.wxid, c.chat_type)
+    emit('enter-chat')
+  } catch (e) {
+    hint.value = e.message || '发起会话失败'
     clearTimeout(hintTimer)
     hintTimer = setTimeout(() => (hint.value = ''), 2200)
-    return
+  } finally {
+    opening.value = false
   }
-  await chat.selectConversation(conv.id)
-  emit('enter-chat')
 }
 </script>
 
@@ -158,7 +160,7 @@ async function enterChat() {
       <div class="d-note">{{ contact.last_msg || '（暂无消息）' }}</div>
 
       <div class="d-actions">
-        <el-button type="primary" size="small" @click="enterChat">发消息</el-button>
+        <el-button type="primary" size="small" :loading="opening" @click="enterChat">发消息</el-button>
         <span v-if="hint" class="hint">{{ hint }}</span>
       </div>
     </template>

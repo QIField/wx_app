@@ -48,6 +48,14 @@ def request_user():
     return _load_token_user(token) if token else None
 
 
+def user_from_token(token):
+    """令牌 → 用户：给 <img>/<audio>/<video> 等带不了请求头的资源地址用 ?token= 校验。
+
+    只应在媒体这类资源端点里兜底使用；令牌会出现在 URL 里，注意别记进日志。
+    """
+    return _load_token_user(token) if token else None
+
+
 def must_change_guard(user):
     """初始密码强制改密门控：未改密返回拦截响应，已改密返回 None。
 

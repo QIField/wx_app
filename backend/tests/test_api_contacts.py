@@ -1,5 +1,7 @@
 """通讯录接口单测。"""
 from backend.extensions import db
+from backend.models.contact import Contact
+from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
 
 
@@ -10,6 +12,67 @@ def make_contact(**over):
     db.session.add(conv)
     db.session.commit()
     return conv
+
+
+def make_roster(wxid, **over):
+    """造 contact 表联系人（全量同步入库的形态）。"""
+    fields = {"type": Contact.TYPE_FRIEND}
+    fields.update(over)
+    c = Contact(openid="dev01", wxid=wxid, **fields)
+    db.session.add(c)
+    db.session.commit()
+    return c
+
+
+def test_roster_contacts_listed(client):
+    """contact 表的全量联系人进通讯录（没聊过天也在，无会话信息）。"""
+    make_roster("wxid_new", name="新好友")
+    make_roster("1@chatroom", type=Contact.TYPE_GROUP, name="报价群")
+
+    friends = client.get("/api/contacts?type=friends").get_json()["data"]
+    groups = client.get("/api/contacts?type=groups").get_json()["data"]
+
+    assert [c["name"] for c in friends["list"]] == ["新好友"]
+    assert friends["list"][0]["conversation_id"] is None
+    assert friends["list"][0]["unread_count"] == 0
+    assert [c["name"] for c in groups["list"]] == ["报价群"]
+
+
+def test_roster_contact_with_conversation_links(client):
+    """通讯录联系人已有会话时，挂上会话信息（未读/摘要/会话 id）。"""
+    make_roster("wxid_customer")
+    conv = make_contact(wxid="wxid_customer", name="张师傅", unread_count=2, last_msg="在吗")
+
+    data = client.get("/api/contacts?type=friends").get_json()["data"]
+
+    assert data["total"] == 1  # 同一 wxid 只出现一次（contact 为主）
+    row = data["list"][0]
+    assert row["conversation_id"] == conv.id
+    assert row["name"] == "张师傅"  # contact 缺资料时回退显示会话里已解析的昵称
+    assert row["unread_count"] == 2
+    assert row["last_msg"] == "在吗"
+
+
+def test_keyword_hits_remark(client):
+    """keyword 命中业务备注（contact 表搜索包含备注）。"""
+    make_roster("wxid_r", name="王老板")
+    db.session.add(ContactProfile(wxid="wxid_r", remark="月结大客户", tags=[]))
+    make_roster("wxid_other", name="李四")
+    db.session.commit()
+
+    data = client.get("/api/contacts?type=friends&keyword=月结").get_json()["data"]
+
+    assert [c["wxid"] for c in data["list"]] == ["wxid_r"]
+
+
+def test_roster_other_device_hidden(client):
+    """多设备隔离：别的设备的联系人不进当前通讯录。"""
+    db.session.add(Contact(openid="other02", wxid="wxid_x", type=Contact.TYPE_FRIEND, name="别家的"))
+    db.session.commit()
+
+    data = client.get("/api/contacts?type=friends").get_json()["data"]
+
+    assert data["list"] == []
 
 
 def test_friends_only_single_chat(client):

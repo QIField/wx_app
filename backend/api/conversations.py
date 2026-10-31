@@ -6,8 +6,10 @@
 from flask import Blueprint, g, jsonify, request
 
 from backend.extensions import db
+from backend.models.contact import Contact
 from backend.models.conversation import Conversation
 from backend.models.message import Message
+from backend.services import conversations as conversation_service
 from backend.services.auth import require_role
 
 bp = Blueprint("conversations", __name__)
@@ -54,6 +56,38 @@ def list_conversations():
         .all()
     )
     return jsonify(code=0, msg="success", data=[_conv_json(c) for c in rows])
+
+
+@bp.post("/api/conversations")
+@require_role()
+def open_conversation():
+    """主动发起会话：按 wxid 建/取会话（联系人须在该设备的通讯录里）。
+
+    body: {"wxid": "...", "chat_type": 1|2}；已存在直接返回，没有则新建。
+    """
+    openid = _my_openid()
+    if openid is None:
+        return jsonify(code=400, msg="当前账号未绑定微信设备"), 400
+
+    body = request.get_json(silent=True) or {}
+    wxid = (body.get("wxid") or "").strip()
+    try:
+        chat_type = int(body.get("chat_type"))
+    except (TypeError, ValueError):
+        chat_type = 0
+    if not wxid or chat_type not in (Conversation.CHAT_SINGLE, Conversation.CHAT_GROUP):
+        return jsonify(code=400, msg="wxid 与 chat_type（1单聊/2群聊）必填且合法"), 400
+
+    contact_type = (
+        Contact.TYPE_FRIEND if chat_type == Conversation.CHAT_SINGLE else Contact.TYPE_GROUP
+    )
+    exists = Contact.query.filter_by(openid=openid, wxid=wxid, type=contact_type).first()
+    if exists is None:
+        return jsonify(code=404, msg="通讯录中没有该联系人"), 404
+
+    conv = conversation_service.get_or_create(openid, wxid, chat_type)
+    db.session.commit()
+    return jsonify(code=0, msg="success", data=_conv_json(conv))
 
 
 @bp.get("/api/conversations/<int:conversation_id>/messages")

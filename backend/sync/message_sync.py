@@ -17,6 +17,7 @@ from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.sync_cursor import SyncCursor
+from backend.services import conversations as conversation_service
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.devices import active_bound_devices
 
@@ -27,7 +28,9 @@ FIRST_HOURS = 1        # 首次运行没有游标时，从最近 1 小时开始�
 _TYPE_MAP = {
     1: Message.MSG_TEXT,
     3: Message.MSG_IMAGE,
+    34: Message.MSG_VOICE,
     43: Message.MSG_VIDEO,
+    47: Message.MSG_EMOJI,
     49: Message.MSG_LINK,  # appmsg：链接/文件类，暂归链接
 }
 
@@ -142,7 +145,7 @@ def _save_message(openid, item):
         if exists is not None:
             return None
 
-    conv = _get_or_create_conversation(openid, fields["peer_wxid"], fields["chat_type"])
+    conv = conversation_service.get_or_create(openid, fields["peer_wxid"], fields["chat_type"])
 
     msg = Message(
         conversation_id=conv.id,
@@ -280,20 +283,6 @@ def _parse_time(value):
     return None
 
 
-def _get_or_create_conversation(openid, peer_wxid, chat_type):
-    """按 openid+wxid 找会话，没有就建（软删除过滤）。"""
-    conv = (
-        Conversation.query.filter_by(openid=openid, wxid=peer_wxid)
-        .filter(Conversation.deleted_at.is_(None))
-        .first()
-    )
-    if conv is None:
-        conv = Conversation(openid=openid, wxid=peer_wxid, chat_type=chat_type)
-        db.session.add(conv)
-        db.session.flush()
-    return conv
-
-
 def _short_summary(msg_type, content):
     """会话列表的摘要：文本截 50 字，其他类型显示标签。"""
     labels = {
@@ -301,6 +290,8 @@ def _short_summary(msg_type, content):
         Message.MSG_FILE: "[文件]",
         Message.MSG_VIDEO: "[视频]",
         Message.MSG_LINK: "[链接]",
+        Message.MSG_VOICE: "[语音]",
+        Message.MSG_EMOJI: "[表情]",
     }
     text = labels.get(msg_type, content or "")
     return text[:50]

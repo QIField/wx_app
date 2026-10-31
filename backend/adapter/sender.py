@@ -73,6 +73,20 @@ def post_link(to_wxid, title, desc, link_url, thumb_url="", uuid=None, openid=""
     )
 
 
+def revoke(to_wxid, msg_id, new_msg_id, create_time, uuid=None, openid=""):
+    """撤回消息（实测：文字消息发送结果 msgId=0，传 "0" 靠 new_msg_id 定位）。
+
+    create_time 为发出时刻的 unix 秒字符串；结果查 get_revoke_message。
+    """
+    return client.call(
+        "send_api",
+        "revoke_message",
+        {"to_wxid": to_wxid, "msg_id": msg_id, "new_msg_id": new_msg_id, "create_time": create_time},
+        uuid=uuid,
+        openid=openid,
+    )
+
+
 def get_result(action, uuid, openid=""):
     """查下发结果：action 传 post_xxx，自动加 get_ 前缀。"""
     return client.call("send_api", "get_" + action, {}, uuid=uuid, openid=openid)

@@ -41,3 +41,6 @@ SEND_CONFIRM_INTERVAL = int(os.getenv("SEND_CONFIRM_INTERVAL", "1"))
 # 会话资料解析间隔（秒）：群名+好友昵称头像，30 分钟一轮兜底
 # （新消息触发的立即补拉见 profile_sync.refresh_missing_profiles）
 PROFILE_INTERVAL_SECONDS = int(os.getenv("PROFILE_INTERVAL_SECONDS", "1800"))
+
+# 媒体缓存目录：中间方下载接口拉回的图片/文件/视频/语音/表情落盘缓存
+MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or (BASE_DIR / "backend" / "media"))
