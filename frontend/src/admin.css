@@ -247,6 +247,14 @@ input[type="password"]::-ms-clear {
 
 /* ===== App Shell · 顶栏（与工作台一致的藏青渐变） ===== */
 .frame { display: flex; flex-direction: column; height: 100vh; }
+
+/* 管理后台（含登录页）全面禁用文字选中，仅输入框保留可选中 */
+.admin-frame,
+.login-body { user-select: none; }
+.admin-frame input,
+.admin-frame textarea,
+.login-body input,
+.login-body textarea { user-select: text; }
 .topbar {
   height: var(--topbar-h); flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;

@@ -40,3 +40,7 @@ body {
 }
 
 .num { font-family: var(--font-num); letter-spacing: 0.2px; }
+
+/* 消息工作台：头像与图片禁止拖拽（避免拖动时出现图片残影） */
+.wb-frame img,
+.wb-frame svg { -webkit-user-drag: none; user-select: none; }

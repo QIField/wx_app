@@ -164,6 +164,7 @@ function onReEdit() {
   margin: 10px 0;
   font-size: 12px;
   color: var(--c-text-sub);
+  user-select: none;
 }
 .re-edit { margin-left: 8px; color: var(--c-primary); }
 .re-edit:hover { text-decoration: underline; }
@@ -181,6 +182,7 @@ function onReEdit() {
   color: #fff; font-size: 13px; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
   margin-top: 16px;
+  user-select: none;
 }
 .avatar.client { background: var(--c-ok); }
 .avatar.agent { background: var(--c-primary); }

@@ -108,8 +108,6 @@ async function enterChat() {
       <div class="kv">
         <div class="kv-row"><span class="k">类型</span><span>{{ typeName }}</span></div>
         <div class="kv-row"><span class="k">最近活跃</span><span class="num">{{ fmtTime(contact.last_msg_at) || '—' }}</span></div>
-        <div class="kv-row"><span class="k">未读消息</span><span class="num">{{ contact.unread_count }}</span></div>
-        <div class="kv-row"><span class="k">置顶</span><span>{{ contact.pinned ? '已置顶' : '否' }}</span></div>
       </div>
 
       <div class="d-sec sec-flex">
@@ -156,9 +154,6 @@ async function enterChat() {
         </template>
       </div>
 
-      <div class="d-sec">最后消息</div>
-      <div class="d-note">{{ contact.last_msg || '（暂无消息）' }}</div>
-
       <div class="d-actions">
         <el-button type="primary" size="small" :loading="opening" @click="enterChat">发消息</el-button>
         <span v-if="hint" class="hint">{{ hint }}</span>
@@ -176,11 +171,13 @@ async function enterChat() {
 </template>
 
 <style scoped>
-.contact-detail { height: 100%; overflow-y: auto; }
+.contact-detail { height: 100%; overflow-y: auto; user-select: none; }
+.contact-detail input { user-select: text; }
 
 .d-head {
   display: flex; align-items: center; gap: 14px;
   padding: 18px 20px;
+  user-select: none;
   border-bottom: 1px solid var(--c-border);
   background: linear-gradient(180deg, #fafbfd, #fff);
 }
@@ -190,6 +187,7 @@ async function enterChat() {
   background: var(--c-primary);
   color: #fff; font-size: 20px; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
+  user-select: none;
 }
 .avatar.group { background: var(--c-ok); }
 .avatar.img { object-fit: cover; background: var(--c-surface); }
@@ -252,16 +250,6 @@ async function enterChat() {
 .text-input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(29, 93, 228, 0.12); }
 .cnt { font-size: 11px; color: var(--c-text-sub); flex-shrink: 0; }
 .edit-actions { display: flex; align-items: center; gap: 8px; padding-top: 8px; }
-
-.d-note {
-  margin: 0 20px;
-  padding: 8px 10px;
-  font-size: 12.5px; line-height: 1.6;
-  color: var(--c-text);
-  background: #f8fafd;
-  border-radius: var(--r-sm);
-  border-left: 3px solid var(--c-border-strong);
-}
 
 .d-actions {
   display: flex; align-items: center; gap: 10px;

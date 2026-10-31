@@ -50,7 +50,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="frame">
+  <div class="frame wb-frame">
     <header class="topbar">
       <div class="brand">
         <BrandLogo :size="26" />

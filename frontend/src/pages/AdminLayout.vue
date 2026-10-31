@@ -29,7 +29,7 @@ const ICONS = {
 </script>
 
 <template>
-  <div class="frame">
+  <div class="frame admin-frame">
     <header class="topbar">
       <div class="brand">
         <BrandLogo />
