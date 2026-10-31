@@ -81,18 +81,34 @@ def list_contacts():
 
 def _contact_json(c, conv):
     """contact 行 → 通讯录条目；contact 缺资料时回退用会话里已解析的昵称/头像。"""
-    name = c.name if c.name and c.name != c.wxid else None
-    if not name and conv and conv.name and conv.name != c.wxid:
-        name = conv.name
-    avatar = c.avatar or (conv.avatar if conv else None)
+    name = _display_name(c.name, c.wxid) or _display_name(
+        conv.name if conv else None, c.wxid)
+    chat_type = conv.chat_type if conv else _roster_chat_type(c)
+    return _item_json(
+        row_id=c.id, wxid=c.wxid, chat_type=chat_type, name=name,
+        avatar=c.avatar or (conv.avatar if conv else None), conv=conv,
+    )
+
+
+def _conv_contact_json(c):
+    """历史会话行 → 通讯录条目（通讯录未同步到时的补集形态）。"""
+    return _item_json(
+        row_id=c.id, wxid=c.wxid, chat_type=c.chat_type,
+        name=_display_name(c.name, c.wxid), avatar=c.avatar, conv=c,
+    )
+
+
+def _item_json(row_id, wxid, chat_type, name, avatar, conv):
+    """通讯录条目公共组装：会话信息（未读/摘要/置顶）有则挂上；名字用 wxid 兜底。"""
+    name = name or wxid
     return {
-        "id": c.id,
+        "id": row_id,
         "conversation_id": conv.id if conv else None,
-        "wxid": c.wxid,
-        "chat_type": conv.chat_type if conv else (Conversation.CHAT_GROUP if c.type == Contact.TYPE_GROUP else Conversation.CHAT_SINGLE),
-        "name": name or c.wxid,
+        "wxid": wxid,
+        "chat_type": chat_type,
+        "name": name,
         "avatar": avatar,
-        "letter": _letter(name or c.wxid),
+        "letter": _letter(name),
         "unread_count": conv.unread_count if conv else 0,
         "pinned": conv.pinned if conv else 0,
         "last_msg": conv.last_msg if conv else None,
@@ -100,22 +116,14 @@ def _contact_json(c, conv):
     }
 
 
-def _conv_contact_json(c):
-    """历史会话行 → 通讯录条目（通讯录未同步到时的补集形态）。"""
-    name = c.name if c.name and c.name != c.wxid else None
-    return {
-        "id": c.id,
-        "conversation_id": c.id,
-        "wxid": c.wxid,
-        "chat_type": c.chat_type,
-        "name": name or c.wxid,
-        "avatar": c.avatar,
-        "letter": _letter(name or c.wxid),
-        "unread_count": c.unread_count,
-        "pinned": c.pinned,
-        "last_msg": c.last_msg,
-        "last_msg_at": c.last_msg_at.strftime("%Y-%m-%d %H:%M:%S") if c.last_msg_at else None,
-    }
+def _display_name(name, wxid):
+    """昵称展示：为空或还是 wxid 原始编号时视为未解析。"""
+    return name if name and name != wxid else None
+
+
+def _roster_chat_type(c):
+    """contact 类型 → 会话类型（无会话时前端展示用）。"""
+    return Conversation.CHAT_GROUP if c.type == Contact.TYPE_GROUP else Conversation.CHAT_SINGLE
 
 
 def _letter(text):

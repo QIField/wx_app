@@ -108,15 +108,8 @@ def _fill_friends(openid):
             return
         infos = friend_profile.query_brief_infos([c.wxid for c in rows], openid)
         changed = False
-        for c in rows:
-            info = infos.get(c.wxid)
-            if not info:
-                continue
-            if info.get("nickname") and c.name in (None, "", c.wxid):
-                c.name = info["nickname"]
-                changed = True
-            if info.get("head_img_url") and not c.avatar:
-                c.avatar = info["head_img_url"]
+        for c in rows:  # 不能用 any()：会短路，漏掉本批其余联系人
+            if _apply_info(c, infos.get(c.wxid) or {}):
                 changed = True
         if not changed:
             return  # 整批拿不到资料（如中间方失败）：别空转烧完批数
@@ -131,11 +124,23 @@ def _fill_groups(openid):
         db.or_(Contact.name.is_(None), Contact.name == "", Contact.avatar.is_(None)),
     ).all()
     for c in rows:
-        info = group_profile.query_chatroom_info(c.wxid, openid)
-        if not info:
-            continue
-        if info.get("nickname") and c.name in (None, "", c.wxid):
-            c.name = info["nickname"]
-        if info.get("avatar") and not c.avatar:
-            c.avatar = info["avatar"]
-        db.session.commit()
+        info = group_profile.query_chatroom_info(c.wxid, openid) or {}
+        if _apply_info(c, info):
+            db.session.commit()
+
+
+def _apply_info(c, info):
+    """昵称/头像补到联系人（头像字段兼容好友 head_img_url 与群 avatar 两种来源）。
+
+    与 friend_profile.apply_friend_info / group_profile.apply_group_info
+    同一套规则：昵称只在未解析时覆盖，头像只补不覆盖。有变更返回 True。
+    """
+    changed = False
+    if info.get("nickname") and c.name in (None, "", c.wxid):
+        c.name = info["nickname"]
+        changed = True
+    avatar = info.get("head_img_url") or info.get("avatar")
+    if avatar and not c.avatar:
+        c.avatar = avatar
+        changed = True
+    return changed
