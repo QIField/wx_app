@@ -20,6 +20,7 @@ from backend.ws.hub import broadcast
 PROFILE_BATCH = 100   # 每轮最多下发 100 个群资料任务（下发很快；结果下轮收割）
 MAX_FAIL_RETRY = 5    # 同一个 wxid 连续失败 5 次后放弃（进程重启清零）
 GROUP_NOW_LIMIT = 3   # 消息触发的立即补拉：单轮最多同步等 3 个群（防阻塞收消息轮询）
+GROUP_NOW_RETRIES = 10  # 立即补拉同步等待预算：10 次 × 2 秒 = 20 秒（实测延迟波动大）
 
 _fail_counts = {}    # (openid, wxid) -> 连续失败次数（内存即可）
 _pending = {}        # task_uuid -> (conversation_id, wxid, openid)：已下发待收割的群资料任务
@@ -108,13 +109,17 @@ def refresh_groups_now(openid, groups):
         task_uuid = new_task_uuid()
         client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid},
                     task_uuid, openid=conv.openid or "")
-        record = query_record("group_api", "get_chatroom_info", task_uuid, openid)
+        record = query_record("group_api", "get_chatroom_info", task_uuid, openid,
+                              retries=GROUP_NOW_RETRIES)
         if record is None:
             _fail_counts[key] = _fail_counts.get(key, 0) + 1
             continue
         info = parse_group_info(record)
         if info:
             apply_group_info(conv.id, conv.wxid, info)
+        else:
+            # 已出结果但 ret != 200：接口真实失败，计入失败数交给限流/兜底
+            _fail_counts[key] = _fail_counts.get(key, 0) + 1
 
 
 def apply_group_info(conv_id, wxid, info):

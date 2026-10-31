@@ -104,10 +104,14 @@ def _parse_verdict(body, want_uuid):
     """按真实返回判定结果（2026-10-29 联调实测结构）。
 
     查询接口返回：{"code":0, "data":[{"uuid":"...", "processing_result":"{\"ret\":200,...}"}]}
-    返回三态：True=设备处理成功 / False=处理失败 / None=还没出结果（data 里没有这条 uuid）。
+    返回三态：True=设备处理成功 / False=设备处理失败 / None=未出结果或查询异常（下轮再查）。
+
+    2026-10-31 修正（与群资料同款竞态）：任务记录行可能先于 processing_result
+    填充出现，此时既不能当成功也不能判失败，返回 None 交给重试兜底；
+    code != 0 是查询层异常而非发送结果，同样返回 None（不消耗失败判定）。
     """
     if body.get("code") != 0:
-        return False
+        return None
     data = body.get("data") or []
     if isinstance(data, dict):
         data = [data]
@@ -119,8 +123,10 @@ def _parse_verdict(body, want_uuid):
             try:
                 result = json.loads(result)
             except ValueError:
-                return False
+                return None
         if isinstance(result, dict):
+            if result.get("ret") is None:
+                return None  # 记录行已出现但结果还没生成（实测竞态）
             return result.get("ret") == 200
-        return False
+        return None
     return None

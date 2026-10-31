@@ -25,8 +25,9 @@ def test_send_api_ok(client, conversation, monkeypatch):
     assert SendTask.query.one().status == SendTask.ST_DISPATCHED
 
 
-def test_send_disabled_by_default(client, conversation):
-    """SEND_ENABLED=false 时发送接口直接 403，不落库不建任务。"""
+def test_send_disabled_by_default(client, conversation, monkeypatch):
+    """SEND_ENABLED=false 时发送接口直接 403，不落库不建任务（显式关开关，不依赖本地 .env）。"""
+    monkeypatch.setattr("backend.api.messages.SEND_ENABLED", False)
     resp = client.post(
         f"/api/conversations/{conversation.id}/messages",
         json={"msg_type": 1, "content": "不该发出去"},

@@ -118,7 +118,8 @@ def query_brief_infos(wxids, openid=""):
     for row in rows:
         if not isinstance(row, dict):
             continue
-        wxid = row.get("wxid") or row.get("username") or ""
+        # 2026-10-30 实测真实返回行标识是驼峰 userName
+        wxid = row.get("wxid") or row.get("userName") or row.get("username") or ""
         if wxid:
             infos[wxid] = {
                 "nickname": pick(row, ("nickName", "nickname", "nick_name", "name")),

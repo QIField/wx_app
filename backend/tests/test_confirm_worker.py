@@ -116,6 +116,45 @@ def test_confirm_gives_up_after_max_retry(app, conversation, monkeypatch):
     assert msg.status == Message.ST_FAILED
 
 
+def test_confirm_row_before_result_keeps_retrying(app, conversation, monkeypatch):
+    """同款竞态（2026-10-31）：记录行先于 processing_result 填充出现。
+
+    旧行为空字符串 json.loads 抛 ValueError 被当成"发送失败"提前定格；
+    修正后视为未出结果，保持已下发并重试。
+    """
+
+    def fake_get_result(action, uuid, openid=""):
+        return {"code": 0, "msg": "success",
+                "data": [{"uuid": "u-1", "processing_result": ""}]}
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert task.status == SendTask.ST_DISPATCHED
+    assert task.retry_count == 1
+    assert msg.status == Message.ST_SENDING
+
+
+def test_confirm_query_code_error_keeps_retrying(app, conversation, monkeypatch):
+    """查询层异常（code != 0）不是发送结果：不算失败，重试+1。"""
+
+    def fake_get_result(action, uuid, openid=""):
+        return {"code": 500, "msg": "内部错误", "data": []}
+
+    monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
+    task, msg = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
+
+    confirm_worker.confirm_once(app)
+
+    db.session.expire_all()
+    assert task.status == SendTask.ST_DISPATCHED
+    assert task.retry_count == 1
+    assert msg.status == Message.ST_SENDING
+
+
 def test_confirm_skips_non_dispatched(app, conversation, monkeypatch):
     """非"已下发"状态的任务不参与确认。"""
     called = []

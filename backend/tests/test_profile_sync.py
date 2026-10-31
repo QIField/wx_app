@@ -9,7 +9,7 @@ import pytest
 
 from backend.extensions import db
 from backend.models.conversation import Conversation
-from backend.sync import friend_profile, group_profile, profile_sync
+from backend.sync import friend_profile, group_profile, profile_sync, task_query
 
 from backend.tests.conftest import make_user
 
@@ -203,7 +203,7 @@ def test_refresh_group_limit_three(app, monkeypatch, real_refresh):
 
     monkeypatch.setattr(group_profile.client, "call", fake_call)
     monkeypatch.setattr(group_profile, "query_record",
-                        lambda module, action, u, openid="": None)
+                        lambda module, action, u, openid="", retries=None: None)
 
     profile_sync.refresh_missing_profiles("o1", [c.id for c in convs])
 
@@ -247,3 +247,50 @@ def test_refresh_dedup_same_conversation(app, single_conv, monkeypatch, real_ref
     profile_sync.refresh_missing_profiles("o1", [single_conv.id, single_conv.id])
 
     assert brief_calls == [["wxid_friend"]]
+
+
+def test_query_brief_infos_parses_real_structure(app, monkeypatch):
+    """query_brief_infos 按实测驼峰结构解析（userName/nickName/smallHeadImgUrl）。
+
+    2026-10-30 排查：行标识此前只认 wxid/username，漏了真实返回的 userName，
+    导致好友资料永远解析为空、会话一直没头像。
+    """
+    real_row = {
+        "userName": "wxid_1815ubzp53ft12",
+        "nickName": "法国红酒",
+        "smallHeadImgUrl": "https://wx.qlogo.cn/mmhead/x/0",
+    }
+    record = {"uuid": "u1", "processing_result": json.dumps(
+        {"ret": 200, "msg": "获取联系人信息成功", "data": [real_row]})}
+    monkeypatch.setattr(friend_profile.client, "call", lambda *a, **k: {})
+    monkeypatch.setattr(friend_profile, "query_record",
+                        lambda module, action, u, openid="": record)
+
+    infos = friend_profile.query_brief_infos(["wxid_1815ubzp53ft12"], "o1")
+
+    assert infos == {"wxid_1815ubzp53ft12": {
+        "nickname": "法国红酒",
+        "head_img_url": "https://wx.qlogo.cn/mmhead/x/0",
+    }}
+
+
+def test_query_record_once_skips_unfinished_task(app, monkeypatch):
+    """任务记录存在但 processing_result 未生成：视为未完成返回 None。
+
+    2026-10-30 实测竞态：任务记录下发后立即出现，结果要晚几秒填充；
+    旧逻辑行存在即返回，导致立即补拉拿到空结果静默跳过、群一直没头像。
+    """
+    rows = {
+        "u_empty": {"uuid": "u_empty", "processing_result": ""},
+        "u_fail": {"uuid": "u_fail", "processing_result": json.dumps({"ret": 500, "msg": "失败"})},
+        "u_done": {"uuid": "u_done", "processing_result": json.dumps({"ret": 200, "msg": "操作成功", "data": {}})},
+    }
+
+    def fake_call(module, action, params=None, uuid=None, openid=""):
+        return {"code": 0, "data": {"list": [rows[uuid]]}}
+
+    monkeypatch.setattr(task_query.client, "call", fake_call)
+
+    assert task_query.query_record_once("group_api", "get_chatroom_info", "u_empty") is None
+    assert task_query.query_record_once("group_api", "get_chatroom_info", "u_fail") is rows["u_fail"]
+    assert task_query.query_record_once("group_api", "get_chatroom_info", "u_done") is rows["u_done"]
