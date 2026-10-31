@@ -42,5 +42,12 @@ SEND_CONFIRM_INTERVAL = int(os.getenv("SEND_CONFIRM_INTERVAL", "1"))
 # （新消息触发的立即补拉见 profile_sync.refresh_missing_profiles）
 PROFILE_INTERVAL_SECONDS = int(os.getenv("PROFILE_INTERVAL_SECONDS", "1800"))
 
+# 登录触发资料全量同步：true=账号登录且已绑定设备时，对该设备做一次完整资料同步
+PROFILE_LOGIN_SYNC_ENABLED = os.getenv("PROFILE_LOGIN_SYNC_ENABLED", "true").lower() in (
+    "1", "true", "yes",
+)
+# 同一设备登录触发的冷却期（秒）：默认 6 小时，避免反复登录重复全量拉取
+PROFILE_LOGIN_COOLDOWN_SECONDS = int(os.getenv("PROFILE_LOGIN_COOLDOWN_SECONDS", "21600"))
+
 # 媒体缓存目录：中间方下载接口拉回的图片/文件/视频/语音/表情落盘缓存
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or (BASE_DIR / "backend" / "media"))

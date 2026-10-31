@@ -1,5 +1,5 @@
 """认证 API：登录 + 当前用户信息 + 自助修改密码。"""
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from backend.models.audit_log import AuditLog
 from backend.services.audit import AuditModule, log_action
@@ -33,6 +33,15 @@ def login():
         return jsonify(code=401, msg=err), 401
 
     token, expires_in = create_token(user)
+
+    # 已绑定设备则异步投递一次增量资料同步；入队失败不影响登录
+    from backend.sync import profile_jobs
+
+    try:
+        profile_jobs.enqueue_login_sync(current_app._get_current_object(), user)
+    except Exception:  # noqa: BLE001
+        current_app.logger.warning("登录资料同步入队失败", exc_info=True)
+
     return jsonify(code=0, msg="success", data={
         "token": token,
         "expires_in": expires_in,

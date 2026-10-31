@@ -54,16 +54,21 @@ def sync_group_names():
     dispatch_group_tasks()
 
 
-def collect_group_results():
-    """收割上一轮下发的任务：结果早已生成，单次查询即命中。"""
+def collect_group_results(openid=None):
+    """收割上一轮下发的任务：结果早已生成，单次查询即命中。
+
+    openid 传入时只收割该设备的任务（登录增量路径），缺省收割全部。
+    """
     done = []
-    for task_uuid, (conv_id, wxid, openid) in _pending.items():
-        record = query_record_once("group_api", "get_chatroom_info", task_uuid, openid)
+    for task_uuid, (conv_id, wxid, dev_openid) in _pending.items():
+        if openid and dev_openid != openid:
+            continue
+        record = query_record_once("group_api", "get_chatroom_info", task_uuid, dev_openid)
         if not record:
             _pending_fails[task_uuid] = _pending_fails.get(task_uuid, 0) + 1
             if _pending_fails[task_uuid] >= 5:
                 # 连续 5 轮没收割到：放弃并计入群失败数（限流，防止重复下发死循环）
-                _fail_counts[(openid, wxid)] = _fail_counts.get((openid, wxid), 0) + 1
+                _fail_counts[(dev_openid, wxid)] = _fail_counts.get((dev_openid, wxid), 0) + 1
                 done.append(task_uuid)
             continue
         done.append(task_uuid)
@@ -75,13 +80,16 @@ def collect_group_results():
         _pending_fails.pop(task_uuid, None)
 
 
-def dispatch_group_tasks():
-    """给缺资料且未在下发中的群补发 chatroom_info 任务（按会话所属设备下发）。"""
-    pending_wxids = {(openid, wxid) for _, wxid, openid in _pending.values()}
+def dispatch_group_tasks(openid=None):
+    """给缺资料且未在下发中的群补发 chatroom_info 任务（按会话所属设备下发）。
+
+    openid 传入时只处理该设备的群（登录全量路径），缺省处理全部。
+    """
+    pending_wxids = {(dev_openid, wxid) for _, wxid, dev_openid in _pending.values()}
     slots = PROFILE_BATCH - len(_pending)
     if slots <= 0:
         return
-    for conv in unnamed_groups(limit=slots):
+    for conv in unnamed_groups(limit=slots, openid=openid):
         key = (conv.openid, conv.wxid)
         if key in pending_wxids:
             continue
@@ -93,7 +101,7 @@ def dispatch_group_tasks():
         _pending[task_uuid] = (conv.id, conv.wxid, conv.openid)
 
 
-def unnamed_groups(limit):
+def unnamed_groups(limit, openid=None):
     """需要补群资料的会话：缺名称/头像，或群成员名册还没落库（两来源合并去重）。"""
     rooms = []
     seen = set()
@@ -104,20 +112,23 @@ def unnamed_groups(limit):
                 seen.add(conv.id)
                 rooms.append(conv)
 
-    _collect(_name_missing_groups(limit))
+    _collect(_name_missing_groups(limit, openid))
     if len(rooms) < limit:
-        _collect(_members_missing_groups(limit - len(rooms)))
+        _collect(_members_missing_groups(limit - len(rooms), openid))
     return rooms[:limit]
 
 
-def _name_missing_groups(limit):
+def _name_missing_groups(limit, openid=None):
     """没有名字的群会话（name 为空或还显示着 wxid 原始编号）。"""
+    query = Conversation.query.filter(
+        Conversation.deleted_at.is_(None),
+        Conversation.chat_type == Conversation.CHAT_GROUP,
+        db.or_(Conversation.name.is_(None), Conversation.name == Conversation.wxid),
+    )
+    if openid:
+        query = query.filter(Conversation.openid == openid)
     return (
-        Conversation.query.filter(
-            Conversation.deleted_at.is_(None),
-            Conversation.chat_type == Conversation.CHAT_GROUP,
-            db.or_(Conversation.name.is_(None), Conversation.name == Conversation.wxid),
-        )
+        query
         # MySQL 5.7 不支持 NULLS LAST，用 IS NULL 布尔排序两端方言通吃（空值排最后）
         .order_by(
             Conversation.last_msg_at.is_(None),
@@ -129,10 +140,17 @@ def _name_missing_groups(limit):
     )
 
 
-def _members_missing_groups(limit):
+def _members_missing_groups(limit, openid=None):
     """成员名册为空的群会话（发言人昵称/头像的数据源）。"""
     from backend.models.group_member import GroupMember
 
+    filters = [
+        Conversation.deleted_at.is_(None),
+        Conversation.chat_type == Conversation.CHAT_GROUP,
+        GroupMember.id.is_(None),
+    ]
+    if openid:
+        filters.append(Conversation.openid == openid)
     return (
         Conversation.query.outerjoin(
             GroupMember,
@@ -141,11 +159,7 @@ def _members_missing_groups(limit):
                 GroupMember.chatroom_wxid == Conversation.wxid,
             ),
         )
-        .filter(
-            Conversation.deleted_at.is_(None),
-            Conversation.chat_type == Conversation.CHAT_GROUP,
-            GroupMember.id.is_(None),
-        )
+        .filter(*filters)
         .order_by(
             Conversation.last_msg_at.is_(None),
             Conversation.last_msg_at.desc(),

@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>资料同步 · 登录触发与排队互斥</title>
+<style>
+  :root{
+    --ink:#18211f; --sub:#5c6661; --paper:#f4f1e8; --surface:#fdfcf8;
+    --border:#d9d4c7; --accent:#0d6b5b; --accent-soft:#e3efeb;
+    --alert:#b64f2e; --alert-soft:#f7e7e0; --ok:#2c7a4b; --warn:#9a6a15;
+    --mono:"Cascadia Code","JetBrains Mono",Consolas,"Courier New",monospace;
+    --sans:"Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",system-ui,sans-serif;
+    --serif:"Songti SC","Noto Serif CJK SC",Georgia,"Times New Roman",serif;
+    --shadow:0 1px 2px rgba(24,33,31,.06),0 12px 28px -18px rgba(24,33,31,.35);
+    --maxw:1120px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.75;
+    background:
+      radial-gradient(900px 420px at 88% -8%,rgba(13,107,91,.10),transparent 60%),
+      radial-gradient(700px 380px at -6% 12%,rgba(182,79,46,.07),transparent 60%),
+      repeating-linear-gradient(0deg,rgba(24,33,31,.025) 0 1px,transparent 1px 26px),
+      var(--paper);
+  }
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:56px 28px 80px}
+  header.hero{display:grid;grid-template-columns:1fr;gap:18px;padding-bottom:34px;border-bottom:1px solid var(--border);animation:rise .6s both}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  h1{font-family:var(--serif);font-size:clamp(30px,4.4vw,50px);line-height:1.16;margin:0;letter-spacing:.01em}
+  .lede{max-width:74ch;color:var(--sub);font-size:16px;margin:0}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-family:var(--mono);font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--sub)}
+  .chip b{color:var(--ink);font-weight:600}
+  .layout{display:grid;grid-template-columns:196px 1fr;gap:44px;align-items:start;margin-top:40px}
+  nav.toc{position:sticky;top:28px;font-size:13px;animation:rise .6s .1s both}
+  nav.toc a{display:block;padding:6px 0 6px 12px;color:var(--sub);text-decoration:none;border-left:2px solid transparent}
+  nav.toc a:hover{color:var(--accent);border-left-color:var(--accent)}
+  nav.toc .toc-title{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--sub);margin-bottom:10px;padding-left:12px}
+  main{min-width:0}
+  section{margin:0 0 46px;animation:rise .6s both}
+  section:nth-of-type(2){animation-delay:.08s}
+  section:nth-of-type(3){animation-delay:.14s}
+  section:nth-of-type(4){animation-delay:.2s}
+  section:nth-of-type(5){animation-delay:.26s}
+  section:nth-of-type(6){animation-delay:.32s}
+  section:nth-of-type(7){animation-delay:.38s}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:16px}
+  .sec-no{font-family:var(--mono);font-size:12px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:1px 7px}
+  h2{font-family:var(--serif);font-size:25px;margin:0;line-height:1.3}
+  h3{font-size:15px;margin:22px 0 8px;color:var(--ink)}
+  p{margin:0 0 12px;color:var(--sub)}
+  p strong{color:var(--ink)}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 18px 16px;box-shadow:var(--shadow)}
+  .card .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--accent);text-transform:uppercase}
+  .card h4{margin:6px 0 6px;font-size:17px}
+  .card p{font-size:13.5px;margin:0}
+  .flow{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;box-shadow:var(--shadow);overflow-x:auto}
+  .flow-title{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--sub);margin-bottom:16px}
+  .row{display:flex;align-items:stretch;gap:0;min-width:640px;flex-wrap:nowrap}
+  .node{flex:1;border:1px solid var(--border);border-radius:8px;padding:11px 12px;background:#fff;min-width:0}
+  .node .t{font-size:12.5px;font-weight:600;display:block;margin-bottom:2px}
+  .node .d{font-family:var(--mono);font-size:11px;color:var(--sub);line-height:1.5;display:block}
+  .node.trigger{border-left:3px solid var(--accent)}
+  .node.danger{border-left:3px solid var(--alert);background:var(--alert-soft)}
+  .node.worker{border-left:3px solid var(--ink)}
+  .arrow{width:34px;display:flex;align-items:center;justify-content:center;color:var(--sub);font-family:var(--mono);flex:0 0 34px}
+  .stack{display:flex;flex-direction:column;gap:8px;min-width:170px;flex:1}
+  .queue{display:flex;flex-direction:column;gap:6px}
+  .slot{font-family:var(--mono);font-size:11px;padding:5px 9px;border:1px dashed var(--border);border-radius:5px;background:var(--accent-soft);color:var(--accent)}
+  .slot.sweep{background:#efece2;color:var(--sub)}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:12px;color:var(--sub)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+  table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:13.5px}
+  th,td{padding:11px 13px;text-align:left;vertical-align:top;border-bottom:1px solid var(--border)}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--sub);background:#f0ede4}
+  tr:last-child td{border-bottom:none}
+  td code{font-family:var(--mono);font-size:12px;background:#efece2;padding:1px 5px;border-radius:4px;color:var(--ink)}
+  .good{color:var(--ok);font-weight:600}
+  .bad{color:var(--alert);font-weight:600}
+  .callout{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 8px 8px 0;padding:13px 16px;margin:16px 0;font-size:13.5px;color:var(--ink)}
+  .callout.warn{border-left-color:var(--warn);background:#f6efdf}
+  .callout.alert{border-left-color:var(--alert);background:var(--alert-soft)}
+  ul.plain{margin:4px 0 14px;padding-left:20px;color:var(--sub)}
+  ul.plain li{margin:5px 0}
+  ul.plain strong{color:var(--ink)}
+  .filelist{display:grid;gap:10px}
+  .file{display:grid;grid-template-columns:150px 1fr;gap:14px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
+  .file .name{font-family:var(--mono);font-size:12px;color:var(--accent);word-break:break-all}
+  .file .name .tag{display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:var(--alert);color:#fff;margin-left:4px;letter-spacing:.05em}
+  .file .desc{font-size:13px;color:var(--sub);margin:0}
+  .file .desc b{color:var(--ink)}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+  .panel h4{margin:0 0 8px;font-size:14px}
+  .panel.bad h4{color:var(--alert)}
+  .panel.good h4{color:var(--ok)}
+  .panel ul{margin:0;padding-left:18px;font-size:13px;color:var(--sub)}
+  .panel li{margin:5px 0}
+  .decision{display:grid;gap:10px}
+  .decision .item{display:grid;grid-template-columns:26px 1fr;gap:12px;padding:13px 15px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+  .decision .num{font-family:var(--mono);font-size:13px;color:var(--accent);text-align:center;border-right:1px solid var(--border)}
+  .decision .item p{margin:0;font-size:13.5px}
+  .decision .item p b{color:var(--ink)}
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--sub)}
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @media (max-width:900px){
+    .layout{grid-template-columns:1fr;gap:26px}
+    nav.toc{position:static;display:flex;flex-wrap:wrap;gap:2px 10px;border-bottom:1px solid var(--border);padding-bottom:10px}
+    nav.toc a{border-left:none;padding:3px 0}
+    .cards,.twocol{grid-template-columns:1fr}
+    .file{grid-template-columns:1fr;gap:4px}
+    .wrap{padding:34px 18px 56px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">Engineering Design · Profile Sync</div>
+    <h1>资料同步：登录触发与排队互斥</h1>
+    <p class="lede">在现有「30 分钟兜底轮」之外，账号登录且已绑定微信设备时，对该设备做一次全量资料同步；两个触发点统一进入单线程队列，按设备串行执行。</p>
+    <div class="chips">
+      <span class="chip"><b>Flask</b> + APScheduler</span>
+      <span class="chip">单进程 · 单 worker</span>
+      <span class="chip">零新依赖</span>
+      <span class="chip">状态 <b>已确认 · 已实施</b></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc">
+      <div class="toc-title">Contents</div>
+      <a href="#conclusion">00 结论</a>
+      <a href="#current">01 现状与问题</a>
+      <a href="#design">02 方案架构</a>
+      <a href="#rules">03 互斥与排队规则</a>
+      <a href="#incremental">04 登录全量策略</a>
+      <a href="#changes">05 代码改动清单</a>
+      <a href="#tests">06 测试计划</a>
+      <a href="#risks">07 风险与边界</a>
+      <a href="#decisions">08 已确认决策</a>
+    </nav>
+
+    <main>
+      <section id="conclusion">
+        <div class="sec-head"><span class="sec-no">00</span><h2>一句话结论</h2></div>
+        <div class="cards">
+          <div class="card">
+            <div class="k">Trigger</div>
+            <h4>登录即补一次</h4>
+            <p>登录成功后检查 <code>user.open_id</code>；已绑定则把该设备投递到队列，接口立即返回，不拖慢登录。</p>
+          </div>
+          <div class="card">
+            <div class="k">Mutual Exclusion</div>
+            <h4>单 worker 串行</h4>
+            <p>30 分钟轮与登录触发共用同一个队列，FIFO 执行；同一设备重复入队自动去重。</p>
+          </div>
+          <div class="card">
+            <div class="k">Full</div>
+            <h4>登录设备全量</h4>
+            <p>登录链路复刻兜底轮四步（含全量通讯录），但只作用于当前登录账号绑定的设备。</p>
+          </div>
+        </div>
+        <div class="callout">改动只围绕「资料获取」，不触碰消息收发主链路（<code>sync_once</code> / <code>confirm_once</code>）。</div>
+      </section>
+
+      <section id="current">
+        <div class="sec-head"><span class="sec-no">01</span><h2>现状与问题</h2></div>
+        <p>当前 30 分钟任务由 <strong>PROFILE_INTERVAL_SECONDS=1800</strong> 驱动，入口是 <code>profile_sync.sync_profiles(app)</code>，内部对全部在役设备依次执行四条链路。</p>
+
+        <div class="flow">
+          <div class="flow-title">CURRENT · 两个触发点没有共享调度</div>
+          <div class="row">
+            <div class="node trigger"><span class="t">APScheduler</span><span class="d">每 1800s</span></div>
+            <div class="arrow">→</div>
+            <div class="node"><span class="t">sync_profiles(app)</span><span class="d">同步执行，可能耗时数十秒</span></div>
+            <div class="arrow">→</div>
+            <div class="stack">
+              <div class="node"><span class="t">① 通讯录全量</span><span class="d">contact_sync</span></div>
+              <div class="node"><span class="t">② 群名/成员名册</span><span class="d">group_profile</span></div>
+              <div class="node"><span class="t">③ 好友昵称头像</span><span class="d">friend_profile</span></div>
+              <div class="node"><span class="t">④ 群成员头像</span><span class="d">group_member</span></div>
+            </div>
+          </div>
+          <div style="height:14px"></div>
+          <div class="row">
+            <div class="node trigger"><span class="t">登录 API</span><span class="d">POST /api/auth/login</span></div>
+            <div class="arrow">→</div>
+            <div class="node danger"><span class="t">仅更新 last_login_at</span><span class="d">不触发任何资料获取</span></div>
+            <div class="arrow">—</span>
+            <div class="node danger"><span class="t">无互斥</span><span class="d">若新增触发，会与 30 分钟轮并发</span></div>
+          </div>
+          <div class="legend">
+            <span><i style="background:var(--accent)"></i>触发点</span>
+            <span><i style="background:var(--alert)"></i>缺失能力 / 风险</span>
+            <span><i style="background:#fff;border:1px solid var(--border)"></i>现有执行单元</span>
+          </div>
+        </div>
+
+        <h3>具体问题</h3>
+        <ul class="plain">
+          <li><strong>登录不触发：</strong>客服刚登录时看到的仍是上一轮资料，新会话名称/头像要等兜底轮。</li>
+          <li><strong>无互斥：</strong>APScheduler 默认线程池允许多任务并行，新增登录触发后会与兜底轮同时调中间方。</li>
+          <li><strong>账号间无排队：</strong>多个账号同时登录会各自发起资料请求，中间方压力叠加。</li>
+          <li><strong>兜底轮含全量通讯录：</strong>每 30 分钟每台设备都拉一次全量联系人清单，是主要固定开销。</li>
+          <li><strong>模块级状态共享：</strong><code>group_profile._pending/_fail_counts</code> 是内存字典，并发写入存在竞态。</li>
+        </ul>
+      </section>
+
+      <section id="design">
+        <div class="sec-head"><span class="sec-no">02</span><h2>方案架构：单线程任务队列</h2></div>
+        <p>新增一个极薄的调度层 <code>backend/sync/profile_jobs.py</code>：所有资料同步请求先入队，由唯一 worker 线程消费。定时轮和登录触发都只是「投递任务」，不再直接执行。</p>
+
+        <div class="flow">
+          <div class="flow-title">PROPOSED · 统一入队 / 单线程串行 / 登录设备全量</div>
+          <div class="row">
+            <div class="stack">
+              <div class="node trigger"><span class="t">30 分钟定时</span><span class="d">enqueue_sweep()</span></div>
+              <div class="node trigger"><span class="t">登录成功（已绑定）</span><span class="d">enqueue_device(openid, login)</span></div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="node"><span class="t">Job Queue + 去重集</span><span class="d">sweep / device:{openid}</span>
+              <div class="queue" style="margin-top:8px">
+                <span class="slot sweep">sweep（全量兜底）</span>
+                <span class="slot">device:dev01（登录全量）</span>
+                <span class="slot">device:dev02（登录全量）</span>
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="node worker"><span class="t">Single Worker</span><span class="d">FIFO · 一次只跑一个<br>app_context / job</span></div>
+            <div class="arrow">→</div>
+            <div class="stack">
+              <div class="node"><span class="t">sweep 任务</span><span class="d">沿用原 sync_profiles 逻辑</span></div>
+              <div class="node"><span class="t">device 任务</span><span class="d">sync_device_full(openid)</span></div>
+            </div>
+          </div>
+          <div class="legend">
+            <span><i style="background:var(--accent)"></i>触发点 → 入队</span>
+            <span><i style="background:var(--ink)"></i>唯一执行线程</span>
+            <span><i style="background:var(--accent-soft);border:1px dashed var(--accent)"></i>待执行任务</span>
+          </div>
+        </div>
+
+        <div class="twocol" style="margin-top:18px">
+          <div class="panel good">
+            <h4>由此获得</h4>
+            <ul>
+              <li>定时轮与登录触发<strong>不会并发</strong></li>
+              <li>不同账号<strong>按 FIFO 串行</strong>，不叠加请求</li>
+              <li>同一设备重复触发<strong>自动去重</strong></li>
+              <li>登录接口只做入队，<strong>响应不变慢</strong></li>
+            </ul>
+          </div>
+          <div class="panel bad">
+            <h4>刻意不做</h4>
+            <ul>
+              <li>不引入 Redis / Celery 等外部依赖</li>
+              <li>不新建队列表，不增加数据库压力</li>
+              <li>不改消息收发与 WebSocket 链路</li>
+              <li>不重写现有四条资料链路</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="rules">
+        <div class="sec-head"><span class="sec-no">03</span><h2>互斥与排队规则</h2></div>
+        <table>
+          <thead><tr><th style="width:24%">场景</th><th style="width:22%">入队 key</th><th>行为</th></tr></thead>
+          <tbody>
+            <tr><td>30 分钟定时到点</td><td><code>sweep</code></td><td>投递一轮全量兜底；若 <code>sweep</code> 已在队列/执行中则不重复投递。</td></tr>
+            <tr><td>登录成功且 <code>open_id</code> 非空</td><td><code>device:{openid}</code></td><td>投递该设备全量任务；若同一设备已在队列/执行中则丢弃。</td></tr>
+            <tr><td>登录成功但未绑定设备</td><td>—</td><td class="bad">不入队，不做任何资料请求。</td></tr>
+            <tr><td>队列已有任务</td><td>—</td><td class="good">FIFO 排队，前一个执行结束才取下一个。</td></tr>
+            <tr><td>某个任务执行失败</td><td>—</td><td>捕获异常、回滚 session、记审计 fail，worker 继续消费后续任务。</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>并发保证：</strong>唯一 worker 线程 + 队列去重，保证「任一时刻只有一个资料获取在跑」，因此 <code>group_profile._pending</code> 等模块级内存状态不会被两个资料任务同时改写。</div>
+        <div class="callout warn"><strong>边界：</strong>队列是进程内内存结构，依赖当前单进程部署（<code>python backend/app.py</code>，<code>use_reloader=False</code>）。若未来多进程部署，需要换成数据库锁或分布式队列。</div>
+      </section>
+
+      <section id="incremental">
+        <div class="sec-head"><span class="sec-no">04</span><h2>登录全量策略</h2></div>
+        <p>登录触发对当前登录设备执行与 30 分钟兜底轮相同的四步全量链路，只是范围限定为该设备；队列保证两者不会并发，其它设备不受影响。</p>
+        <table>
+          <thead><tr><th style="width:22%">数据类别</th><th style="width:30%">30 分钟兜底轮</th><th>登录触发（单设备全量）</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>通讯录名册</td>
+              <td>拉全量 <code>fetch_contacts_list_cache</code> 并 upsert</td>
+              <td>同样拉全量并 upsert（仅该设备）</td>
+            </tr>
+            <tr>
+              <td>群名 / 群头像 / 成员名册</td>
+              <td>收割上轮结果 + 补发缺失群</td>
+              <td>收割该设备上轮结果 + 补发该设备缺失群</td>
+            </tr>
+            <tr>
+              <td>好友昵称 / 头像</td>
+              <td>拉好友列表 + 缺失单聊 <code>brief_info</code>（20/批）</td>
+              <td>同样拉好友列表 + 缺失单聊（仅该设备）</td>
+            </tr>
+            <tr>
+              <td>群成员头像</td>
+              <td>缺额补 40 个</td>
+              <td>缺额补 40 个</td>
+            </tr>
+            <tr>
+              <td>范围差异</td>
+              <td>全部在役设备</td>
+              <td class="good">仅当前登录账号绑定的设备</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>登录全量执行顺序</h3>
+        <ul class="plain">
+          <li><strong>① 通讯录：</strong>拉全量 wxid 清单 → 入库 → 补缺失昵称头像。</li>
+          <li><strong>② 群：</strong>收割该设备上轮结果，并补发该设备缺失群（结果下一轮收割）。</li>
+          <li><strong>③ 好友：</strong>拉好友列表，补齐缺资料单聊（≤20/批）。</li>
+          <li><strong>④ 群成员头像：</strong>只补 <code>avatar is null</code> 的成员，最多 40 个。</li>
+          <li><strong>⑤ 串行保证：</strong>与 30 分钟兜底轮共用队列，前一任务结束才执行下一个。</li>
+        </ul>
+      </section>
+
+      <section id="changes">
+        <div class="sec-head"><span class="sec-no">05</span><h2>代码改动清单</h2></div>
+        <div class="filelist">
+          <div class="file">
+            <div class="name">backend/sync/profile_jobs.py <span class="tag">NEW</span></div>
+            <p class="desc"><b>队列与 worker：</b><code>ensure_worker(app)</code>、<code>enqueue_sweep(app)</code>、<code>enqueue_device(app, openid, reason)</code>、<code>enqueue_login_sync(app, user)</code>；内部维护 <code>Queue</code> + 去重集合 + 单线程循环。</p>
+          </div>
+          <div class="file">
+            <div class="name">backend/sync/profile_sync.py</div>
+            <p class="desc"><b>新增全量入口：</b><code>sync_device_full(openid)</code>，复用 <code>contact_sync.sync_contacts_of_device</code>、<code>group_profile.collect/dispatch(openid)</code>、<code>friend_profile.sync_friend_profiles_of_device</code>、<code>group_member.refresh_avatars_of_device</code>；原 <code>sync_profiles(app)</code> 保持不变，供 sweep 与现有单测使用。</p>
+          </div>
+          <div class="file">
+            <div class="name">backend/sync/group_profile.py</div>
+            <p class="desc"><b>支持按设备过滤：</b><code>collect_group_results(openid=None)</code>、<code>dispatch_group_tasks(openid=None)</code>、<code>unnamed_groups(limit, openid=None)</code>；默认 <code>None</code> 保持原有全量行为，登录全量只处理该设备。</p>
+          </div>
+          <div class="file">
+            <div class="name">backend/app.py</div>
+            <p class="desc"><b>调度改造：</b>资料任务从直接调用 <code>sync_profiles(app)</code> 改为 <code>profile_jobs.enqueue_sweep(app)</code>；<code>init_scheduler</code> 中调用 <code>ensure_worker(app)</code> 只启动一次 worker。</p>
+          </div>
+          <div class="file">
+            <div class="name">backend/api/auth.py</div>
+            <p class="desc"><b>登录触发：</b>登录成功后调用 <code>profile_jobs.enqueue_login_sync(current_app, user)</code>；是否绑定设备由队列层判断，接口保持非阻塞。</p>
+          </div>
+          <div class="file">
+            <div class="name">backend/config.py</div>
+            <p class="desc"><b>可选开关：</b><code>PROFILE_LOGIN_SYNC_ENABLED</code>（默认 true），便于线上临时关闭登录触发而不改代码。</p>
+          </div>
+          <div class="file">
+            <div class="name">backend/tests/test_profile_jobs.py <span class="tag">NEW</span></div>
+            <p class="desc"><b>新增单测：</b>去重、冷却、登录触发、单设备全量四步路由、通讯录/好友/群补缺。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="tests">
+        <div class="sec-head"><span class="sec-no">06</span><h2>测试计划</h2></div>
+        <ul class="plain">
+          <li><strong>队列去重：</strong>同一 openid 连续入队两次，队列里只有 1 个任务。</li>
+          <li><strong>串行执行：</strong>两个任务共用一个 fake runner，记录进入/退出顺序，断言不重叠、顺序为 FIFO。</li>
+          <li><strong>登录触发：</strong>绑定 <code>open_id</code> 的账号登录会入队；未绑定 / 已停用不入队。</li>
+          <li><strong>全量路由：</strong>登录任务依次执行通讯录 → 群收割/补发 → 好友资料 → 群成员头像，且只传登录设备 openid。</li>
+          <li><strong>补缺验证：</strong>通讯录缺资料、好友缺资料、缺失群下发分别验证。</li>
+          <li><strong>回归：</strong>现有 <code>test_profile_sync</code> / <code>test_message_sync</code> / <code>test_contact_sync</code> 全绿。</li>
+        </ul>
+        <div class="callout">单测中不启动真实 worker 线程（<code>app.config["TESTING"]</code> 时只记录入队），避免内存 SQLite 跨线程问题。</div>
+      </section>
+
+      <section id="risks">
+        <div class="sec-head"><span class="sec-no">07</span><h2>风险与边界</h2></div>
+        <table>
+          <thead><tr><th style="width:30%">风险</th><th>处理</th></tr></thead>
+          <tbody>
+            <tr><td>内存队列只适用于单进程</td><td>记录为已知边界；多进程部署需换 DB 锁/分布式队列，不在本次范围。</td></tr>
+            <tr><td>worker 长期运行异常退出</td><td>worker 循环对每个任务 try/except；线程 daemon 化，不影响 Flask 主进程退出。</td></tr>
+            <tr><td>DB session 跨任务残留</td><td>每个任务结束 <code>finally</code> 中 <code>db.session.remove()</code>。</td></tr>
+            <tr><td>登录触发过于频繁</td><td>已加同一设备 6 小时冷却，并对排队中的任务去重。</td></tr>
+            <tr><td>消息触发的立即补拉仍在队列外</td><td>现有 <code>sync_once</code> 内的 <code>refresh_missing_profiles</code> 按已确认范围暂不迁移。</td></tr>
+          </tbody>
+        </table>
+        <div class="callout alert"><strong>已存在的并行风险：</strong>消息轮询线程会直接调用 <code>refresh_missing_profiles</code>，与 worker 仍可能同时读写 <code>group_profile</code> 内存状态。本次按已确认范围只解决 30 分钟轮与登录触发，消息触发链路保持现状。</div>
+      </section>
+
+      <section id="decisions">
+        <div class="sec-head"><span class="sec-no">08</span><h2>已确认决策</h2></div>
+        <div class="decision">
+          <div class="item">
+            <div class="num">01</div>
+            <p><b>排队范围：</b>仅「30 分钟兜底轮 + 登录触发」纳入队列；消息收发主链路与其立即补拉保持现状。</p>
+          </div>
+          <div class="item">
+            <div class="num">02</div>
+            <p><b>登录冷却：</b>同一设备 6 小时内只触发一次全量；30 分钟兜底轮不受冷却影响。</p>
+          </div>
+          <div class="item">
+            <div class="num">03</div>
+            <p><b>登录同步范围：</b>对当前登录账号绑定的设备做全量四步（通讯录 / 群资料 / 好友资料 / 群成员头像），其它设备不受影响。</p>
+          </div>
+        </div>
+        <div class="callout"><strong>实现状态：</strong>队列、冷却、单设备全量入口与单测均已落地；<code>backend/tests</code> 全量 189 项通过。</div>
+      </section>
+
+      <footer>
+        <span>WX_APP · backend/sync · 2026-10-31</span>
+        <span>已确认并实施 · 189 项测试通过</span>
+      </footer>
+    </main>
+  </div>
+</div>
+</body>
+</html>

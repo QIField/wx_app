@@ -90,7 +90,7 @@ def init_scheduler(app: Flask):
     from backend.services.audit import clean_expired_logs
     from backend.sync.confirm_worker import confirm_once
     from backend.sync.message_sync import sync_once
-    from backend.sync.profile_sync import sync_profiles
+    from backend.sync import profile_jobs
 
     sched = BackgroundScheduler(daemon=True)
     sched.add_job(
@@ -107,8 +107,9 @@ def init_scheduler(app: Flask):
         id="confirm_send",
         max_instances=1,
     )
+    # 资料同步统一走任务队列：定时轮只投递任务，由单 worker 与登录触发串行消费
     sched.add_job(
-        lambda: sync_profiles(app),
+        lambda: profile_jobs.enqueue_sweep(app),
         "interval",
         seconds=PROFILE_INTERVAL_SECONDS,
         id="sync_profiles",
@@ -123,6 +124,7 @@ def init_scheduler(app: Flask):
         id="clean_audit_logs",
         max_instances=1,
     )
+    profile_jobs.ensure_worker(app)  # 资料同步唯一 worker，先于定时任务启动
     sched.start()
     return sched
 
