@@ -254,7 +254,7 @@ input[type="password"]::-ms-clear {
   background: linear-gradient(90deg, var(--c-navy), var(--c-navy-2));
   color: #fff;
 }
-.brand { display: flex; align-items: center; gap: 9px; }
+.brand { display: flex; align-items: center; gap: 9px; user-select: none; }
 .logo {
   width: 26px; height: 26px; border-radius: var(--r-sm);
   background: var(--c-primary); color: #fff;

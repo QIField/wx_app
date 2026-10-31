@@ -139,7 +139,7 @@ onMounted(async () => {
   background: linear-gradient(90deg, var(--c-navy), var(--c-navy-2));
   color: #fff;
 }
-.brand { display: flex; align-items: center; gap: 9px; }
+.brand { display: flex; align-items: center; gap: 9px; user-select: none; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .name { font-size: 13px; font-weight: 600; letter-spacing: 1px; }
 .sub { font-size: 10px; color: rgba(255, 255, 255, 0.55); }

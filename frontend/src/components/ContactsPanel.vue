@@ -168,6 +168,7 @@ function isSelected(type, id) {
 .contacts { display: flex; flex-direction: column; height: 100%; }
 .head {
   padding: 10px 12px 8px;
+  user-select: none;
   border-bottom: 1px solid var(--c-border);
 }
 .title { font-weight: 600; font-size: 13px; }
@@ -239,6 +240,7 @@ function isSelected(type, id) {
   position: sticky; top: 0; z-index: 2;
   padding: 3px 12px;
   font-size: 11px; font-weight: 700;
+  user-select: none;
   color: var(--c-primary-deep);
   background: #f4f6fa;
   border-top: 1px solid var(--c-border);
@@ -249,7 +251,7 @@ function isSelected(type, id) {
 .item {
   display: flex; gap: 9px; align-items: center;
   padding: 7px 12px;
-  cursor: pointer; position: relative;
+  cursor: pointer; user-select: none; position: relative;
   border-bottom: 1px solid #f2f4f8;
   animation: slide-in 0.28s both;
 }

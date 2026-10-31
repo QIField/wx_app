@@ -58,6 +58,7 @@ function first(c) {
 .head {
   display: flex; justify-content: space-between; align-items: center;
   padding: 10px 12px 8px;
+  user-select: none;
   border-bottom: 1px solid var(--c-border);
 }
 .title { font-weight: 600; font-size: 13px; }
@@ -68,6 +69,7 @@ function first(c) {
   display: flex; gap: 9px;
   padding: 8px 12px;
   cursor: pointer;
+  user-select: none;
   position: relative;
   border-bottom: 1px solid #f2f4f8;
   animation: slide-in 0.28s both;
