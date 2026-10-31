@@ -112,13 +112,18 @@ def list_messages(conversation_id):
     rows = q.order_by(Message.id.desc()).limit(page_size).all()
     rows.reverse()  # 库里倒序取最新一页，翻转成正序给前端
 
+    # 群消息发言人资料：存库是 wxid 原文，展示时实时关联群成员名册（单聊返回空映射）
+    from backend.sync import group_member
+
+    sender_map = group_member.sender_map_for(conv, [m.sender_wxid for m in rows])
+
     has_more = len(rows) == page_size
     return jsonify(
         code=0,
         msg="success",
         data={
             "conversation": _conv_json(conv),
-            "messages": [_msg_json(m) for m in rows],
+            "messages": [_msg_json(m, sender_map) for m in rows],
             "next_before_id": rows[0].id if has_more and rows else None,
         },
     )
@@ -138,13 +143,15 @@ def _conv_json(c):
     }
 
 
-def _msg_json(m):
+def _msg_json(m, sender_map=None):
+    info = (sender_map or {}).get(m.sender_wxid or "")
     return {
         "id": m.id,
         "msg_type": m.msg_type,
         "direction": m.direction,
         "sender_wxid": m.sender_wxid,
-        "sender_name": m.sender_name,
+        "sender_name": (info or {}).get("nickname") or m.sender_name,
+        "sender_avatar": (info or {}).get("avatar"),
         "content": m.content,
         "payload": m.payload,
         "create_time": m.create_time.strftime("%Y-%m-%d %H:%M:%S"),

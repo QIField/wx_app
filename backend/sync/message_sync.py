@@ -20,6 +20,7 @@ from backend.models.sync_cursor import SyncCursor
 from backend.services import conversations as conversation_service
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.devices import active_bound_devices
+from backend.sync import msg_xml, revoke
 
 PAGE_SIZE = 100        # 每轮拉一页；单轮增量超一页的情况极少，靠下一轮补
 FIRST_HOURS = 1        # 首次运行没有游标时，从最近 1 小时开始拉
@@ -34,19 +35,30 @@ _TYPE_MAP = {
     49: Message.MSG_LINK,  # appmsg：链接/文件类，暂归链接
 }
 
+# content XML 内容分类 → 本系统类型（msg_type=1 里塞的图片/链接/撤回等，实测 2026-10-31）
+_KIND_TO_TYPE = {
+    msg_xml.IMAGE: Message.MSG_IMAGE,
+    msg_xml.VIDEO: Message.MSG_VIDEO,
+    msg_xml.VOICE: Message.MSG_VOICE,
+    msg_xml.EMOJI: Message.MSG_EMOJI,
+    msg_xml.FILE: Message.MSG_FILE,
+    msg_xml.LINK: Message.MSG_LINK,
+}
+
 
 def sync_once(app):
     """跑一轮同步：遍历所有绑定设备的账号，逐设备拉增量。由定时器或测试触发。"""
     with app.app_context():
         for openid in active_bound_devices():
             try:
-                pushed = sync_device(openid)
+                pushed, revokes = sync_device(openid)
             except Exception as exc:  # noqa: BLE001 单设备失败不拖垮其他设备
                 db.session.rollback()
                 log_action(AuditModule.SYNC, "消息同步", f"设备 {openid}",
                            result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
                 continue
             broadcast_messages(pushed)
+            broadcast_revokes(revokes)
             if pushed:  # 新消息涉及的会话缺名称/头像时立即补拉（函数内部自行容错）
                 from backend.sync.profile_sync import refresh_missing_profiles
 
@@ -54,7 +66,7 @@ def sync_once(app):
 
 
 def sync_device(openid):
-    """同步单台设备，返回待广播的入库消息列表（commit 已完成）。"""
+    """同步单台设备，返回 (待广播的新消息列表, 撤回事件列表)，commit 已完成。"""
     cursor = _get_cursor(openid)
     params = {
         "start_create_time": cursor.last_sync_time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -65,13 +77,14 @@ def sync_device(openid):
         body = middle_client.call("messag_api", "get_message", params, openid=openid)
     except Exception:
         db.session.rollback()  # 拉取失败：游标不动，下一轮重来
-        return []
+        return [], []
 
     items = _extract_messages(body)
     latest = cursor.last_sync_time
-    pushed = []  # 本轮新入库的消息，commit 后统一广播
+    pushed = []   # 本轮新入库的消息，commit 后统一广播
+    revokes = []  # 本轮命中的撤回事件（原消息已打标），commit 后广播
     for item in items:
-        saved = _save_message(openid, item)
+        saved = _save_message(openid, item, revokes)
         if saved is None:
             continue
         pushed.append(saved)
@@ -80,24 +93,48 @@ def sync_device(openid):
 
     cursor.last_sync_time = latest
     db.session.commit()
-    return pushed
+    return pushed, revokes
 
 
 def broadcast_messages(pushed):
-    """commit 之后才广播：保证前端听到推送时库里一定能查到。"""
+    """commit 之后才广播：保证前端听到推送时库里一定能查到。
+
+    群消息发言人昵称/头像实时关联群成员名册（存库是 wxid 原文），
+    前端直接消费推送数据，所以这里解析完再推。
+    """
     if not pushed:
         return
+    from backend.models.conversation import Conversation
+    from backend.sync import group_member
     from backend.ws import hub
+
+    sender_maps = {}
+    conv_ids = {p["conversation_id"] for p in pushed}
+    convs = Conversation.query.filter(Conversation.id.in_(conv_ids)).all()
+    for conv in convs:
+        wxids = [p["sender_wxid"] for p in pushed if p["conversation_id"] == conv.id]
+        sender_maps[conv.id] = group_member.sender_map_for(conv, wxids)
+
     for saved in pushed:
+        info = sender_maps.get(saved["conversation_id"], {}).get(saved["sender_wxid"] or "")
         hub.broadcast("new_message", {
             "message_id": saved["message_id"],
             "conversation_id": saved["conversation_id"],
             "direction": saved["direction"],
             "msg_type": saved["msg_type"],
             "content": saved["content"],
-            "sender_name": saved["sender_name"],
+            "payload": saved.get("payload") or {},  # 系统灰条带 system 标记；卡片信息前端兜底解析
+            "sender_name": (info or {}).get("nickname") or saved["sender_name"],
+            "sender_avatar": (info or {}).get("avatar"),
             "create_time": saved["create_time"].strftime("%Y-%m-%d %H:%M:%S"),
         })
+
+
+def broadcast_revokes(revokes):
+    """撤回事件广播：前端把对应气泡换成微信样式灰条。"""
+    from backend.ws import hub
+    for event in revokes:
+        hub.broadcast("message_revoked", event)
 
 
 def _get_cursor(openid):
@@ -126,14 +163,20 @@ def _extract_messages(body):
     return (data or {}).get("list") or []
 
 
-def _save_message(openid, item):
+def _save_message(openid, item, revokes=None):
     """单条消息入库：去重 → 转字段 → 建/找会话 → 写 message → 更新会话。
 
-    返回推送信息字典（commit 后供广播用）；重复或坏数据返回 None。
+    撤回通知不入库：按 msgid 定位原消息打 revoked 标记，事件挂到 revokes；
+    原消息找不到（未同步过）就落一条系统灰条兜底，保证撤回这件事可见。
+    正常入库时返回推送信息字典（commit 后供广播用）；重复或坏数据返回 None。
     """
     fields = _normalize(item)
     if fields is None:
         return None
+
+    # 撤回通知：标记原消息或落兜底灰条，本身不作为消息入库
+    if fields["revoke"]:
+        return revoke.apply_revoke(openid, fields, revokes)
 
     # 去重：middle_msg_id 已存在就整条跳过
     if fields["middle_msg_id"]:
@@ -173,6 +216,8 @@ def _save_message(openid, item):
         "direction": fields["direction"],
         "msg_type": fields["msg_type"],
         "content": fields["content"],
+        "payload": fields["payload"],
+        "sender_wxid": fields["sender_wxid"],
         "sender_name": fields["sender_name"],
         "create_time": fields["create_time"],
     }
@@ -182,6 +227,8 @@ def _normalize(item):
     """中间方一条消息 → 入库字段（结构按 2026-10-29 联调实测）。
 
     方向规则：from == 设备wxid（raw_json.Wxid）视为自己发出的，否则为客户发来。
+    content 实为微信 XML 时（实测图片/链接/撤回都塞在 msg_type=1 里）按内容
+    还原真实类型；撤回通知带出定位信息交 revoke.apply_revoke 处理。
     """
     try:
         from_wxid = item.get("from_wxid", "")
@@ -214,6 +261,17 @@ def _normalize(item):
                 sender_wxid = head
                 content = rest
 
+        # 按内容还原真实类型（撤回通知单独标记，卡片类补结构化信息给前端）
+        revoke = None
+        kind = msg_xml.classify(content)
+        if kind == msg_xml.REVOKE:
+            revoke = msg_xml.revoke_info(content)
+        elif kind is not None:
+            msg_type = _KIND_TO_TYPE[kind]
+        payload = dict(item)
+        if kind in (msg_xml.LINK, msg_xml.FILE):
+            payload["app"] = msg_xml.app_info(content)
+
         return {
             "direction": direction,
             "peer_wxid": peer_wxid,
@@ -226,7 +284,8 @@ def _normalize(item):
             "sender_name": item.get("sender_name") or sender_wxid,
             "msg_type": msg_type,
             "content": content,
-            "payload": dict(item),  # 原文全量留底
+            "payload": payload,
+            "revoke": revoke,
             "middle_msg_id": str(item.get("msg_id") or ""),
             "new_msg_id": str(
                 item.get("new_msg_id")
@@ -284,7 +343,7 @@ def _parse_time(value):
 
 
 def _short_summary(msg_type, content):
-    """会话列表的摘要：文本截 50 字，其他类型显示标签。"""
+    """会话列表的摘要：文本截 50 字，XML 卡片取标题，其他类型显示标签。"""
     labels = {
         Message.MSG_IMAGE: "[图片]",
         Message.MSG_FILE: "[文件]",
@@ -293,5 +352,13 @@ def _short_summary(msg_type, content):
         Message.MSG_VOICE: "[语音]",
         Message.MSG_EMOJI: "[表情]",
     }
-    text = labels.get(msg_type, content or "")
+    text = labels.get(msg_type)
+    if text is None:
+        text = content or ""
+        if text.lstrip().startswith("<"):
+            text = "[系统消息]"  # 拍一拍/游戏中心等无法识别的系统 XML
+    if msg_type in (Message.MSG_LINK, Message.MSG_FILE):
+        title = msg_xml.app_info(content).get("title")
+        if title:
+            text = f"{text} {title}"
     return text[:50]

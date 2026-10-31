@@ -7,6 +7,7 @@
 from backend.adapter import client
 from backend.extensions import db
 from backend.models.conversation import Conversation
+from backend.sync import group_member
 from backend.sync.task_query import (
     as_dict,
     new_task_uuid,
@@ -28,8 +29,24 @@ _pending_fails = {}  # task_uuid -> 收割失败轮数（超 5 轮丢弃，防�
 
 
 def missing_profile(conv):
-    """资料是否缺失：名称为空/仍是 wxid 原始编号，或头像为空。"""
-    return conv.name in (None, "", conv.wxid) or not conv.avatar
+    """资料是否缺失：群名/头像缺失，或群聊的成员名册还没落库。
+
+    成员名册（group_member）是消息发言人昵称/头像的数据源，所以
+    "资料看起来齐全但名册为空"的群也要算缺资料，触发 chatroom_info 补拉。
+    """
+    if conv.name in (None, "", conv.wxid) or not conv.avatar:
+        return True
+    if conv.chat_type != Conversation.CHAT_GROUP:
+        return False
+    from backend.models.group_member import GroupMember
+
+    has_members = (
+        db.session.query(GroupMember.id)
+        .filter_by(openid=conv.openid, chatroom_wxid=conv.wxid)
+        .first()
+        is not None
+    )
+    return not has_members
 
 
 def sync_group_names():
@@ -77,6 +94,23 @@ def dispatch_group_tasks():
 
 
 def unnamed_groups(limit):
+    """需要补群资料的会话：缺名称/头像，或群成员名册还没落库（两来源合并去重）。"""
+    rooms = []
+    seen = set()
+
+    def _collect(rows):
+        for conv in rows:
+            if conv.id not in seen:
+                seen.add(conv.id)
+                rooms.append(conv)
+
+    _collect(_name_missing_groups(limit))
+    if len(rooms) < limit:
+        _collect(_members_missing_groups(limit - len(rooms)))
+    return rooms[:limit]
+
+
+def _name_missing_groups(limit):
     """没有名字的群会话（name 为空或还显示着 wxid 原始编号）。"""
     return (
         Conversation.query.filter(
@@ -85,6 +119,33 @@ def unnamed_groups(limit):
             db.or_(Conversation.name.is_(None), Conversation.name == Conversation.wxid),
         )
         # MySQL 5.7 不支持 NULLS LAST，用 IS NULL 布尔排序两端方言通吃（空值排最后）
+        .order_by(
+            Conversation.last_msg_at.is_(None),
+            Conversation.last_msg_at.desc(),
+            Conversation.id,
+        )
+        .limit(limit)
+        .all()
+    )
+
+
+def _members_missing_groups(limit):
+    """成员名册为空的群会话（发言人昵称/头像的数据源）。"""
+    from backend.models.group_member import GroupMember
+
+    return (
+        Conversation.query.outerjoin(
+            GroupMember,
+            db.and_(
+                GroupMember.openid == Conversation.openid,
+                GroupMember.chatroom_wxid == Conversation.wxid,
+            ),
+        )
+        .filter(
+            Conversation.deleted_at.is_(None),
+            Conversation.chat_type == Conversation.CHAT_GROUP,
+            GroupMember.id.is_(None),
+        )
         .order_by(
             Conversation.last_msg_at.is_(None),
             Conversation.last_msg_at.desc(),
@@ -117,9 +178,23 @@ def refresh_groups_now(openid, groups):
         info = parse_group_info(record)
         if info:
             apply_group_info(conv.id, conv.wxid, info)
+            _refresh_member_avatars_now(conv)  # 名册刚落，立即补头像避免等兜底轮
         else:
             # 已出结果但 ret != 200：接口真实失败，计入失败数交给限流/兜底
             _fail_counts[key] = _fail_counts.get(key, 0) + 1
+
+
+def _refresh_member_avatars_now(conv):
+    """消息触发路径：收割完单群名册后立即补该群成员头像（一次批量约 4 秒）。
+
+    每群最多 20 人/次，超出的与失败都留给 30 分钟兜底轮，不阻塞收消息。
+    """
+    try:
+        if group_member.refresh_avatars_of_device(conv.openid, chatroom_wxid=conv.wxid):
+            db.session.commit()
+            broadcast("conv_updated", {"conversation_id": conv.id})
+    except Exception:  # noqa: BLE001 补头像失败不影响收消息主链路
+        db.session.rollback()
 
 
 def apply_group_info(conv_id, wxid, info):
@@ -133,6 +208,9 @@ def apply_group_info(conv_id, wxid, info):
     if info.get("avatar") and not conv.avatar:
         conv.avatar = info["avatar"]
         changed = True
+    # memberList 顺带落群成员名册（消息展示靠它解析发言人昵称）
+    if info.get("members") and group_member.save_members(conv.openid, wxid, info["members"]):
+        changed = True
     if changed:
         db.session.commit()
         _fail_counts.pop((conv.openid, conv.wxid), None)
@@ -140,18 +218,24 @@ def apply_group_info(conv_id, wxid, info):
 
 
 def parse_group_info(record):
-    """任务记录 → {nickname, avatar}。
+    """任务记录 → {nickname, avatar, members}。
 
     2026-10-30 实测 processing_result.data：
-    nickName=群名, smallHeadImgUrl=群头像, memberList=成员(含昵称，后续接)。
+    nickName=群名, smallHeadImgUrl=群头像,
+    memberList=成员（wxid+nickName；头像为空，走 brief_info 补拉）。
     """
     data_raw = unwrap_result(record)
     if data_raw is None:
         return None
     data = as_dict(data_raw)
+    members = []
+    for row in data.get("memberList") or []:
+        if isinstance(row, dict) and row.get("wxid"):
+            members.append({"wxid": row["wxid"], "nickname": pick(row, ("nickName", "nickname", "displayName"))})
     return {
         "nickname": pick(data, ("nickName", "nickname", "chatroom_name", "name")),
         "avatar": pick(data, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "avatar")),
+        "members": members,
     }
 
 

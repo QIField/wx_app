@@ -33,6 +33,27 @@ def sync_profiles(app):
             friend_profile.sync_friend_profiles()
         except Exception as exc:  # noqa: BLE001
             app.logger.warning("好友资料解析失败: %s", exc)
+        try:
+            refresh_group_member_avatars(app)
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("群成员头像补拉失败: %s", exc)
+
+
+def refresh_group_member_avatars(app):
+    """群成员头像兜底补拉：逐设备补缺额，有更新就广播前端刷新。"""
+    from backend.services.devices import active_bound_devices
+    from backend.sync import group_member
+
+    for openid in active_bound_devices():
+        try:
+            if group_member.refresh_avatars_of_device(openid):
+                db.session.commit()
+                from backend.ws import hub
+
+                hub.broadcast("conv_updated", {"reason": "group_member_avatars"})
+        except Exception as exc:  # noqa: BLE001 单设备失败不影响其他设备
+            db.session.rollback()
+            app.logger.warning("群成员头像补拉失败(设备 %s): %s", openid, exc)
 
 
 def refresh_missing_profiles(openid, conv_ids):

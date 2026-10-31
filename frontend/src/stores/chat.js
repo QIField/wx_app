@@ -96,15 +96,22 @@ export const useChatStore = defineStore('chat', {
       })
     },
 
-    /** 群名/好友资料解析完成后推送：重拉列表拿最新的名字和头像。 */
-    onConvUpdated() {
-      this.loadConversations()
+    /** 资料解析完成后推送：重拉列表；当前会话重拉消息（昵称/头像补齐即刷新）。 */
+    async onConvUpdated() {
+      await this.loadConversations()
+      if (this.currentId) {
+        const data = await fetchMessages(this.currentId)
+        this.currentMessages = data.messages
+        this.hasMore = !!data.next_before_id
+      }
     },
 
     onNewMessage(d) {
       const conv = this.conversations.find((c) => c.id === d.conversation_id)
       if (conv) {
-        conv.last_msg = d.content
+        // 系统灰条直接用原文；残留的微信 XML（未识别类型）不进会话摘要
+        const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
+        conv.last_msg = d.payload?.system || isXml ? '[系统消息]' : d.content
         conv.last_msg_at = d.create_time
         if (d.conversation_id !== this.currentId) conv.unread_count += 1
       } else {

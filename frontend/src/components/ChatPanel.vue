@@ -1,14 +1,16 @@
 <script setup>
-/** 中栏：聊天窗 + 输入框。气泡带头像昵称；状态只区分 发送中/已发送/失败。 */
+/** 中栏：聊天窗 + 输入框。消息行渲染见 MessageRow.vue（气泡/灰条/卡片）。 */
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getToken } from '../api'
 import { useChatStore } from '../stores/chat'
+import MessageRow from './MessageRow.vue'
 
 const chat = useChatStore()
 const input = ref('')
 const scroller = ref(null)
+const composerEl = ref(null)
 const composerH = ref(52)
+const previewUrl = ref('') // 图片全屏预览地址
 
 /* 顶部拖拽拉伸：按住输入框上边缘上下拖，向上拖=变高 */
 let drag = null
@@ -26,14 +28,6 @@ function onGrabUp() {
   drag = null
 }
 
-const TYPE_LABEL = { 2: '[图片]', 3: '[文件]', 4: '[视频]', 5: '[链接]', 6: '[语音]', 7: '[表情]' }
-const STATUS_LABEL = { 0: '发送中', 1: '已发送', 2: '失败' }
-
-/* 媒体地址：<img>/<audio>/<video> 带不了 Authorization 头，统一走 ?token= 兜底 */
-function mediaUrl(m) {
-  return `/api/messages/${m.id}/media?token=${encodeURIComponent(getToken())}`
-}
-
 /* 相邻消息间隔超过 30 分钟时插一条时间分隔线（参照标准界面蓝色时间线） */
 const timeline = computed(() => {
   const out = []
@@ -47,32 +41,36 @@ const timeline = computed(() => {
   return out
 })
 
-/* 行头像：in=客户（群消息取发言人首字，单聊取会话名首字）；out=客服 */
-function avatarOf(m) {
-  if (m.direction === 2) return '客'
-  const s = chat.currentConv?.chat_type === 2
-    ? (m.sender_name || '客')
-    : (chat.currentConv?.name || chat.currentConv?.wxid || '?')
-  return s.slice(0, 1).toUpperCase()
+/* 置底：直接赋值 scrollTop，瞬时到位（不做平滑滚动） */
+function stickBottom() {
+  const w = scroller.value?.wrapRef
+  if (w) w.scrollTop = w.scrollHeight
 }
 
-/* 入方向消息的微信头像：仅单聊有（群成员头像后续接群成员接口） */
-function picOf(m) {
-  if (m.direction === 2) return null
-  return chat.currentConv?.chat_type === 1 ? chat.currentConv?.avatar : null
-}
-function nameOf(m) {
-  if (m.direction === 2) return '客服'
-  return chat.currentConv?.chat_type === 2 ? (m.sender_name || '成员') : (chat.currentConv?.name || chat.currentConv?.wxid)
-}
-
+/* 切会话→定位到最新一条；追加新消息→跟到底；上翻加载旧消息→保持视野不动。
+   监听数组引用而非仅长度：切会话时新旧消息数量常相同，只看长度不会触发。
+   flush 默认 pre：DOM 更新前先量旧高度，供加载旧消息后做高度补偿。 */
 watch(
-  () => [chat.currentId, chat.currentMessages.length],
-  async () => {
-    await nextTick()
-    const el = scroller.value
-    if (el) el.scrollTop = el.scrollHeight
-  }
+  () => [chat.currentId, chat.currentMessages, chat.currentMessages.length],
+  async ([id, msgs], [prevId, prevMsgs] = []) => {
+    if (!id) return
+    const wrap = scroller.value?.wrapRef
+    if (!wrap) return
+    const switched = id !== prevId
+    const appended =
+      !switched && msgs[msgs.length - 1]?.id !== prevMsgs?.[prevMsgs.length - 1]?.id
+    if (switched || appended) {
+      await nextTick()
+      stickBottom()
+    } else if (msgs[0]?.id !== prevMsgs?.[0]?.id) {
+      const prevH = wrap.scrollHeight
+      const prevTop = wrap.scrollTop
+      await nextTick()
+      const w = scroller.value?.wrapRef
+      if (w) w.scrollTop = w.scrollHeight - prevH + prevTop
+    }
+  },
+  { immediate: true }
 )
 
 async function onSend() {
@@ -84,6 +82,13 @@ async function onSend() {
   } catch (e) {
     ElMessage.error(e.message)
   }
+}
+
+/* 撤回消息的"重新编辑"：原文回填输入框并聚焦 */
+async function onReEdit(content) {
+  input.value = content
+  await nextTick()
+  composerEl.value?.focus()
 }
 </script>
 
@@ -105,30 +110,24 @@ async function onSend() {
           <div v-if="row.type === 'time'" class="time-line num">
             <span>{{ row.label }}</span>
           </div>
-          <div v-else class="msg" :class="row.direction === 2 ? 'out' : 'in'">
-            <img v-if="picOf(row)" class="avatar img" :src="picOf(row)" alt="" referrerpolicy="no-referrer" />
-            <span v-else class="avatar" :class="row.direction === 2 ? 'agent' : 'client'">{{ avatarOf(row) }}</span>
-            <div class="body">
-              <div class="name">{{ nameOf(row) }}</div>
-              <div class="bubble">
-                <div v-if="row.payload?.revoked" class="content revoked">该消息已撤回</div>
-                <img v-else-if="row.msg_type === 2" class="media img" :src="mediaUrl(row)" alt="图片消息" referrerpolicy="no-referrer" />
-                <audio v-else-if="row.msg_type === 6" class="media audio" :src="mediaUrl(row)" controls preload="none"></audio>
-                <video v-else-if="row.msg_type === 4" class="media video" :src="mediaUrl(row)" controls preload="metadata"></video>
-                <img v-else-if="row.msg_type === 7" class="media emoji" :src="mediaUrl(row)" alt="表情" referrerpolicy="no-referrer" />
-                <a v-else-if="row.msg_type === 3" class="content type-label file-link" :href="mediaUrl(row)" download>{{ row.content || '[文件]' }}</a>
-                <div v-else-if="row.msg_type !== 1" class="content type-label">{{ TYPE_LABEL[row.msg_type] || '[未知类型]' }}</div>
-                <div v-else class="content">{{ row.content }}</div>
-                <div class="meta">
-                  <span v-if="row.direction === 2" :class="['st', { fail: row.status === 2 }]">{{ STATUS_LABEL[row.status] }}</span>
-                  <span class="num">{{ row.create_time?.slice(11, 16) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <MessageRow
+            v-else
+            :msg="row"
+            :conv="chat.currentConv"
+            @preview="previewUrl = $event"
+            @reedit="onReEdit"
+          />
         </template>
       </div>
     </el-scrollbar>
+
+    <!-- 图片全屏预览 -->
+    <el-image-viewer
+      v-if="previewUrl"
+      :url-list="[previewUrl]"
+      hide-on-click-modal
+      @close="previewUrl = ''"
+    />
 
     <div class="editor">
       <div class="grab-bar" title="拖拽调整输入框高度" @mousedown.prevent="onGrabDown"><i></i></div>
@@ -140,6 +139,7 @@ async function onSend() {
       </div>
       <div class="input-row">
         <textarea
+          ref="composerEl"
           v-model="input"
           class="composer"
           :style="{ height: composerH + 'px' }"
@@ -161,7 +161,7 @@ async function onSend() {
   border-bottom: 1px solid var(--c-border);
   background: var(--c-panel);
 }
-.peer { font-weight: 600; font-size: 14px; }
+.peer { font-weight: 600; font-size: 14px; user-select: none; }
 .scroll { flex: 1; background: var(--c-bg); }
 .tip { text-align: center; color: var(--c-text-sub); font-size: 12px; padding: 8px; }
 
@@ -175,53 +175,6 @@ async function onSend() {
 }
 
 .msgs { padding: 4px 16px 16px; }
-.revoked { color: var(--c-text-sub); font-style: italic; }
-.msg { display: flex; gap: 8px; margin-bottom: 12px; animation: pop 0.22s both; }
-@keyframes pop {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-.msg.out { flex-direction: row-reverse; }
-
-.avatar {
-  width: 30px; height: 30px; flex-shrink: 0;
-  border-radius: var(--r-sm);
-  color: #fff; font-size: 13px; font-weight: 600;
-  display: flex; align-items: center; justify-content: center;
-  margin-top: 16px;
-}
-.avatar.client { background: var(--c-ok); }
-.avatar.agent { background: var(--c-primary); }
-.avatar.img { object-fit: cover; background: var(--c-surface); }
-
-.body { max-width: 72%; min-width: 0; display: flex; flex-direction: column; }
-.msg.out .body { align-items: flex-end; }
-.name { font-size: 11px; color: var(--c-text-sub); margin-bottom: 2px; }
-
-.bubble {
-  padding: 7px 10px;
-  border-radius: var(--r-lg);
-  background: var(--c-panel);
-  border: 1px solid var(--c-border);
-  width: fit-content;
-}
-.msg.in .bubble { border-top-left-radius: 3px; }
-.msg.out .bubble { background: var(--c-primary-soft); border-color: #c9dbff; border-top-right-radius: 3px; }
-
-/* 媒体消息：图片/表情/语音/视频直接渲染，文件给下载链接 */
-.media { display: block; }
-.media.img { max-width: 200px; max-height: 200px; border-radius: var(--r-sm); object-fit: cover; }
-.media.emoji { width: 120px; }
-.media.audio { width: 240px; height: 36px; }
-.media.video { max-width: 240px; border-radius: var(--r-sm); }
-.file-link { text-decoration: underline; }
-.content { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
-.type-label { color: var(--c-primary); }
-.meta {
-  margin-top: 3px; font-size: 10px; color: var(--c-text-sub);
-  display: flex; gap: 8px; justify-content: flex-end;
-}
-.st.fail { color: var(--c-danger); font-weight: 600; }
 
 .editor { border-top: 1px solid var(--c-border); background: var(--c-panel); padding: 0 12px 10px; }
 .grab-bar {

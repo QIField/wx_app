@@ -4,6 +4,7 @@ from backend.models.base import SoftDeleteMixin
 from backend.models.contact import Contact
 from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
+from backend.models.group_member import GroupMember
 from backend.models.message import Message
 from backend.models.send_task import SendTask
 from backend.models.sync_cursor import SyncCursor
@@ -11,5 +12,5 @@ from backend.models.user import User
 
 __all__ = [
     "SoftDeleteMixin", "AuditLog", "Contact", "ContactProfile", "Conversation",
-    "Message", "SendTask", "SyncCursor", "User",
+    "GroupMember", "Message", "SendTask", "SyncCursor", "User",
 ]
