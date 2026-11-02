@@ -23,6 +23,26 @@ def test_log_action_defaults_to_current_user(app):
     assert log.role == "agent"
     assert log.result == "success"
     assert log.detail is None
+    assert log.org_name is None  # 未分配组织：快照为空
+
+
+def test_log_action_captures_org_snapshot(app):
+    """姓名+组织快照规范：写入那一刻抄录登录人所属组织，不搞关联。"""
+    from flask import request
+
+    from backend.models.org import Org
+
+    org = Org.query.filter_by(name="佛山").first() or Org(name="佛山")
+    db.session.add(org)
+    db.session.commit()
+    user = make_user(name="张客服", org_id=org.id)
+    with app.test_request_context():
+        request.current_user = user
+        log_action(AuditModule.ACCOUNT, "编辑账号", "cs02 · 王五")
+
+    log = AuditLog.query.one()
+    assert log.operator_name == "张客服"
+    assert log.org_name == "佛山"
 
 
 def test_log_action_system_when_no_request(app):

@@ -9,6 +9,7 @@ from flask import current_app, has_request_context, request
 
 from backend.extensions import db
 from backend.models.audit_log import AuditLog
+from backend.services.user_snapshot import current_user, org_of
 
 
 class AuditModule:
@@ -22,12 +23,11 @@ class AuditModule:
 
 
 def _current_operator():
-    """从请求上下文取当前登录人；没有（定时任务）则记系统。"""
-    if has_request_context():
-        user = getattr(request, "current_user", None)
-        if user is not None:
-            return str(user.id), user.name, user.role
-    return None, "系统", "system"
+    """当前登录人（含角色与组织快照）；没有（定时任务）则记系统。"""
+    user = current_user()
+    if user is not None:
+        return str(user.id), user.name, user.role, org_of(user)
+    return None, "系统", "system", None
 
 
 def _client_ip():
@@ -43,13 +43,16 @@ def log_action(module, action, target, result=AuditLog.RESULT_SUCCESS, detail=""
             detail = "未记录失败原因"  # 规范兜底：fail 必须有 detail
 
         if operator is not None:
-            op_id, op_name, op_role = str(operator.id), operator.name, operator.role
+            op_id = str(operator.id)
+            op_name, op_role = operator.name, operator.role
+            op_org = org_of(operator)
         else:
-            op_id, op_name, op_role = _current_operator()
+            op_id, op_name, op_role, op_org = _current_operator()
 
         db.session.add(AuditLog(
             operator_id=op_id,
             operator_name=op_name[:64],
+            org_name=op_org[:64] if op_org else None,
             role=op_role[:32],
             module=str(module)[:32],
             action=str(action)[:64],

@@ -38,6 +38,7 @@ class Message(db.Model, SoftDeleteMixin):
     payload = db.Column(db.JSON, comment="其他字段原文（图片url、视频时长等）")
     operator_id = db.Column(BigIntPK, comment="发出操作人系统账号 id（dir=2 溯源）")
     operator_name = db.Column(db.String(64), comment="发出操作人姓名快照（账号可停用，靠快照追溯）")
+    org_name = db.Column(db.String(64), comment="发出操作人组织快照；跨组织/未分配为空")
     middle_msg_id = db.Column(db.String(64), comment="中间方消息id（撤回要用）")
     new_msg_id = db.Column(db.String(64), comment="中间方new_msg_id（撤回要用）")
     create_time = db.Column(db.DateTime, nullable=False, default=datetime.now, comment="消息时间")

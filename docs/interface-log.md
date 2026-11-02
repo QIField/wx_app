@@ -39,6 +39,9 @@
 - `GET /api/logs/access`：`start/end/path/user_id/org_id/status/method` 过滤。
 - `GET /api/logs/middle`：`start/end/module/action/uuid/success/openid` 过滤。
 - 权限 `developer`；只读，删除仅走定时清理。
+- 2026-11-02 姓名+组织快照规范：`middle_call_log` 补 `user_name / org_name` 快照列
+  （请求上下文有登录人即抄录；定时任务为空），与 `audit_log` / `message` 的
+  「姓名 + 组织」双快照规范一致（见 docs/audit-log.md 第六节）。
 
 ## 组织管理（P2，已确认方案 A，已实施）
 

@@ -63,7 +63,11 @@ onMounted(load)
             <tr v-for="l in list" v-else :key="l.id">
               <td class="num" style="white-space:nowrap;">{{ l.created_at }}</td>
               <td>
-                <div class="cell-main">{{ l.operator_name }}</div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span class="cell-main">{{ l.operator_name }}</span>
+                  <span v-if="l.org_name" class="tag tag-blue">{{ l.org_name }}</span>
+                  <span v-else-if="l.role === 'developer'" class="tag tag-gray" title="开发者账号跨组织">跨组织</span>
+                </div>
                 <div class="cell-sub">{{ ROLE_TEXT[l.role] || l.role }}</div>
               </td>
               <td><span class="tag tag-gray">{{ l.module }}</span></td>

@@ -117,6 +117,7 @@ def send_message(conversation_id, msg_type, content, payload, operator=None):
         status=Message.ST_SENDING,
         operator_id=operator.id if operator is not None else None,
         operator_name=operator.name if operator is not None else None,
+        org_name=operator.org_name if operator is not None else None,
     )
     task = SendTask(uuid=str(uuid4()), action=action, status=SendTask.ST_PENDING)
     db.session.add_all([msg, task])

@@ -157,6 +157,32 @@ def test_middle_call_success(app, monkeypatch):
     assert row.uuid == "u1"
     assert row.openid == "dev01"
     assert row.module == "login_api"
+    assert row.user_id is None  # 定时任务/无登录人：姓名+组织快照为空
+    assert row.user_name is None
+    assert row.org_name is None
+
+
+def test_middle_call_user_snapshot(app, monkeypatch):
+    """姓名+组织快照规范：请求上下文有登录人时，出站日志抄录当时姓名+组织。"""
+    from flask import request
+
+    from backend.models.org import Org
+    from backend.tests.conftest import make_user
+
+    org = Org.query.filter_by(name="佛山").first() or Org(name="佛山")
+    db.session.add(org)
+    db.session.commit()
+    user = make_user(name="客服01", org_id=org.id)
+    monkeypatch.setattr("backend.adapter.client.requests.post",
+                        lambda url, data, timeout: FakeResp(200, {"code": 0, "msg": "success"}))
+    with app.test_request_context("/api/conversations"):
+        request.current_user = user
+        client_mod.call("send_api", "post_text", openid="dev01", uuid="u9")
+
+    row = MiddleCallLog.query.one()
+    assert row.user_id == user.id
+    assert row.user_name == "客服01"
+    assert row.org_name == "佛山"
 
 
 def test_middle_call_business_code_fail(app, monkeypatch):

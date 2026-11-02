@@ -15,6 +15,7 @@ from flask import current_app, has_app_context, has_request_context, request
 from backend.extensions import db
 from backend.models.middle_call_log import MiddleCallLog
 from backend.services.access_log import mask_value
+from backend.services.user_snapshot import current_user as _snapshot_user, org_of
 
 MAX_TEXT = 2000
 
@@ -34,12 +35,12 @@ def _trigger_source():
     return _job_source.get()[:64]
 
 
-def _current_user_id():
-    if has_request_context():
-        user = getattr(request, "current_user", None)
-        if user is not None:
-            return user.id
-    return None
+def _current_user():
+    """当前登录人 (id, 姓名, 组织) 快照；定时任务/无登录人返回 (None, '', None)。"""
+    user = _snapshot_user()
+    if user is None:
+        return None, "", None
+    return user.id, user.name, org_of(user)
 
 
 def first_result(body):
@@ -71,10 +72,13 @@ def log_call(module, action, *, uuid="", openid="", params=None, trigger_source=
     if not has_app_context():
         return
     try:
+        user_id, user_name, org_name = _current_user()
         db.session.add(MiddleCallLog(
             call_time=datetime.now(),
             trigger_source=(trigger_source or _trigger_source())[:64],
-            user_id=_current_user_id(),
+            user_id=user_id,
+            user_name=user_name[:64] if user_name else None,
+            org_name=org_name[:64] if org_name else None,
             module=str(module)[:32],
             action=str(action)[:64],
             uuid=str(uuid or "")[:64],

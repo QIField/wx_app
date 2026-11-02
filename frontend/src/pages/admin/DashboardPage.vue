@@ -79,7 +79,7 @@ function successText(v) {
         <div v-for="l in logs" :key="l.id" class="mini-log">
           <span class="m-time num">{{ l.created_at }}</span>
           <div class="m-body">
-            <b>{{ l.operator_name }}</b> {{ l.action }} · {{ l.target }}
+            <b>{{ l.operator_name }}</b><span v-if="l.org_name" class="tag tag-blue" style="margin:0 4px;">{{ l.org_name }}</span> {{ l.action }} · {{ l.target }}
             <span :class="l.result === 'fail' ? 'tag-danger' : 'tag-gray'" class="tag" style="margin-left:6px;">{{ l.result === 'fail' ? '失败' : '成功' }}</span>
             <div v-if="l.detail" style="color:var(--c-text-sub);">{{ l.detail }}</div>
           </div>

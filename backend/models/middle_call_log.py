@@ -20,6 +20,8 @@ class MiddleCallLog(db.Model):
         comment="触发来源：请求路径或定时任务job名",
     )
     user_id = db.Column(BigIntPK, comment="发起用户(请求上下文)；定时任务为空")
+    user_name = db.Column(db.String(64), comment="发起用户姓名快照；定时任务/无登录人为空")
+    org_name = db.Column(db.String(64), comment="发起用户组织快照；系统任务/跨组织为空")
     module = db.Column(db.String(32), nullable=False, comment="send_api/messag_api/login_api等")
     action = db.Column(db.String(64), nullable=False, comment="如 post_text_message")
     uuid = db.Column(db.String(64), nullable=False, default="", comment="本次调用唯一标识，串联下发与确认")
@@ -47,6 +49,8 @@ class MiddleCallLog(db.Model):
             "call_time": self.call_time.strftime("%Y-%m-%d %H:%M:%S") if self.call_time else None,
             "trigger_source": self.trigger_source,
             "user_id": self.user_id,
+            "user_name": self.user_name or "",
+            "org_name": self.org_name or "",
             "module": self.module,
             "action": self.action,
             "uuid": self.uuid,

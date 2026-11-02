@@ -17,6 +17,7 @@ class AuditLog(db.Model):
     id = db.Column(BigIntPK, primary_key=True, autoincrement=True)
     operator_id = db.Column(db.String(64), comment="操作人账号 id；空 = 系统自动任务")
     operator_name = db.Column(db.String(64), nullable=False, comment="操作时姓名快照")
+    org_name = db.Column(db.String(64), comment="操作时组织快照；系统任务/跨组织开发者/未分配为空")
     role = db.Column(db.String(32), nullable=False, comment="操作时角色快照 developer/admin/agent/system")
     module = db.Column(db.String(32), nullable=False, comment="模块枚举，见 services/audit.py")
     action = db.Column(db.String(64), nullable=False, comment="动宾结构，如「重置密码」")
@@ -35,6 +36,7 @@ class AuditLog(db.Model):
         return {
             "id": self.id,
             "operator_name": self.operator_name,
+            "org_name": self.org_name or "",
             "role": self.role,
             "module": self.module,
             "action": self.action,
