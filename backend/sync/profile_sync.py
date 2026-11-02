@@ -125,6 +125,9 @@ def _refresh_device_member_avatars(openid):
 
 def _safe_step(openid, action, fn):
     """单设备链路单步容错：失败回滚并记审计，后续步骤继续。"""
+    from flask import current_app
+
+    current_app.logger.info("资料同步步骤: %s (设备 %s)", action, openid)
     try:
         fn()
     except Exception as exc:  # noqa: BLE001

@@ -167,7 +167,7 @@ def test_media_sniff_real_type(app, client, conv, media_dir, monkeypatch):
 
 def test_media_cross_device_isolated(app, client, conv, media_dir, monkeypatch):
     """数据隔离：绑定 dev02 的账号拉不到 dev01 会话的媒体（404）。"""
-    other = make_user(username="cs02", name="客服02", open_id="dev02")
+    other = make_user(username="cs02", name="客服02", open_ids=["dev02"])
     msg = make_message(conv.id, Message.MSG_IMAGE, "<msg><img aeskey=\"k\" /></msg>")
     mock_download(monkeypatch)
 

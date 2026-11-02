@@ -92,9 +92,10 @@ def _display_content(msg_type, content, payload):
     return (payload or {}).get(key, "")
 
 
-def send_message(conversation_id, msg_type, content, payload):
+def send_message(conversation_id, msg_type, content, payload, operator=None):
     """发消息主流程，返回写库后的 message。
 
+    operator 是发出操作的登录人（溯源快照：id + 姓名都落库，账号停用也能查）。
     下发成功时消息保持"发送中"，等轮询确认后变已发送/失败；
     下发本身失败（网络错误等）则直接标失败并抛 SendDispatchError。
     """
@@ -114,6 +115,8 @@ def send_message(conversation_id, msg_type, content, payload):
         content=_display_content(msg_type, content, payload),
         payload=payload,
         status=Message.ST_SENDING,
+        operator_id=operator.id if operator is not None else None,
+        operator_name=operator.name if operator is not None else None,
     )
     task = SendTask(uuid=str(uuid4()), action=action, status=SendTask.ST_PENDING)
     db.session.add_all([msg, task])

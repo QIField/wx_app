@@ -1,14 +1,21 @@
 <script setup>
-/** 左栏：会话列表（紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。 */
+/** 左栏：会话列表（微信风格搜索框 + 紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。 */
+import { computed, ref } from 'vue'
 import { useChatStore } from '../stores/chat'
+import { fmtTime, highlight } from '../utils/format'
 import UnreadBadge from './UnreadBadge.vue'
 
 const chat = useChatStore()
 
-function fmtTime(t) {
-  if (!t) return ''
-  return t.slice(5, 16) // MM-DD HH:MM
-}
+const keyword = ref('')
+
+/** 本地过滤：命中会话名或 wxid 才显示（微信同款即时搜索）。 */
+const filtered = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return chat.conversations
+  return chat.conversations.filter(
+    (c) => [c.name, c.wxid].some((x) => x && x.toLowerCase().includes(kw)))
+})
 
 function first(c) {
   const s = c.name || c.wxid || '?'
@@ -19,12 +26,18 @@ function first(c) {
 <template>
   <div class="conv-list">
     <div class="head">
-      <span class="title">会话 <em class="num">{{ chat.conversations.length }}</em></span>
+      <div class="search">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input v-model="keyword" type="text" placeholder="搜索会话">
+        <button v-if="keyword" class="clear" aria-label="清空搜索" @click="keyword = ''">
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
     </div>
 
     <el-scrollbar class="scroll">
       <div
-        v-for="(c, i) in chat.conversations"
+        v-for="(c, i) in filtered"
         :key="c.id"
         class="item"
         :class="{ active: c.id === chat.currentId }"
@@ -35,7 +48,8 @@ function first(c) {
         <span v-else class="avatar" :class="{ group: c.chat_type === 2 }">{{ first(c) }}</span>
         <div class="body">
           <div class="row1">
-            <span class="name">{{ c.name || c.wxid }}</span>
+            <!-- 命中关键词高亮（v-html 内容来自本地数据 + highlight 已转义） -->
+            <span class="name" v-html="highlight(c.name || c.wxid || '', keyword)"></span>
             <span class="time num">{{ fmtTime(c.last_msg_at) }}</span>
           </div>
           <div class="row2">
@@ -48,7 +62,11 @@ function first(c) {
         </div>
       </div>
 
-      <el-empty v-if="!chat.conversations.length" description="暂无会话" :image-size="60" />
+      <el-empty
+        v-if="!filtered.length"
+        :description="keyword ? '没有匹配的会话' : '暂无会话'"
+        :image-size="60"
+      />
     </el-scrollbar>
   </div>
 </template>
@@ -56,13 +74,39 @@ function first(c) {
 <style scoped>
 .conv-list { display: flex; flex-direction: column; height: 100%; }
 .head {
-  display: flex; justify-content: space-between; align-items: center;
   padding: 10px 12px 8px;
-  user-select: none;
   border-bottom: 1px solid var(--c-border);
 }
-.title { font-weight: 600; font-size: 13px; }
-.title em { font-style: normal; color: var(--c-text-sub); font-size: 12px; margin-left: 4px; }
+
+/* 微信风格搜索框：圆角灰底，聚焦浮起 */
+.search {
+  display: flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 8px;
+  border-radius: var(--r-sm);
+  background: #eef1f6;
+  color: var(--c-text-sub);
+  transition: box-shadow 0.15s, background 0.15s;
+}
+.search:focus-within {
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--c-primary) inset;
+}
+.search input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: none;
+  font-size: 12px; color: var(--c-text);
+}
+.search input::placeholder { color: var(--c-text-sub); }
+.clear {
+  display: flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; border-radius: 50%;
+  background: #c6ccd6; color: #fff;
+  cursor: pointer; flex-shrink: 0;
+}
+.clear:hover { background: var(--c-text-sub); }
+.name :deep(mark) { background: none; color: var(--c-primary); font-weight: 600; padding: 0; }
+
 .scroll { flex: 1; }
 
 .item {

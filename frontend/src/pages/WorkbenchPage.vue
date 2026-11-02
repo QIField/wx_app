@@ -1,7 +1,9 @@
 <script setup>
 /** 三栏工作台：深色顶栏 + 微信式图标侧栏（会话/通讯录）+ 列表 / 聊天窗 / 报价处理台。 */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
+import { useContactsStore } from '../stores/contacts'
 import BrandLogo from '../components/BrandLogo.vue'
 import ConvList from '../components/ConvList.vue'
 import ContactsPanel from '../components/ContactsPanel.vue'
@@ -16,6 +18,7 @@ const props = defineProps({
 const emit = defineEmits(['logout', 'back'])
 
 const chat = useChatStore()
+const contacts = useContactsStore()
 
 const ROLE_TEXT = { developer: '开发者', admin: '管理员', agent: '客服' }
 
@@ -45,19 +48,52 @@ function onResizeUp() {
 }
 
 onMounted(async () => {
+  chat.operatorName = props.me.name // 本地气泡直接显示操作人
+  await chat.loadDevices(true)      // 默认进第一个绑定的聊天账号
   await chat.loadConversations()
   chat.connect()
+})
+
+/* 切换聊天账号 → 通讯录跟着换设备重拉 */
+watch(() => chat.activeOpenid, () => { contacts.load() })
+
+/* 其他绑定账号来消息：顶栏卡片红点（store 已加）+ 这里弹 toast */
+watch(() => chat.crossMsg, (m) => {
+  if (!m) return
+  ElMessage({
+    message: `来自「${m.name}」的新消息：${String(m.content).slice(0, 30)}`,
+    type: 'warning',
+    duration: 3200,
+  })
 })
 </script>
 
 <template>
   <div class="frame wb-frame">
     <header class="topbar">
-      <div class="brand">
-        <BrandLogo :size="26" />
-        <div class="brand-text">
-          <span class="name">SI客服系统</span>
-          <span class="sub num">SI · MESSAGE WORKBENCH</span>
+      <div class="left">
+        <div class="brand">
+          <BrandLogo :size="26" />
+          <div class="brand-text">
+            <span class="name">SI客服系统</span>
+            <span class="sub num">SI · MESSAGE WORKBENCH</span>
+          </div>
+        </div>
+        <!-- 聊天账号卡片组：显示名 + 在线点 + 未读数，点击切换 -->
+        <div class="device-cards">
+          <button
+            v-for="d in chat.devices"
+            :key="d.openid"
+            class="dev-card"
+            :class="{ on: d.openid === chat.activeOpenid }"
+            :title="`${d.display_name}（${d.online === 1 ? '在线' : d.online === 0 ? '离线' : '检测中'}）`"
+            @click="chat.switchDevice(d.openid)"
+          >
+            <span class="dev-dot" :class="{ on: d.online === 1 }"></span>
+            <span class="dev-name">{{ d.display_name }}</span>
+            <span v-if="d.unread" class="dev-unread num">{{ d.unread > 99 ? '99+' : d.unread }}</span>
+          </button>
+          <span v-if="!chat.devices.length" class="dev-empty">未绑定聊天账号</span>
         </div>
       </div>
       <div class="right">
@@ -65,7 +101,6 @@ onMounted(async () => {
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
           <span>返回后台</span>
         </button>
-        <span class="status"><span class="dot"></span>{{ me.open_id ? '设备已绑定' : '未绑定设备' }}</span>
         <div class="user-chip">
           <div class="user-avatar num">{{ me.name.slice(0, 1) }}</div>
           <div class="user-meta">
@@ -130,19 +165,63 @@ onMounted(async () => {
   background: var(--c-bg);
 }
 
+/* 深海军蓝顶栏：斜向渐变打底 + 双层极光光晕反向漂移（纯 CSS，不挡交互） */
 .topbar {
+  position: relative;
   height: 46px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  background: linear-gradient(90deg, var(--c-navy), var(--c-navy-2));
+  background: linear-gradient(92deg, #0e1c3d 0%, var(--c-navy) 34%, var(--c-navy-2) 72%, #234a92 100%);
   color: #fff;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12); /* 底缘一道高光线 */
 }
+/* 光晕层 A：品牌蓝 + 青（向右漂） */
+.topbar::before,
+.topbar::after {
+  content: '';
+  position: absolute;
+  inset: -40% -6%;
+  pointer-events: none;
+  will-change: transform;
+}
+.topbar::before {
+  background:
+    radial-gradient(320px 190px at 7% 30%, rgba(29, 93, 228, 0.5), transparent 70%),
+    radial-gradient(260px 170px at 40% 110%, rgba(34, 211, 238, 0.16), transparent 72%);
+  animation: aurora-a 18s ease-in-out infinite alternate;
+}
+/* 光晕层 B：靛蓝 + 暖橙（向左漂，与 A 反向产生视差） */
+.topbar::after {
+  background:
+    radial-gradient(280px 170px at 66% -30%, rgba(122, 162, 255, 0.3), transparent 70%),
+    radial-gradient(220px 150px at 97% 115%, rgba(240, 130, 30, 0.2), transparent 72%);
+  animation: aurora-b 24s ease-in-out infinite alternate;
+}
+@keyframes aurora-a {
+  from { transform: translate3d(-16px, 0, 0) scale(1.02); }
+  to { transform: translate3d(22px, 0, 0) scale(1.07); }
+}
+@keyframes aurora-b {
+  from { transform: translate3d(20px, 0, 0) scale(1.05); }
+  to { transform: translate3d(-18px, 0, 0) scale(1.02); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar::before, .topbar::after, .dev-unread { animation: none; }
+}
+/* 顶栏内容抬到光晕之上 */
+.topbar .left, .topbar .right { position: relative; z-index: 1; }
 .brand { display: flex; align-items: center; gap: 9px; user-select: none; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
-.name { font-size: 13px; font-weight: 600; letter-spacing: 1px; }
+.name {
+  font-size: 13px; font-weight: 600; letter-spacing: 1px;
+  background: linear-gradient(90deg, #ffffff 30%, #a8c6ff 100%); /* 冷光渐变字 */
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
 .sub { font-size: 10px; color: rgba(255, 255, 255, 0.55); }
 .right { display: flex; align-items: center; gap: 12px; }
 .back-btn {
@@ -151,21 +230,114 @@ onMounted(async () => {
   align-items: center;
   gap: 4px;
   height: 26px;
-  padding: 0 8px;
+  padding: 0 9px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.8);
   font-size: 12px;
+  transition: all 0.18s;
 }
-.back-btn:hover { border-color: rgba(255, 255, 255, 0.6); color: #fff; }
+.back-btn:hover {
+  border-color: rgba(160, 195, 255, 0.7);
+  background: rgba(29, 93, 228, 0.35);
+  box-shadow: 0 0 10px rgba(29, 93, 228, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
 .env-chip {
   font-size: 11px; color: #ffd8a8;
   border: 1px solid rgba(240, 130, 30, 0.55);
   background: rgba(240, 130, 30, 0.14);
   border-radius: 3px; padding: 1px 7px;
 }
-.status { display: flex; align-items: center; gap: 5px; font-size: 12px; color: rgba(255, 255, 255, 0.8); }
-.dot { width: 7px; height: 7px; border-radius: 50%; background: #35d07f; box-shadow: 0 0 6px #35d07f; }
+/* 用户信息卡：磨砂玻璃 + 蓝靛渐变头像；退出按钮悬停转红（危险语义） */
+.topbar .user-chip {
+  padding: 3px 5px 3px 4px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 6px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.topbar .user-chip:hover {
+  border-color: rgba(160, 195, 255, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 10px rgba(29, 93, 228, 0.3);
+}
+.topbar .user-avatar {
+  background: linear-gradient(135deg, #2f6ff0, #6d4de0);
+  box-shadow: 0 0 8px rgba(29, 93, 228, 0.45);
+}
+.topbar .user-chip .icon-btn {
+  width: 24px; height: 24px; border-radius: 50%;
+  transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+}
+.topbar .user-chip .icon-btn:hover {
+  background: rgba(229, 72, 77, 0.85);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(229, 72, 77, 0.45);
+}
+.left { display: flex; align-items: center; gap: 16px; min-width: 0; }
+
+/* 聊天账号卡片组：磨砂玻璃胶囊 + 内侧高光，悬浮上浮，激活渐变发光 */
+.device-cards {
+  display: flex; align-items: center; gap: 7px;
+  min-width: 0; overflow-x: auto; scrollbar-width: none;
+}
+.device-cards::-webkit-scrollbar { display: none; }
+.dev-card {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 11px;
+  max-width: 170px; flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 6px rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px; line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s, background 0.18s;
+}
+.dev-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(160, 195, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 12px rgba(29, 93, 228, 0.35);
+  color: #fff;
+}
+.dev-card:active { transform: translateY(0) scale(0.97); }
+.dev-card.on {
+  background: linear-gradient(135deg, #2f6ff0 0%, #1d5de4 45%, #3a55c9 100%);
+  border-color: rgba(160, 195, 255, 0.85);
+  color: #fff;
+  box-shadow:
+    0 0 0 1px rgba(90, 140, 255, 0.25),
+    0 4px 14px rgba(29, 93, 228, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.dev-dot { width: 6px; height: 6px; border-radius: 50%; background: #8b93a3; flex-shrink: 0; transition: background 0.18s, box-shadow 0.18s; }
+.dev-card.on .dev-dot { background: #a9f0cd; box-shadow: 0 0 6px rgba(83, 240, 165, 0.8); }
+.dev-dot.on { background: #35d07f; box-shadow: 0 0 5px #35d07f; }
+.dev-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 未读徽标：红渐变 + 顶栏底色描边（像嵌在卡上）+ 呼吸脉冲 */
+.dev-unread {
+  position: absolute; top: -7px; right: -7px;
+  min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #ff6b6d, #e5484d);
+  border: 1.5px solid rgba(17, 32, 66, 0.95);
+  color: #fff; font-size: 10px; font-weight: 700; line-height: 14px; text-align: center;
+  animation: unread-pulse 2s ease-in-out infinite;
+}
+@keyframes unread-pulse {
+  0%, 100% { box-shadow: 0 2px 6px rgba(229, 72, 77, 0.5), 0 0 0 0 rgba(229, 72, 77, 0.45); }
+  50% { box-shadow: 0 2px 6px rgba(229, 72, 77, 0.5), 0 0 0 5px rgba(229, 72, 77, 0); }
+}
+.dev-empty { font-size: 12px; color: rgba(255, 255, 255, 0.45); user-select: none; }
 
 .layout {
   flex: 1;
@@ -189,7 +361,7 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-/* 左侧导航栏（微信式图标栏）：与顶栏同色系，激活用信号蓝 */
+/* 左侧导航栏（微信式图标栏）：与顶栏同色系，顶部一抹品牌蓝辉光呼应极光 */
 .rail {
   width: 46px;
   flex-shrink: 0;
@@ -198,7 +370,9 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   padding: 10px 0;
-  background: linear-gradient(180deg, var(--c-navy), var(--c-navy-2));
+  background:
+    radial-gradient(150px 100px at 50% -20%, rgba(29, 93, 228, 0.45), transparent 75%),
+    linear-gradient(180deg, var(--c-navy), var(--c-navy-2));
 }
 .rail-btn {
   position: relative;
@@ -208,10 +382,20 @@ onMounted(async () => {
   background: none;
   color: rgba(255, 255, 255, 0.55);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.18s, color 0.18s, transform 0.18s, box-shadow 0.18s;
 }
-.rail-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
-.rail-btn.on { background: var(--c-primary); color: #fff; }
+.rail-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.rail-btn:active { transform: translateY(0) scale(0.94); }
+.rail-btn.on {
+  background: linear-gradient(135deg, #2f6ff0, #1d5de4);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(29, 93, 228, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
 .col-main {
   flex: 1;
   background: var(--c-panel);

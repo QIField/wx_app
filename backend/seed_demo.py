@@ -48,9 +48,28 @@ DEMO = [
 ]
 
 
+def _ensure_demo_user():
+    """演示账号：绑定 demo 设备（幂等，绑定已存在则跳过）。"""
+    from werkzeug.security import generate_password_hash
+
+    from backend.models.user import ROLE_AGENT, User
+    from backend.models.user_device import UserDevice
+
+    if UserDevice.query.filter_by(openid=DEMO_OPENID).first() is not None:
+        return
+    user = User(username="demo", name="演示客服", role=ROLE_AGENT,
+                password_hash=generate_password_hash("123456"))
+    db.session.add(user)
+    db.session.flush()
+    db.session.add(UserDevice(user_id=user.id, openid=DEMO_OPENID, remark="演示设备"))
+    db.session.commit()
+    print("已创建演示账号 demo / 123456（绑定 demo 设备）")
+
+
 def seed():
     app = create_app()
     with app.app_context():
+        _ensure_demo_user()
         exists = Conversation.query.filter_by(openid=DEMO_OPENID).first()
         if exists is not None:
             print("演示数据已存在，跳过（要重造先删 wx_app_dev.db）")

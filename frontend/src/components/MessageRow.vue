@@ -21,9 +21,9 @@ function mediaUrl(m) {
   return `/api/messages/${m.id}/media?token=${encodeURIComponent(getToken())}`
 }
 
-/* 行头像：in=客户（群消息取发言人首字，单聊取会话名首字）；out=客服 */
+/* 行头像：in=客户（群消息取发言人首字，单聊取会话名首字）；out=操作人姓名首字 */
 function avatarOf(m) {
-  if (m.direction === 2) return '客'
+  if (m.direction === 2) return (m.operator_name || '客').slice(0, 1)
   const s = props.conv?.chat_type === 2 ? (m.sender_name || '客') : (props.conv?.name || props.conv?.wxid || '?')
   return s.slice(0, 1).toUpperCase()
 }
@@ -35,7 +35,8 @@ function picOf(m) {
   return props.conv?.avatar || null
 }
 function nameOf(m) {
-  if (m.direction === 2) return '客服'
+  // 出方向显示操作人快照（谁发的这条消息），历史数据回退"客服"
+  if (m.direction === 2) return m.operator_name || m.sender_name || '客服'
   return props.conv?.chat_type === 2 ? (m.sender_name || '成员') : (props.conv?.name || props.conv?.wxid)
 }
 
@@ -191,6 +192,8 @@ function onReEdit() {
 .body { max-width: 72%; min-width: 0; display: flex; flex-direction: column; }
 .msg.out .body { align-items: flex-end; }
 .name { font-size: 11px; color: var(--c-text-sub); margin-bottom: 2px; user-select: none; }
+/* 出方向名字即操作人：主色徽标便于一眼看出"谁发的" */
+.msg.out .name { color: var(--c-primary); font-weight: 600; }
 
 .bubble {
   padding: 7px 10px;

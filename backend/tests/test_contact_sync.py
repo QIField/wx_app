@@ -13,7 +13,7 @@ from backend.tests.conftest import make_user
 @pytest.fixture(autouse=True)
 def device(app):
     """通讯录同步按设备遍历：造一台 o1 设备的启用账号。"""
-    return make_user(open_id="o1")
+    return make_user(open_ids=["o1"])
 
 
 def _patch_catalog(monkeypatch, friends, chatrooms, ghs=None):

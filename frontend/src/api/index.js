@@ -66,6 +66,10 @@ export const toggleAccountStatus = (id, status) =>
 
 export const resetAccountPassword = (id) => http.put(`/accounts/${id}/password`)
 
+/* ===== 组织字典 ===== */
+
+export const fetchOrgs = () => http.get('/orgs')
+
 /* ===== 审计日志 / 总览 ===== */
 
 export const fetchAuditLogs = (keyword) =>
@@ -73,13 +77,16 @@ export const fetchAuditLogs = (keyword) =>
 
 export const fetchAdminStats = () => http.get('/admin/stats')
 
-/* ===== 工作台 ===== */
+/* ===== 工作台（多账号：openid 选当前查看的聊天账号，缺省=第一个绑定） ===== */
 
-export const fetchConversations = () => http.get('/conversations')
+export const fetchDevices = () => http.get('/devices')
+
+export const fetchConversations = (openid) =>
+  http.get('/conversations', { params: { openid: openid || undefined } })
 
 /** 主动发起会话：按 wxid 建/取会话（chat_type: 1好友 2群），联系人须在通讯录里。 */
-export const openConversation = (wxid, chatType) =>
-  http.post('/conversations', { wxid, chat_type: chatType })
+export const openConversation = (wxid, chatType, openid) =>
+  http.post('/conversations', { wxid, chat_type: chatType }, { params: { openid: openid || undefined } })
 
 /** 会话操作：置顶（{pinned:0|1}）/ 清未读（{read:true}）。 */
 export const updateConversation = (convId, payload) =>
@@ -102,8 +109,14 @@ export const sendTextMessage = (convId, content) =>
   })
 
 /** 通讯录：好友/群列表（type: friends | groups，keyword 可选）。 */
-export const fetchContacts = (type, keyword) =>
-  http.get('/contacts', { params: { type, keyword: keyword || undefined } })
+export const fetchContacts = (type, keyword, openid) =>
+  http.get('/contacts', {
+    params: { type, keyword: keyword || undefined, openid: openid || undefined },
+  })
+
+/** 发送日志：谁·何时·用哪个聊天账号·发给谁（当前账号全部绑定设备）。 */
+export const fetchSendLogs = (openid) =>
+  http.get('/send-logs', { params: { openid: openid || undefined } })
 
 /** 联系人档案：备注/标签（业务自建，按 wxid，好友与群通用）。 */
 export const fetchContactProfile = (wxid) => http.get(`/contacts/${wxid}/profile`)

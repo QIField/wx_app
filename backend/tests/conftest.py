@@ -44,7 +44,7 @@ def no_task_query_wait(monkeypatch):
 
 @pytest.fixture()
 def client(app):
-    """已登录默认客服账号（open_id=dev01）的测试客户端。
+    """已登录默认客服账号（绑定设备 dev01）的测试客户端。
 
     通过自定义 test_client_class 给所有请求自动带 Bearer 令牌；
     会话数据沿用既有约定的 openid=dev01。
@@ -63,7 +63,7 @@ def client(app):
             headers = {**self.auth_headers, **(kwargs.pop("headers", None) or {})}
             return super().open(*args, headers=headers, **kwargs)
 
-    make_user(open_id="dev01")
+    make_user(open_ids=["dev01"])
     user = User.query.filter_by(username="cs01").one()
     token, _ = create_token(user)
 
@@ -74,10 +74,15 @@ def client(app):
 
 
 def make_user(**over):
-    """测试造号工厂：默认客服角色 cs01/123456，可覆盖任意字段。"""
+    """测试造号工厂：默认客服角色 cs01/123456，可覆盖任意字段。
+
+    open_ids=["o1", ...]：造号同时按顺序绑定微信设备（user_device）。
+    """
     from backend.models.user import ROLE_AGENT, User
+    from backend.models.user_device import UserDevice
     from werkzeug.security import generate_password_hash
 
+    open_ids = over.pop("open_ids", None)
     fields = dict(
         username="cs01",
         name="客服01",
@@ -87,8 +92,21 @@ def make_user(**over):
     fields.update(over)
     user = User(**fields)
     _db.session.add(user)
+    _db.session.flush()  # 拿 id 再绑设备
+    for openid in open_ids or []:
+        _db.session.add(UserDevice(user_id=user.id, openid=openid))
     _db.session.commit()
     return user
+
+
+def bind_device(user, openid, remark=None):
+    """给已有账号追加一台绑定设备（多设备用例用）。"""
+    from backend.models.user_device import UserDevice
+
+    row = UserDevice(user_id=user.id, openid=openid, remark=remark)
+    _db.session.add(row)
+    _db.session.commit()
+    return row
 
 
 def login_headers(user):

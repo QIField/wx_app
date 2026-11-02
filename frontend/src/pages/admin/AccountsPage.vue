@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   createAccount,
   fetchAccounts,
+  fetchOrgs,
   resetAccountPassword,
   toggleAccountStatus,
   updateAccount,
@@ -42,7 +43,15 @@ async function load() {
   }
   loading.value = false
 }
-onMounted(load)
+
+/* ===== 组织字典：账号必选归属（方案 A，仅标记不隔离） ===== */
+const orgs = ref([])
+async function loadOrgs() {
+  try {
+    orgs.value = await fetchOrgs()
+  } catch { /* 组织拉不到时表单下拉为空，保存时后端兜底校验 */ }
+}
+onMounted(() => { load(); loadOrgs() })
 
 /* ===== 启停用 ===== */
 async function onToggle(u) {
@@ -68,9 +77,21 @@ async function onReset(u) {
   }
 }
 
+/* ===== 微信设备绑定（一个账号可绑多台）：openid + 备注名行编辑 ===== */
+const emptyDevRows = () => [{ openid: '', remark: '' }]
+const devicesOf = (u) =>
+  (u.devices?.length ? u.devices : emptyDevRows())
+    .map((d) => ({ openid: d.openid || '', remark: d.remark || '' }))
+
+/** 行数据 → 提交格式：去掉空行与空白备注。 */
+const cleanDevices = (rows) =>
+  rows
+    .map((d) => ({ openid: d.openid.trim(), remark: (d.remark || '').trim() }))
+    .filter((d) => d.openid)
+
 /* ===== 新增弹窗 ===== */
 const addOpen = ref(false)
-const addForm = ref({ username: '', name: '', role: 'agent', open_id: '' })
+const addForm = ref({ username: '', name: '', role: 'agent', org_id: null, devices: emptyDevRows() })
 const addErr = ref('')
 const addSaving = ref(false)
 const roleOptions = computed(() =>
@@ -78,9 +99,10 @@ const roleOptions = computed(() =>
     ? [['developer', '开发者'], ['admin', '管理员'], ['agent', '客服']]
     : [['admin', '管理员'], ['agent', '客服']]
 )
+const needOrg = (role) => role !== 'developer'  // 开发者跨组织，其余必选
 
 function openAdd() {
-  addForm.value = { username: '', name: '', role: 'agent', open_id: '' }
+  addForm.value = { username: '', name: '', role: 'agent', org_id: null, devices: emptyDevRows() }
   addErr.value = ''
   addOpen.value = true
 }
@@ -88,14 +110,17 @@ function openAdd() {
 async function saveAdd() {
   const f = addForm.value
   if (!f.username.trim() || !f.name.trim()) { addErr.value = '请填写登录账号与姓名'; return }
+  if (needOrg(f.role) && !f.org_id) { addErr.value = '请选择所属组织'; return }
   addSaving.value = true
   try {
-    await createAccount({
+    const payload = {
       username: f.username.trim(),
       name: f.name.trim(),
       role: f.role,
-      open_id: f.open_id.trim(),
-    })
+      org_id: f.org_id,
+    }
+    if (canBind) payload.devices = cleanDevices(f.devices)
+    await createAccount(payload)
     toast('toast', { msg: `已新增账号 ${f.username.trim()}，初始密码 123456` })
     addOpen.value = false
     await load()
@@ -107,12 +132,15 @@ async function saveAdd() {
 
 /* ===== 编辑弹窗 ===== */
 const editOpen = ref(false)
-const editForm = ref({ id: null, username: '', name: '', open_id: '' })
+const editForm = ref({ id: null, username: '', name: '', role: '', org_id: null, devices: emptyDevRows() })
 const editErr = ref('')
 const editSaving = ref(false)
 
 function openEdit(u) {
-  editForm.value = { id: u.id, username: u.username, name: u.name, open_id: u.open_id || '' }
+  editForm.value = {
+    id: u.id, username: u.username, name: u.name, role: u.role,
+    org_id: u.org_id ?? null, devices: devicesOf(u),
+  }
   editErr.value = ''
   editOpen.value = true
 }
@@ -120,9 +148,12 @@ function openEdit(u) {
 async function saveEdit() {
   const f = editForm.value
   if (!f.name.trim()) { editErr.value = '请填写姓名'; return }
+  if (needOrg(f.role) && !f.org_id) { editErr.value = '请选择所属组织'; return }
   editSaving.value = true
   try {
-    await updateAccount(f.id, { name: f.name.trim(), open_id: f.open_id.trim() })
+    const payload = { name: f.name.trim(), org_id: f.org_id }
+    if (canBind) payload.devices = cleanDevices(f.devices) // 空数组=解绑全部
+    await updateAccount(f.id, payload)
     toast('toast', { msg: '已保存账号修改' })
     editOpen.value = false
     await load()
@@ -168,6 +199,7 @@ async function saveEdit() {
               <th>登录账号</th>
               <th>成员</th>
               <th>角色</th>
+              <th>所属组织</th>
               <th>微信绑定</th>
               <th>状态</th>
               <th>最近登录</th>
@@ -176,10 +208,10 @@ async function saveEdit() {
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td v-for="i in 7" :key="i"><div class="skeleton" style="width:96px;height:12px"></div></td>
+              <td v-for="i in 8" :key="i"><div class="skeleton" style="width:96px;height:12px"></div></td>
             </tr>
             <tr v-else-if="!filtered.length">
-              <td colspan="7"><div class="empty"><span>没有符合条件的账号</span></div></td>
+              <td colspan="8"><div class="empty"><span>没有符合条件的账号</span></div></td>
             </tr>
             <tr v-for="u in filtered" v-else :key="u.id">
               <td>
@@ -194,7 +226,16 @@ async function saveEdit() {
               </td>
               <td><span class="tag" :class="ROLE_CLASS[u.role]">{{ ROLE_TEXT[u.role] }}</span></td>
               <td>
-                <span v-if="u.open_id" class="tag tag-ok" :title="u.open_id">已绑定</span>
+                <span v-if="u.org_name" class="tag tag-blue">{{ u.org_name }}</span>
+                <span v-else class="tag tag-gray" :title="u.role === 'developer' ? '开发者账号跨组织' : '存量账号未分配，编辑时可补选'">
+                  {{ u.role === 'developer' ? '跨组织' : '未分配' }}
+                </span>
+              </td>
+              <td>
+                <span v-if="u.devices?.length" class="tag tag-ok"
+                      :title="u.devices.map((d) => d.remark ? `${d.remark}（${d.openid}）` : d.openid).join('、')">
+                  已绑定 {{ u.devices.length }} 台
+                </span>
                 <span v-else class="tag tag-gray" title="未绑定设备，登录工作台看不到任何会话">未绑定</span>
               </td>
               <td>
@@ -250,9 +291,29 @@ async function saveEdit() {
             </select>
           </div>
           <div class="field">
-            <label>微信设备 open_id（可选）</label>
-            <input v-model="addForm.open_id" class="input" type="text" :disabled="!canBind"
-                   :placeholder="canBind ? '中间方分配的设备标识，可创建后再绑定' : '仅开发者可配置微信设备绑定'">
+            <label>所属组织{{ needOrg(addForm.role) ? '' : '（可选）' }}</label>
+            <select v-model="addForm.org_id" class="select">
+              <option :value="null" disabled>{{ needOrg(addForm.role) ? '请选择组织' : '不绑组织（跨组织）' }}</option>
+              <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>微信设备绑定（可选，可绑多台）</label>
+            <div class="dev-rows">
+              <div v-for="(d, i) in addForm.devices" :key="i" class="dev-row">
+                <input v-model="d.openid" class="input" type="text" :disabled="!canBind"
+                       :placeholder="canBind ? '设备 open_id' : '仅开发者可配置微信设备绑定'">
+                <input v-model="d.remark" class="input remark" type="text" :disabled="!canBind"
+                       placeholder="备注名（选填）">
+                <button type="button" class="icon-btn" :disabled="!canBind || addForm.devices.length <= 1"
+                        title="删除此行" @click="addForm.devices.splice(i, 1)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+              </div>
+              <button type="button" class="btn btn-ghost dev-add" :disabled="!canBind" @click="addForm.devices.push({ openid: '', remark: '' })">
+                + 添加设备
+              </button>
+            </div>
           </div>
           <span class="tag tag-gray">初始密码统一为 123456，请通知成员尽快修改</span>
           <div class="form-err" :class="{ show: addErr }">
@@ -285,12 +346,32 @@ async function saveEdit() {
             <input v-model="editForm.name" class="input" type="text" placeholder="成员真实姓名">
           </div>
           <div class="field">
-            <label>微信设备 open_id</label>
-            <input v-model="editForm.open_id" class="input" type="text" :disabled="!canBind"
-                   :placeholder="canBind ? '中间方分配的设备标识，留空解除绑定' : '仅开发者可配置'">
+            <label>所属组织{{ needOrg(editForm.role) ? '' : '（可选）' }}</label>
+            <select v-model="editForm.org_id" class="select">
+              <option :value="null">{{ needOrg(editForm.role) ? '请选择组织' : '不绑组织（跨组织）' }}</option>
+              <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>微信设备绑定（可绑多台，全部删掉=解绑）</label>
+            <div class="dev-rows">
+              <div v-for="(d, i) in editForm.devices" :key="i" class="dev-row">
+                <input v-model="d.openid" class="input" type="text" :disabled="!canBind"
+                       :placeholder="canBind ? '设备 open_id' : '仅开发者可配置'">
+                <input v-model="d.remark" class="input remark" type="text" :disabled="!canBind"
+                       placeholder="备注名（选填）">
+                <button type="button" class="icon-btn" :disabled="!canBind || editForm.devices.length <= 1"
+                        title="删除此行" @click="editForm.devices.splice(i, 1)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+              </div>
+              <button type="button" class="btn btn-ghost dev-add" :disabled="!canBind" @click="editForm.devices.push({ openid: '', remark: '' })">
+                + 添加设备
+              </button>
+            </div>
           </div>
           <span class="tag tag-gray">
-            {{ canBind ? '绑定后该账号在工作台只看到此设备的会话与好友，留空则列表为空' : '微信设备绑定仅开发者可配置，管理员只能修改姓名' }}
+            {{ canBind ? '绑定后该账号在工作台只看到这些设备的会话与好友；清空全部则列表为空' : '微信设备绑定仅开发者可配置，管理员只能修改姓名' }}
           </span>
           <div class="form-err" :class="{ show: editErr }">
             <span>{{ editErr }}</span>
@@ -304,3 +385,12 @@ async function saveEdit() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 设备绑定行：openid 主体 + 备注窄列 + 删行按钮 */
+.dev-rows { display: flex; flex-direction: column; gap: 6px; }
+.dev-row { display: flex; align-items: center; gap: 6px; }
+.dev-row .input { flex: 1; min-width: 0; }
+.dev-row .input.remark { flex: 0 0 150px; }
+.dev-add { align-self: flex-start; }
+</style>

@@ -15,8 +15,8 @@ from backend.tests.conftest import make_user
 
 @pytest.fixture(autouse=True)
 def device(app):
-    """多设备后：同步以绑定 open_id 的启用账号为准，造一台 dev01 设备。"""
-    return make_user(open_id="dev01")
+    """同步以绑定设备的启用账号为准：造一台 dev01 设备。"""
+    return make_user(open_ids=["dev01"])
 
 
 def make_item(**over):
@@ -198,7 +198,7 @@ def test_sync_pull_params(app, monkeypatch):
 
 def test_sync_multi_device_isolated(app, monkeypatch):
     """多设备：两台设备各拉各的游标，会话互不串。"""
-    make_user(username="cs02", name="客服02", open_id="dev02")
+    make_user(username="cs02", name="客服02", open_ids=["dev02"])
     bodies = {"dev01": make_body([make_item(msg_id="m1")]),
               "dev02": make_body([make_item(msg_id="m2", from_wxid="wxid_02")])}
     calls = []
@@ -338,7 +338,8 @@ def test_sync_revoke_marks_original(app, monkeypatch):
     assert msg.payload["revoked"] is True
     conv = Conversation.query.one()
     assert conv.last_msg == "对方撤回了一条消息"  # 客户撤回，不能照抄 replacemsg 的"你撤回了"
-    assert broadcasts == [("message_revoked", {"message_id": msg.id, "conversation_id": conv.id})]
+    assert broadcasts == [("message_revoked", {"message_id": msg.id, "conversation_id": conv.id,
+                                               "openid": "dev01"})]
 
 
 def test_sync_self_revoke_marks_original(app, monkeypatch):

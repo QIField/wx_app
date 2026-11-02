@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!-- SI客服系统 · 多账号绑定与监控工作台 原型（纯静态，离线可开）
+     设计契约见同目录 design-contract.md；数据为 mock，不含真实后端 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SI客服系统 · 多账号工作台原型</title>
+  <link rel="stylesheet" href="base.css" />
+  <link rel="stylesheet" href="workbench.css" />
+</head>
+<body>
+  <div class="frame">
+    <header class="topbar">
+      <div class="brand">
+        <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+          <rect width="26" height="26" rx="6" fill="#1d5de4"/>
+          <text x="13" y="17.5" text-anchor="middle" font-family="Bahnschrift,'Segoe UI',sans-serif" font-size="11" font-weight="700" fill="#fff">SI</text>
+        </svg>
+        <div class="brand-text">
+          <span class="name">SI客服系统</span>
+          <span class="sub num">SI · MULTI-ACCOUNT WORKBENCH</span>
+        </div>
+      </div>
+      <div class="topbar-accounts" id="topbar-accounts" aria-label="聊天账号切换"></div>
+      <div class="right" id="topbar-right"></div>
+    </header>
+    <main id="view" style="flex:1;display:flex;flex-direction:column;min-height:0"></main>
+  </div>
+
+  <div class="toast-zone" id="toast-zone" aria-live="polite"></div>
+  <div id="drawer-root"></div>
+
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script src="store.js"></script>
+  <script src="views.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 /** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项、联系人档案（备注/标签）。 */
 import { defineStore } from 'pinia'
 import { fetchContacts, fetchContactProfile, saveContactProfile } from '../api'
+import { useChatStore } from './chat'
 
 export const useContactsStore = defineStore('contacts', {
   state: () => ({
@@ -40,13 +41,14 @@ export const useContactsStore = defineStore('contacts', {
   },
 
   actions: {
-    /** 拉取好友+群列表（每次打开通讯录都刷新，保证资料同步后是最新的）。 */
+    /** 拉取好友+群列表（按当前选中的聊天账号；打开通讯录/切换账号时都刷新）。 */
     async load() {
       this.loading = true
       try {
+        const openid = useChatStore().activeOpenid || undefined
         const [friends, groups] = await Promise.all([
-          fetchContacts('friends'),
-          fetchContacts('groups'),
+          fetchContacts('friends', undefined, openid),
+          fetchContacts('groups', undefined, openid),
         ])
         this.friends = friends.list
         this.groups = groups.list

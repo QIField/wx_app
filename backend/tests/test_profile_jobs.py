@@ -1,6 +1,4 @@
 """资料同步任务队列单测：去重、冷却、任务路由、单设备全量补缺。"""
-from types import SimpleNamespace
-
 import pytest
 
 from backend.extensions import db
@@ -54,12 +52,15 @@ def test_login_cooldown_after_job_done(app):
 
 def test_enqueue_login_sync_checks_binding(app):
     """未绑定设备或账号停用：登录触发起不到作用。"""
-    assert profile_jobs.enqueue_login_sync(
-        app, SimpleNamespace(open_id="o1", enabled=True)) is True
-    assert profile_jobs.enqueue_login_sync(
-        app, SimpleNamespace(open_id=None, enabled=True)) is False
-    assert profile_jobs.enqueue_login_sync(
-        app, SimpleNamespace(open_id="o2", enabled=False)) is False
+    from backend.tests.conftest import make_user
+
+    bound = make_user(username="cs21", name="客服21", open_ids=["o1"])
+    unbound = make_user(username="cs22", name="客服22")
+    disabled = make_user(username="cs23", name="客服23", open_ids=["o2"], status=0)
+
+    assert profile_jobs.enqueue_login_sync(app, bound) is True
+    assert profile_jobs.enqueue_login_sync(app, unbound) is False
+    assert profile_jobs.enqueue_login_sync(app, disabled) is False
 
 
 def test_execute_routes_job_type(app, monkeypatch):
@@ -78,12 +79,12 @@ def test_login_api_enqueues_bound_device(app, client, monkeypatch):
     """登录成功且已绑定设备时触发一次入队（接口本身不阻塞）。"""
     calls = []
     monkeypatch.setattr(profile_jobs, "enqueue_login_sync",
-                        lambda flask_app, user: calls.append(user.open_id))
+                        lambda flask_app, user: calls.append(user.username))
 
     resp = client.post("/api/auth/login", json={"username": "cs01", "password": "123456"})
 
     assert resp.status_code == 200
-    assert calls == ["dev01"]
+    assert calls == ["cs01"]
 
 
 def test_sync_device_full_routes_four_steps(app, monkeypatch):

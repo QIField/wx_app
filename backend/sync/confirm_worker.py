@@ -76,7 +76,7 @@ def _task_openid(task):
 
 
 def _broadcast(task, msg_status):
-    """状态有变化就推给前端：气泡从"发送中"变成"已发送/失败"。"""
+    """状态有变化就推给前端：气泡从"发送中"变成"已发送/失败"；openid 供多账号路由。"""
     if task.message_id is None:
         return
     msg = db.session.get(Message, task.message_id)
@@ -86,6 +86,7 @@ def _broadcast(task, msg_status):
     hub.broadcast("send_result", {
         "message_id": msg.id,
         "conversation_id": msg.conversation_id,
+        "openid": _task_openid(task),
         "status": msg_status,
     })
 

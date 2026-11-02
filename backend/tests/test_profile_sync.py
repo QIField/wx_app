@@ -25,7 +25,7 @@ def clean_fail_counts():
 @pytest.fixture(autouse=True)
 def device(app):
     """好友资料解析按设备遍历：造一台 o1 设备的启用账号。"""
-    return make_user(open_id="o1")
+    return make_user(open_ids=["o1"])
 
 
 @pytest.fixture

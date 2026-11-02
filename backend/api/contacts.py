@@ -1,6 +1,6 @@
 """通讯录 API：好友/群列表（contact 表全量同步 ∪ 历史会话，排除软删除）。
 
-多设备：列表按当前登录人绑定的设备（open_id）过滤。
+多设备：列表按 ?openid=（默认第一个绑定设备）过滤，跨账号不可见。
 """
 from flask import Blueprint, g, jsonify, request
 from pypinyin import lazy_pinyin, Style
@@ -10,6 +10,7 @@ from backend.models.contact import Contact
 from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
 from backend.services.auth import require_role
+from backend.services.devices import active_openid_for, user_openids
 
 bp = Blueprint("contacts", __name__)
 
@@ -32,9 +33,12 @@ def list_contacts():
     if mapped is None:
         return jsonify(code=400, msg="type 仅支持 friends / groups"), 400
     chat_type, contact_type = mapped
-    openid = (g.current_user.open_id or "").strip()
-    if not openid:
+    if not user_openids(g.current_user.id):  # 未绑定设备：空列表（与旧口径一致）
         return jsonify(code=0, msg="success", data={"list": [], "total": 0})
+    openid, err = active_openid_for(g.current_user, request.args.get("openid"))
+    if err:
+        msg, status = err
+        return jsonify(code=status, msg=msg), status
 
     keyword = (request.args.get("keyword") or "").strip()
     like = f"%{keyword}%"

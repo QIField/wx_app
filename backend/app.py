@@ -2,12 +2,13 @@
 
 职责：只做组装，不写业务逻辑。
 """
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from backend.config import (
     APP_ENV,
     DATABASE_URL,
+    DEVICE_CHECK_INTERVAL_SECONDS,
     POLL_INTERVAL_SECONDS,
     PROFILE_INTERVAL_SECONDS,
     SEND_CONFIRM_INTERVAL,
@@ -27,7 +28,28 @@ def create_app() -> Flask:
 
     register_routes(app)
     register_error_handlers(app)
+    register_access_log_hooks(app)
     return app
+
+
+def register_access_log_hooks(app: Flask) -> None:
+    """入站接口日志钩子（规范见 docs/interface-log.md）：自动全量记录，业务零代码。"""
+    from backend.services import access_log as svc
+
+    @app.before_request
+    def _access_begin():
+        svc.start_timer()
+
+    @app.after_request
+    def _access_end(response):
+        svc.record(response)
+        return response
+
+    @app.teardown_request
+    def _access_teardown(exc):
+        # 兜底：未处理异常时 after_request 不会执行，补记一条 500
+        if exc is not None:
+            svc.record_crash(exc)
 
 
 def register_routes(app: Flask) -> None:
@@ -36,8 +58,12 @@ def register_routes(app: Flask) -> None:
     from backend.api.auth import bp as auth_bp
     from backend.api.contacts import bp as contacts_bp
     from backend.api.conversations import bp as conversations_bp
+    from backend.api.devices import bp as devices_bp
+    from backend.api.logs import bp as logs_bp
     from backend.api.media import bp as media_bp
     from backend.api.messages import bp as messages_bp
+    from backend.api.orgs import bp as orgs_bp
+    from backend.api.send_logs import bp as send_logs_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(accounts_bp)
@@ -45,7 +71,11 @@ def register_routes(app: Flask) -> None:
     app.register_blueprint(messages_bp)
     app.register_blueprint(conversations_bp)
     app.register_blueprint(contacts_bp)
+    app.register_blueprint(devices_bp)
+    app.register_blueprint(send_logs_bp)
     app.register_blueprint(media_bp)
+    app.register_blueprint(logs_bp)
+    app.register_blueprint(orgs_bp)
 
     import backend.ws.hub  # noqa: F401 注册 /ws WebSocket 路由
 
@@ -81,47 +111,110 @@ def ensure_bootstrap_developer():
         db.session.commit()
 
 
+def upgrade_existing_schema():
+    """开发库轻量迁移：create_all 只建新表，不会给存量表补列。
+
+    2026-11-02 多账号绑定改造：user.open_id（一对一）→ user_device（一对多）；
+    message 增加操作人快照列（operator_id/operator_name，发消息溯源）。
+    """
+    _try_alter("ALTER TABLE user ADD COLUMN org_id BIGINT")
+    _try_alter("ALTER TABLE message ADD COLUMN operator_id BIGINT")
+    _try_alter("ALTER TABLE message ADD COLUMN operator_name VARCHAR(64)")
+    _backfill_user_devices()
+    _try_drop_user_openid()
+
+
+def _try_alter(sql):
+    """执行一条 ALTER；列已存在（重复启动）时忽略。"""
+    from sqlalchemy import text
+
+    try:
+        db.session.execute(text(sql))
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+
+
+def _backfill_user_devices():
+    """存量 user.open_id 一次性搬入 user_device（幂等：已存在的 openid 跳过）。"""
+    from backend.models.user_device import UserDevice
+    from sqlalchemy import text
+
+    result = db.session.execute(text(
+        "INSERT INTO user_device (user_id, openid, online, created_at, updated_at) "
+        "SELECT id, open_id, :unknown, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM user "
+        "WHERE open_id IS NOT NULL AND open_id != '' "
+        "AND open_id NOT IN (SELECT openid FROM user_device)"
+    ), {"unknown": UserDevice.ONLINE_UNKNOWN})
+    if result.rowcount:
+        db.session.commit()
+
+
+def _try_drop_user_openid():
+    """迁移完成后删掉 user.open_id 旧列（SQLite 因 UNIQUE 约束删不掉就保留，
+    模型已不含该字段，不影响运行；MySQL 生产库可正常删）。"""
+    _try_alter("ALTER TABLE user DROP COLUMN open_id")
+
+
 def init_scheduler(app: Flask):
     """定时任务：收消息轮询 + 发送结果确认 + 会话资料解析 + 日志清理。
     只在直接运行 app.py 时启动。
     """
     from apscheduler.schedulers.background import BackgroundScheduler
 
+    from backend.config import DEVICE_CHECK_INTERVAL_SECONDS
+    from backend.services import middle_log
     from backend.services.audit import clean_expired_logs
+    from backend.services.devices import refresh_all_device_online
     from backend.sync.confirm_worker import confirm_once
     from backend.sync.message_sync import sync_once
     from backend.sync import profile_jobs
 
+    def scheduled(name, fn):
+        """包装定时任务：给出站日志标记触发来源。"""
+        def run():
+            middle_log.set_job_source(name)
+            fn(app)
+        return run
+
     sched = BackgroundScheduler(daemon=True)
     sched.add_job(
-        lambda: sync_once(app),
+        scheduled("message_sync", sync_once),
         "interval",
         seconds=POLL_INTERVAL_SECONDS,
         id="sync_message",
         max_instances=1,
     )
     sched.add_job(
-        lambda: confirm_once(app),
+        scheduled("confirm_worker", confirm_once),
         "interval",
         seconds=SEND_CONFIRM_INTERVAL,
         id="confirm_send",
         max_instances=1,
     )
+    # 设备在线状态轮询：check_online 回写 user_device.online（顶栏卡片在线点）
+    sched.add_job(
+        scheduled("device_online", refresh_all_device_online),
+        "interval",
+        seconds=DEVICE_CHECK_INTERVAL_SECONDS,
+        id="device_online",
+        max_instances=1,
+    )
     # 资料同步统一走任务队列：定时轮只投递任务，由单 worker 与登录触发串行消费
     sched.add_job(
-        lambda: profile_jobs.enqueue_sweep(app),
+        scheduled("profile_sweep", profile_jobs.enqueue_sweep),
         "interval",
         seconds=PROFILE_INTERVAL_SECONDS,
         id="sync_profiles",
         max_instances=1,
     )
-    # 审计日志保留 180 天，每天凌晨 3:30 清理一次（规范见 docs/audit-log.md）
+    # 日志清理：audit_log 180 天，access_log / middle_call_log 90 天（规范见 docs/interface-log.md）
     sched.add_job(
         lambda: _cleanup_logs(app),
         "cron",
         hour=3,
         minute=30,
-        id="clean_audit_logs",
+        id="clean_logs",
         max_instances=1,
     )
     profile_jobs.ensure_worker(app)  # 资料同步唯一 worker，先于定时任务启动
@@ -131,7 +224,12 @@ def init_scheduler(app: Flask):
 
 def _cleanup_logs(app: Flask):
     with app.app_context():
-        clean_expired_logs(days=180)
+        from backend.services.access_log import clean_expired as clean_access_logs
+        from backend.services.middle_log import clean_expired as clean_middle_logs
+
+        clean_expired_logs(days=180)  # audit_log 保留 180 天
+        clean_access_logs(days=90)
+        clean_middle_logs(days=90)
 
 
 app = create_app()
@@ -139,6 +237,9 @@ app = create_app()
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()  # 开发期自动建表；生产环境建议换数据库迁移工具
+        upgrade_existing_schema()
+        from backend.models.org import Org
+        Org.ensure_seed()  # 组织字典固定五条种子（幂等）
         ensure_bootstrap_developer()
     init_scheduler(app)
     # use_reloader=False：防止调试重载导致定时器跑两份

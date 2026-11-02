@@ -17,7 +17,7 @@ def test_login_ok_returns_token_and_user(client):
     assert body["code"] == 0
     assert body["data"]["token"]
     assert body["data"]["user"]["role"] == ROLE_AGENT
-    assert body["data"]["user"]["open_id"] == "dev01"
+    assert [d["openid"] for d in body["data"]["user"]["devices"]] == ["dev01"]
 
 
 def test_login_wrong_password(client):

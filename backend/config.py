@@ -38,6 +38,8 @@ SEND_ENABLED = os.getenv("SEND_ENABLED", "false").lower() in ("1", "true", "yes"
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "2"))
 # 发送结果确认轮询间隔（秒）
 SEND_CONFIRM_INTERVAL = int(os.getenv("SEND_CONFIRM_INTERVAL", "1"))
+# 设备在线状态轮询间隔（秒）：调中间方 check_online 回写 user_device.online
+DEVICE_CHECK_INTERVAL_SECONDS = int(os.getenv("DEVICE_CHECK_INTERVAL_SECONDS", "60"))
 # 会话资料解析间隔（秒）：群名+好友昵称头像，30 分钟一轮兜底
 # （新消息触发的立即补拉见 profile_sync.refresh_missing_profiles）
 PROFILE_INTERVAL_SECONDS = int(os.getenv("PROFILE_INTERVAL_SECONDS", "1800"))

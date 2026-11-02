@@ -46,12 +46,17 @@ def enqueue_device(app, openid, reason="login"):
 
 
 def enqueue_login_sync(app, user):
-    """登录成功后调用：已绑定设备且账号启用才入队；队列层负责冷却与去重。"""
+    """登录成功后调用：逐台绑定设备入队（队列层负责冷却与去重）。"""
     if not PROFILE_LOGIN_SYNC_ENABLED:
         return False
-    if user is None or not getattr(user, "open_id", None) or not user.enabled:
+    if user is None or not user.enabled:
         return False
-    return enqueue_device(app, user.open_id, reason="login")
+    from backend.services.devices import user_openids
+
+    return any(
+        enqueue_device(app, openid, reason="login")
+        for openid in user_openids(user.id)
+    )
 
 
 def ensure_worker(app):
@@ -123,10 +128,17 @@ def _run_forever():
 def _execute(job, app):
     from backend.sync import profile_sync
 
-    if job["type"] == "sweep":
-        profile_sync.sync_profiles(app)
-    else:
-        profile_sync.sync_device_full(job["openid"])
+    target = job.get("openid") or "全部设备"
+    started = time.monotonic()
+    app.logger.info("资料同步开始: type=%s target=%s", job["type"], target)
+    try:
+        if job["type"] == "sweep":
+            profile_sync.sync_profiles(app)
+        else:
+            profile_sync.sync_device_full(job["openid"])
+    finally:
+        app.logger.info("资料同步结束: type=%s target=%s 用时=%.1fs",
+                        job["type"], target, time.monotonic() - started)
 
 
 def _log_failure(app, job, exc):

@@ -14,6 +14,7 @@ from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.services.auth import must_change_guard, request_user
+from backend.services.devices import user_openids
 from backend.sync import task_query
 from backend.sync.send_service import SendDispatchError, send_message
 
@@ -21,6 +22,11 @@ bp = Blueprint("messages", __name__)
 
 _VALID_TYPES = {1, 2, 3, 4, 5}  # 文本/图片/文件/视频/链接卡片
 REVOKE_WINDOW = 120  # 微信限制：发出 2 分钟内可撤回
+
+
+def _own_openids(user):
+    """当前登录人绑定的全部设备标识（归属校验口径，跨账号不可见）。"""
+    return user_openids(user.id)
 
 
 @bp.post("/api/conversations/<int:conversation_id>/messages")
@@ -49,18 +55,20 @@ def send_message_api(conversation_id):
     if not isinstance(payload, dict):
         return jsonify(code=400, msg="payload 必须是对象"), 400
 
+    openids = _own_openids(user)
     conv = (
         Conversation.query.filter(
             Conversation.id == conversation_id,
             Conversation.deleted_at.is_(None),
-            Conversation.openid == (user.open_id or ""),
+            Conversation.openid.in_(openids),
         ).first()
-    )
+    ) if openids else None
     if conv is None:
         return jsonify(code=404, msg="会话不存在"), 404
 
     try:
-        msg = send_message(conversation_id, msg_type, body.get("content", ""), payload)
+        msg = send_message(conversation_id, msg_type, body.get("content", ""), payload,
+                           operator=user)
     except SendDispatchError as exc:
         return jsonify(code=502, msg=f"下发失败：{exc}"), 502
 
@@ -86,16 +94,17 @@ def revoke_message_api(message_id):
     if blocked is not None:
         return blocked
 
+    openids = _own_openids(user)
     msg = (
         Message.query.join(Conversation, Message.conversation_id == Conversation.id)
         .filter(
             Message.id == message_id,
             Message.deleted_at.is_(None),
             Conversation.deleted_at.is_(None),
-            Conversation.openid == (user.open_id or ""),
+            Conversation.openid.in_(openids),
         )
         .first()
-    )
+    ) if openids else None
     if msg is None:
         return jsonify(code=404, msg="消息不存在"), 404
     if msg.direction != Message.DIR_OUT:
@@ -139,5 +148,6 @@ def revoke_message_api(message_id):
     hub.broadcast("message_revoked", {
         "message_id": msg.id,
         "conversation_id": msg.conversation_id,
+        "openid": openid,
     })
     return jsonify(code=0, msg="success", data={"message_id": msg.id})

@@ -1,7 +1,8 @@
 """会话与聊天记录 API：给前端读库（都过滤软删除）。
 
-多设备：所有查询按当前登录人绑定的微信设备（open_id）过滤，
-未绑定设备的账号看到的列表为空。
+多设备：工作台一次只看一个聊天账号——列表类接口按 ?openid=（默认第一个
+绑定设备）过滤；归属校验按"当前登录人全部绑定设备"（同账号数据互通，
+跨账号严格隔离）。未绑定设备的账号看到的列表为空。
 """
 from flask import Blueprint, g, jsonify, request
 
@@ -11,6 +12,7 @@ from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.services import conversations as conversation_service
 from backend.services.auth import require_role
+from backend.services.devices import active_openid_for, user_openids
 
 bp = Blueprint("conversations", __name__)
 
@@ -18,20 +20,30 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
 
-def _my_openid():
-    """当前登录人绑定的设备标识；未绑定为 None。"""
-    return g.current_user.open_id or None
+def _my_openids():
+    """当前登录人绑定的全部设备标识；未绑定为空列表。"""
+    return user_openids(g.current_user.id)
+
+
+def _active_openid():
+    """?openid= 选当前设备；未传默认第一个绑定。返回 (openid, 错误响应)。"""
+    openid, err = active_openid_for(g.current_user, request.args.get("openid"))
+    if err:
+        msg, status = err
+        return None, (jsonify(code=status, msg=msg), status)
+    return openid, None
 
 
 def _my_conversation(conversation_id):
-    """取属于当前登录人设备的会话；跨设备/已删除的会话当不存在。"""
-    if _my_openid() is None:
+    """取属于当前登录人任一绑定设备的会话；跨账号/已删除的会话当不存在。"""
+    openids = _my_openids()
+    if not openids:
         return None
     return (
         Conversation.query.filter(
             Conversation.id == conversation_id,
             Conversation.deleted_at.is_(None),
-            Conversation.openid == _my_openid(),
+            Conversation.openid.in_(openids),
         ).first()
     )
 
@@ -39,14 +51,17 @@ def _my_conversation(conversation_id):
 @bp.get("/api/conversations")
 @require_role()
 def list_conversations():
-    """会话列表：本设备内 置顶优先，其余按最后消息时间倒序（NULL 排最后）。"""
-    if _my_openid() is None:
+    """会话列表：当前设备内 置顶优先，其余按最后消息时间倒序（NULL 排最后）。"""
+    if not _my_openids():
         return jsonify(code=0, msg="success", data=[])
+    openid, err = _active_openid()
+    if err:
+        return err
 
     rows = (
         Conversation.query.filter(
             Conversation.deleted_at.is_(None),
-            Conversation.openid == _my_openid(),
+            Conversation.openid == openid,
         )
         .order_by(
             Conversation.pinned.desc(),
@@ -63,11 +78,14 @@ def list_conversations():
 def open_conversation():
     """主动发起会话：按 wxid 建/取会话（联系人须在该设备的通讯录里）。
 
-    body: {"wxid": "...", "chat_type": 1|2}；已存在直接返回，没有则新建。
+    body: {"wxid": "...", "chat_type": 1|2}；?openid= 选设备，默认第一个绑定。
+    已存在直接返回，没有则新建。
     """
-    openid = _my_openid()
-    if openid is None:
+    if not _my_openids():
         return jsonify(code=400, msg="当前账号未绑定微信设备"), 400
+    openid, err = _active_openid()
+    if err:
+        return err
 
     body = request.get_json(silent=True) or {}
     wxid = (body.get("wxid") or "").strip()
@@ -193,6 +211,7 @@ def _msg_json(m, sender_map=None):
         "sender_avatar": (info or {}).get("avatar"),
         "content": m.content,
         "payload": m.payload,
+        "operator_name": m.operator_name or "",  # 发出消息的操作人快照（气泡徽章）
         "create_time": m.create_time.strftime("%Y-%m-%d %H:%M:%S"),
         "status": m.status,
     }

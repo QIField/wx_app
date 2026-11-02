@@ -45,7 +45,7 @@ def login():
     return jsonify(code=0, msg="success", data={
         "token": token,
         "expires_in": expires_in,
-        "user": user.to_json(with_openid=True),
+        "user": user.to_json(with_devices=True),
     })
 
 
@@ -53,7 +53,7 @@ def login():
 @require_role(allow_must_change=True)
 def me():
     """当前登录人：前端刷新页面时用它恢复会话。"""
-    return jsonify(code=0, msg="success", data=g.current_user.to_json(with_openid=True))
+    return jsonify(code=0, msg="success", data=g.current_user.to_json(with_devices=True))
 
 
 @bp.put("/api/auth/password")
@@ -73,4 +73,4 @@ def change_my_password():
         return jsonify(code=400, msg=err), 400
 
     log_action(AuditModule.AUTH, "修改密码", target)
-    return jsonify(code=0, msg="success", data=user.to_json(with_openid=True))
+    return jsonify(code=0, msg="success", data=user.to_json(with_devices=True))

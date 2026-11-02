@@ -1,6 +1,9 @@
-/** 聊天共享状态（Pinia）：会话列表、当前会话、消息、WebSocket 事件分发。 */
+/** 聊天共享状态（Pinia）：多设备绑定、会话列表、当前会话、消息、WebSocket 事件分发。 */
 import { defineStore } from 'pinia'
-import { connectWs, fetchConversations, fetchMessages, markConversationRead, openConversation, sendTextMessage } from '../api'
+import {
+  connectWs, fetchConversations, fetchDevices, fetchMessages,
+  markConversationRead, openConversation, sendTextMessage,
+} from '../api'
 
 /** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
 function nowStamp() {
@@ -12,22 +15,45 @@ function nowStamp() {
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
-    conversations: [],   // 左栏列表
+    conversations: [],   // 当前设备下的左栏列表
     currentId: null,     // 当前选中的会话 id
     currentMessages: [], // 当前会话的聊天记录（时间正序）
     loadingMessages: false,
     hasMore: false,      // 还有更早的记录可翻
     loadingMore: false,
+    devices: [],         // 绑定的聊天账号卡片 [{openid, remark, display_name, online, unread}]
+    activeOpenid: '',    // 当前查看的聊天账号（缺省=第一个绑定）
+    operatorName: '',    // 当前登录人姓名：本地乐观气泡直接显示操作人
+    crossMsg: null,      // 其他绑定账号新消息 {openid, name, content}，页面据此弹 toast
   }),
 
   getters: {
     currentConv: (s) => s.conversations.find((c) => c.id === s.currentId) || null,
+    activeDevice: (s) => s.devices.find((d) => d.openid === s.activeOpenid) || null,
   },
 
   actions: {
+    /** 绑定设备卡片：首次载入默认选第一个；之后重拉即同步未读/在线状态。 */
+    async loadDevices(selectFirst = false) {
+      this.devices = await fetchDevices()
+      if ((selectFirst || !this.activeOpenid) && this.devices.length) {
+        this.activeOpenid = this.devices[0].openid
+      }
+    },
+
+    /** 切换聊天账号：清当前会话并重拉列表（通讯录由页面监听 activeOpenid 重拉）。 */
+    async switchDevice(openid) {
+      if (openid === this.activeOpenid) return
+      this.activeOpenid = openid
+      this.currentId = null
+      this.currentMessages = []
+      this.hasMore = false
+      await Promise.all([this.loadDevices(), this.loadConversations()])
+    },
+
     async loadConversations() {
       // 未读一律以后端为准：不因"正在打开"而清除，只有用户点击会话窗口内容才算已读
-      this.conversations = await fetchConversations()
+      this.conversations = await fetchConversations(this.activeOpenid)
     },
 
     /** 从通讯录发起会话：已有会话直接进，没有就建一个再进。 */
@@ -36,7 +62,7 @@ export const useChatStore = defineStore('chat', {
         (c) => c.wxid === wxid && c.chat_type === chatType)
       let convId = local?.id
       if (!convId) {
-        const conv = await openConversation(wxid, chatType)
+        const conv = await openConversation(wxid, chatType, this.activeOpenid)
         convId = conv.id
         await this.loadConversations()
       }
@@ -96,7 +122,7 @@ export const useChatStore = defineStore('chat', {
           id: data.message_id,
           msg_type: 1,
           direction: 2,
-          sender_name: '客服',
+          operator_name: this.operatorName || '客服',
           content,
           payload: {},
           status: data.status,
@@ -123,14 +149,38 @@ export const useChatStore = defineStore('chat', {
       })
     },
 
-    /** 连接 WebSocket 并分发推送。 */
+    /** 连接 WebSocket 并按 data.openid 分发推送。 */
     connect() {
       connectWs((event, data) => {
+        // 路由规则：本账号 → 正常处理；我的其他账号 → 红点+toast；别人的 → 忽略。
+        // 旧事件不带 openid 时保持原行为（进当前视图）。
+        if (data?.openid && data.openid !== this.activeOpenid) {
+          if (event === 'new_message' && this.myDevice(data.openid)) this.onCrossMessage(data)
+          return
+        }
         if (event === 'new_message') this.onNewMessage(data)
         else if (event === 'send_result') this.onSendResult(data)
         else if (event === 'conv_updated') this.onConvUpdated(data)
         else if (event === 'message_revoked') this.onMessageRevoked(data)
       })
+    },
+
+    /** 找回我的某台绑定设备卡片（找不到说明消息属于别人的设备）。 */
+    myDevice(openid) {
+      return this.devices.find((d) => d.openid === openid) || null
+    },
+
+    /** 其他绑定账号来消息：对应卡片未读 +1，并抛 crossMsg 让页面弹 toast。 */
+    onCrossMessage(d) {
+      const dev = this.myDevice(d.openid)
+      if (!dev) return
+      if (d.direction === 1) dev.unread = (dev.unread || 0) + 1
+      const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
+      this.crossMsg = {
+        openid: d.openid,
+        name: dev.display_name || d.openid,
+        content: d.payload?.system || isXml ? '[系统消息]' : (d.content || ''),
+      }
     },
 
     /** 资料解析完成后推送：重拉列表；当前会话重拉消息（昵称/头像补齐即刷新）。 */

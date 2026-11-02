@@ -15,8 +15,8 @@ from backend.tests.test_message_sync import make_body, make_item, patch_pull
 
 @pytest.fixture(autouse=True)
 def device(app):
-    """同步以绑定 open_id 的启用账号为准，造一台 dev01 设备。"""
-    return make_user(open_id="dev01")
+    """同步以绑定设备的启用账号为准，造一台 dev01 设备。"""
+    return make_user(open_ids=["dev01"])
 
 
 def test_broadcast_puts_json_into_every_queue():

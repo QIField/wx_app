@@ -6,8 +6,10 @@ from backend.adapter.client import MiddleApiError
 
 
 class FakeResp:
-    def __init__(self, body):
+    def __init__(self, body, status_code=200):
         self._body = body
+        self.status_code = status_code
+        self.text = str(body)
 
     def raise_for_status(self):
         return None
@@ -19,6 +21,7 @@ class FakeResp:
 class FakeBytesResp:
     def __init__(self, content, content_type="application/octet-stream"):
         self.content = content
+        self.status_code = 200
         self.headers = {"Content-Type": content_type}
 
     def raise_for_status(self):

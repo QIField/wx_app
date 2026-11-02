@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>接口调用日志记录方案 · wx_app 评审稿</title>
+<style>
+:root{
+  --bg:#f5f7fb; --paper:#ffffff; --ink:#1a2233; --muted:#64748b; --line:#e5eaf2;
+  --primary:#2456d6; --primary-soft:#eef3fe; --primary-ink:#1d3fa8;
+  --ok:#0f9960; --ok-soft:#e8f7f0; --warn:#b45309; --warn-soft:#fef4e6; --bad:#d64545; --bad-soft:#fdeeee;
+  --code-bg:#0f172a; --code-ink:#d7e2f4; --radius:12px;
+  --mono:"Cascadia Code",Consolas,"JetBrains Mono",monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);
+  font:15px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px;display:flex;gap:32px;align-items:flex-start}
+
+/* ---------- 侧边目录 ---------- */
+nav.toc{position:sticky;top:24px;width:216px;flex:none;padding:20px 0 20px 4px;max-height:calc(100vh - 48px);overflow:auto}
+nav.toc .brand{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;margin:0 0 12px 14px}
+nav.toc a{display:block;padding:7px 14px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;font-size:13.5px;border-radius:0 8px 8px 0}
+nav.toc a:hover{color:var(--ink);background:#eef1f7}
+nav.toc a.on{color:var(--primary);border-left-color:var(--primary);background:var(--primary-soft);font-weight:600}
+
+/* ---------- 主文档 ---------- */
+main{flex:1;min-width:0;padding:40px 0 80px}
+header.hero{background:linear-gradient(135deg,#12275c 0%,#2456d6 70%,#3b74ea 100%);color:#fff;border-radius:16px;padding:44px 44px 38px;margin-bottom:28px;position:relative;overflow:hidden}
+header.hero::after{content:"LOG";position:absolute;right:-14px;bottom:-38px;font:900 150px/1 var(--mono);opacity:.06;letter-spacing:-.04em}
+header.hero h1{font-size:30px;letter-spacing:.02em;margin-bottom:10px}
+header.hero p.sub{opacity:.88;max-width:640px;font-size:15px}
+.meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+.meta span{font-size:12.5px;padding:4px 12px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22)}
+.meta span.rev{background:#fbbf24;color:#4a2b00;border-color:#fbbf24;font-weight:700}
+
+section{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:30px 34px;margin-bottom:22px;scroll-margin-top:20px}
+section>h2{font-size:19px;display:flex;align-items:center;gap:12px;margin-bottom:6px}
+section>h2 .no{flex:none;width:30px;height:30px;border-radius:9px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center;font:700 14px var(--mono)}
+section>p.lead{color:var(--muted);font-size:14px;margin-bottom:18px}
+h3{font-size:15.5px;margin:22px 0 10px;padding-left:10px;border-left:3px solid var(--primary)}
+p{margin:8px 0}
+ul,ol{margin:8px 0 8px 22px}
+li{margin:4px 0}
+b.k{color:var(--primary-ink)}
+code{font-family:var(--mono);font-size:.88em;background:#eef1f7;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#274690}
+
+/* 表格 */
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0}
+th{background:#f1f4fa;text-align:left;font-weight:600;color:#334155}
+th,td{border:1px solid var(--line);padding:8px 12px;vertical-align:top}
+td code{white-space:nowrap}
+tr:hover td{background:#fafbfe}
+
+/* 徽标 */
+.tag{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;vertical-align:1px}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.tag.warn{background:var(--warn-soft);color:var(--warn)}
+.tag.bad{background:var(--bad-soft);color:var(--bad)}
+.tag.blue{background:var(--primary-soft);color:var(--primary)}
+.tag.gray{background:#eef1f6;color:var(--muted)}
+
+/* 代码块 */
+.code{position:relative;background:var(--code-bg);border-radius:10px;margin:12px 0;overflow:hidden}
+.code pre{padding:16px 18px;overflow-x:auto;color:var(--code-ink);font:12.8px/1.7 var(--mono)}
+.code .cap{display:block;font-size:11.5px;color:#7e93b8;font-family:var(--mono);padding:9px 18px;border-bottom:1px solid #1e293b;background:#0b1222}
+.code .copy{position:absolute;top:7px;right:10px;font-size:11.5px;color:#9db2d4;background:#1e293b;border:1px solid #2c3c58;border-radius:6px;padding:3px 10px;cursor:pointer}
+.code .copy:hover{color:#fff}
+.code .cm{color:#64748b}.code .kw{color:#7dd3fc}.code .st{color:#a5e8b0}
+
+/* 流程图 */
+.flow{display:flex;align-items:stretch;gap:0;margin:16px 0;flex-wrap:wrap}
+.flow .node{flex:1;min-width:150px;background:#f8fafd;border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative}
+.flow .node b{display:block;font-size:13.5px;margin-bottom:3px}
+.flow .node small{color:var(--muted);font-size:12px;line-height:1.55;display:block}
+.flow .arr{flex:none;display:grid;place-items:center;padding:0 8px;color:var(--primary);font-size:18px;font-weight:700}
+.flow .node.hl{background:var(--primary-soft);border-color:#c4d5f7}
+.flow .node.hl b{color:var(--primary)}
+
+/* 案例卡 */
+.case{border:1px solid #f3d6d6;background:#fffafa;border-radius:10px;padding:16px 20px;margin:12px 0}
+.case .t{font-weight:700;color:var(--bad);font-size:13.5px;margin-bottom:6px}
+.case ol{margin-left:18px}
+.divider{height:1px;background:var(--line);margin:18px 0}
+
+/* 选项卡（DDL） */
+.tabs{display:flex;gap:8px;margin:14px 0 0;flex-wrap:wrap}
+.tabs button{font:600 13px/1 inherit;padding:9px 16px;border-radius:9px 9px 0 0;border:1px solid var(--line);border-bottom:none;background:#eef1f7;color:var(--muted);cursor:pointer}
+.tabs button.on{background:var(--code-bg);color:#fff;border-color:var(--code-bg)}
+.pane{display:none}
+.pane.on{display:block}
+
+/* 待确认选项卡 */
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0}
+.opt{border:2px solid var(--line);border-radius:12px;padding:18px 20px;cursor:pointer;transition:.15s;background:#fbfcfe}
+.opt:hover{border-color:#b9caf0}
+.opt.on{border-color:var(--primary);background:var(--primary-soft);box-shadow:0 0 0 3px rgba(36,86,214,.08)}
+.opt .rt{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:14.5px}
+.opt .rt .pick{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+.opt.on .rt .pick{background:var(--primary);color:#fff;border-color:var(--primary)}
+.opt ul{margin-left:18px;font-size:13.5px}
+.opt .imp{margin-top:8px;font-size:12.5px;color:var(--warn);font-weight:600}
+#optState{text-align:center;font-size:13px;color:var(--muted);padding:8px 0 0}
+#optState b{color:var(--primary)}
+
+/* 检查清单 */
+.check{list-style:none;margin-left:0}
+.check li{padding-left:26px;position:relative;margin:7px 0}
+.check li::before{content:"";position:absolute;left:0;top:6px;width:16px;height:16px;border-radius:5px;background:var(--ok-soft)}
+.check li::after{content:"";position:absolute;left:4px;top:9px;width:8px;height:5px;border-left:2px solid var(--ok);border-bottom:2px solid var(--ok);transform:rotate(-45deg)}
+
+/* 里程碑 */
+.stage{display:flex;gap:14px;margin:14px 0}
+.stage .s{flex:1;border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fbfcfe}
+.stage .s .ph{font:700 11px var(--mono);color:var(--primary);letter-spacing:.1em}
+.stage .s b{display:block;margin:4px 0 6px;font-size:14px}
+.stage .s p{font-size:12.8px;color:var(--muted);line-height:1.6}
+
+.qa{background:#fffbeb;border:1px solid #f5e3ad;border-radius:10px;padding:14px 18px;margin:10px 0;font-size:13.5px}
+.qa b{color:var(--warn)}
+
+footer{color:var(--muted);font-size:12.5px;text-align:center;padding:0 0 40px}
+
+@media (max-width:920px){
+  .wrap{flex-direction:column}
+  nav.toc{position:static;width:100%;max-height:none;padding:12px 0 0}
+  nav.toc a{display:inline-block;border:1px solid var(--line);border-radius:8px;margin:0 6px 6px 0;padding:5px 12px}
+  .opts{grid-template-columns:1fr}
+  .stage{flex-direction:column}
+  section{padding:22px 18px}
+  header.hero{padding:30px 24px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <div class="brand">方案目录</div>
+  <a href="#s1" class="on">1 背景与目标</a>
+  <a href="#s2">2 总体设计</a>
+  <a href="#s3">3 入站日志</a>
+  <a href="#s4">4 出站日志</a>
+  <a href="#s5">5 表结构 DDL</a>
+  <a href="#s6">6 日志查询接口</a>
+  <a href="#s7">7 项目规范条款</a>
+  <a href="#s8">8 组织管理（待确认）</a>
+  <a href="#s9">9 实施清单</a>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>接口调用日志记录方案</h1>
+  <p class="sub">覆盖「前端 → 后端 API」入站调用与「后端 → 中间方」出站调用，统一落库、可查询、可追溯；同时确立项目规范：现有功能与未来新功能的接口调用一律有日志。文末附组织管理方案（待确认后实施）。</p>
+  <div class="meta">
+    <span>wx_app · 微信消息工作台</span><span>v1.0</span><span>2026-11-02</span><span class="rev">评审中 · 待确认</span>
+  </div>
+</header>
+
+<!-- 1 -->
+<section id="s1">
+  <h2><span class="no">1</span>背景与目标</h2>
+  <p class="lead">方案源于一次真实的排障过程：发送消息接口返回成功，消息却实际发送失败。</p>
+  <div class="case">
+    <div class="t">实测案例 · 2026-11-02 发送闭环排查</div>
+    <ol>
+      <li><code>POST /api/conversations/70/messages</code> 返回 <code>{"code":0,"status":0}</code> —— 前端看到"已入队"，以为成功；</li>
+      <li>真正的发送结果在 <b>confirm_worker 轮询</b>里，异常被静默吞掉只累计 retry_count；</li>
+      <li>最后靠<b>临时在终端打印中间方原始响应</b>才定位：中间方返回 <code>ret:500 "设备已离线，appId:wx_DLcv5wC1xSL52e0Bf6c8o"</code>。</li>
+    </ol>
+  </div>
+  <p>这类问题不该依赖临时代码。本方案把"完整请求/响应可查"变成<b class="k">常驻基础设施</b>：</p>
+  <ul>
+    <li><b>查得到</b>：任何一次入站、出站调用的参数、响应、耗时、结果，按时间 / 用户 / 组织 / 路径 / uuid 检索；</li>
+    <li><b>串得起</b>：发送闭环从 API 请求 → send_task → 中间方下发 → 轮询确认，用 <code>uuid</code> 串联；</li>
+    <li><b>不添乱</b>：日志写失败不影响业务，敏感字段脱敏，定期自动清理；</li>
+    <li><b>可延续</b>：写成项目规范（<code>docs/interface-log.md</code>），新功能自动被覆盖，验收时"有日志"是完成标准之一。</li>
+  </ul>
+  <div class="qa"><b>与现有 audit_log 的分工：</b>audit_log 记"业务动作"（谁重置了谁的密码，模块级，手动埋点）；本方案记"接口调用流水"（每一笔 HTTP 往返，钩子自动埋点）。两者互补，不互相替代。</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <h2><span class="no">2</span>总体设计</h2>
+  <p class="lead">两条日志链路，各一张表，均由统一入口自动记录。</p>
+  <div class="flow">
+    <div class="node"><b>浏览器 / 前端</b><small>所有 /api 请求（带 token）</small></div>
+    <div class="arr">→</div>
+    <div class="node hl"><b>Flask before/after_request</b><small>入站钩子：记录参数、响应、耗时<br>唯一实现点，新接口零代码接入</small></div>
+    <div class="arr">→</div>
+    <div class="node"><b>表 access_log</b><small>入站流水（本次新增）</small></div>
+  </div>
+  <div class="flow">
+    <div class="node"><b>业务层 / 定时任务</b><small>发送、同步、资料、确认轮询</small></div>
+    <div class="arr">→</div>
+    <div class="node hl"><b>adapter/client.call / call_download</b><small>出站唯一出口（现状即如此）<br>在此埋点：请求参数 + 原始响应</small></div>
+    <div class="arr">→</div>
+    <div class="node"><b>表 middle_call_log</b><small>出站流水（本次新增）</small></div>
+  </div>
+  <h3>设计原则</h3>
+  <ul>
+    <li><b>入口唯一，天然全覆盖</b>：出站本来只允许走 <code>adapter/client</code>（docs/api.md 附录既定规则），埋一次点覆盖现有 5 个模块与未来全部新模块；入站用 Flask 全局钩子，同样一次覆盖。</li>
+    <li><b>快照而非外键</b>：user_name / org_name 存快照字符串（与 audit_log 同款做法），账号停用后历史日志仍可读。</li>
+    <li><b>失败不阻断</b>：写日志包 try/except，异常只进 app logger（与 <code>services/audit.log_action</code> 同款兜底）。</li>
+    <li><b>本地开发友好</b>：开发库为 SQLite，模型用 SQLAlchemy 定义，MySQL DDL 仅作生产参考，两套等价。</li>
+  </ul>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <h2><span class="no">3</span>入站日志（前端 → 后端 API）</h2>
+  <p class="lead">在 <code>create_app</code> 注册全局钩子，一次实现覆盖所有蓝图与未来新接口。</p>
+  <h3>触发点</h3>
+  <ul>
+    <li><code>before_request</code>：记起始时间、组装基本字段（user / org 从 <code>request.current_user</code> 取，未登录接口记空）暂存 <code>flask.g</code>；</li>
+    <li><code>after_request</code>：补记响应码、耗时，落库一条 access_log；</li>
+    <li><code>teardown_request</code>：请求抛异常时兜底补一条（result=fail，error_msg=异常摘要）。</li>
+  </ul>
+  <div class="code"><span class="cap">实现要点 · backend/app.py（示意）</span><button class="copy">复制</button><pre><span class="kw">def</span> register_access_log(app):
+    <span class="kw">@app.before_request</span>
+    <span class="kw">def</span> _t0():
+        g.log_start = time.time()
+
+    <span class="kw">@app.after_request</span>
+    <span class="kw">def</span> _log(resp):
+        <span class="cm"># 豁免：健康检查 / WebSocket 握手 / 静态资源 / OPTIONS 预检</span>
+        <span class="kw">if</span> request.path <span class="kw">in</span> EXEMPT <span class="kw">or</span> request.method == <span class="st">"OPTIONS"</span>:
+            <span class="kw">return</span> resp
+        user = getattr(request, <span class="st">"current_user"</span>, <span class="kw">None</span>)
+        AccessLog(
+            access_time=datetime.now(), path=request.path, method=request.method,
+            url=request.url, ip=_client_ip(), user_agent=request.user_agent.string,
+            args=json.dumps(request.args.to_dict(), ensure_ascii=<span class="kw">False</span>),
+            form=mask(json.dumps(request.get_json(silent=<span class="kw">True</span>) <span class="kw">or</span> request.form.to_dict())),
+            user_id=user.id <span class="kw">if</span> user <span class="kw">else</span> <span class="kw">None</span>,
+            user_name=user.name <span class="kw">if</span> user <span class="kw">else</span> <span class="st">""</span>,
+            org_id=user.org_id <span class="kw">if</span> user <span class="kw">else</span> <span class="kw">None</span>,
+            status_code=resp.status_code,
+            duration_ms=int((time.time() - g.log_start) * 1000),
+        )
+        db.session.commit()   <span class="cm"># 独立提交；整体包 try/except，失败仅 warning</span>
+        <span class="kw">return</span> resp</pre></div>
+  <h3>豁免清单</h3>
+  <p><code>/api/health</code>（探活会刷屏）、<code>/ws</code>（WebSocket 握手）、静态资源、<code>OPTIONS</code>。媒体接口 <code>/api/messages/&lt;id&gt;/media</code> <b>不豁免</b>——媒体加载失败也是排障对象，但 304 缓存命中照记（体积极小）。</p>
+  <h3>脱敏规则（出入站通用）</h3>
+  <ul>
+    <li>参数键名命中 <code>password / old_password / new_password / token / authorization</code> → 值替换为 <code>***</code>；</li>
+    <li>出站响应体超过 2000 字符截断并加 <code>…(truncated)</code>；</li>
+    <li>媒体二进制不落内容，只记 <code>http_status + content_type + 字节数</code>。</li>
+  </ul>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <h2><span class="no">4</span>出站日志（后端 → 中间方）</h2>
+  <p class="lead">在 <code>adapter/client.py</code> 的 <code>call()</code> 与 <code>call_download()</code> 内埋点——这两个函数已是全项目对中间方的唯一出口。</p>
+  <h3>记录点（含异常，四类全覆盖）</h3>
+  <table>
+    <tr><th style="width:200px">场景</th><th>success</th><th>error_msg 记录内容</th></tr>
+    <tr><td>正常返回 <code>code=0</code></td><td><span class="tag ok">1</span></td><td>空；response_body 存原始返回（截断）</td></tr>
+    <tr><td>业务失败 <code>code!=0</code> / <code>ret!=200</code></td><td><span class="tag bad">0</span></td><td>中间方 msg（如「设备已离线，appId:xxx」），ret 单独成列便于筛选</td></tr>
+    <tr><td>HTTP 层失败（超时/连接拒绝/5xx）</td><td><span class="tag bad">0</span></td><td>RequestException 摘要 + http_status（如有）</td></tr>
+    <tr><td>响应非法 JSON</td><td><span class="tag bad">0</span></td><td>ValueError 摘要 + 原始文本前 500 字符</td></tr>
+  </table>
+  <div class="code"><span class="cap">埋点位置 · adapter/client.py（示意，包裹现有逻辑）</span><button class="copy">复制</button><pre><span class="kw">def</span> call(module, action, params=<span class="kw">None</span>, uuid=<span class="kw">None</span>, openid=<span class="st">""</span>):
+    t0 = time.time()
+    <span class="kw">try</span>:
+        body = _do_call(...)          <span class="cm"># 现有请求+解析逻辑</span>
+        log_middle(module, action, form, resp=body, ret=_pick_ret(body),
+                   duration_ms=..., success=<span class="kw">True</span>, uuid=form[<span class="st">"uuid"</span>], openid=openid)
+        <span class="kw">return</span> body
+    <span class="kw">except</span> MiddleApiError <span class="kw">as</span> exc:
+        log_middle(module, action, form, success=<span class="kw">False</span>, error=str(exc),
+                   duration_ms=..., uuid=form[<span class="st">"uuid"</span>], openid=openid)
+        <span class="kw">raise</span></pre></div>
+  <h3>uuid 串联发送闭环</h3>
+  <p>下发与确认轮询使用同一个 <code>uuid</code>（现状即如此，<code>SendTask.uuid</code>）。排查时一条链查全：</p>
+  <table>
+    <tr><th>环节</th><th>去哪查</th><th>关键字段</th></tr>
+    <tr><td>1 前端发起</td><td>access_log</td><td>path=<code>/api/conversations/70/messages</code>，user / org / form</td></tr>
+    <tr><td>2 中间方下发</td><td>middle_call_log</td><td>action=<code>post_text_message</code>，uuid</td></tr>
+    <tr><td>3 轮询确认</td><td>middle_call_log</td><td>action=<code>get_post_text_message</code>，同 uuid → <code>ret=500 设备已离线</code></td></tr>
+    <tr><td>4 状态落库</td><td>audit_log（SYNC 模块，已有）</td><td>「发送确认失败」detail</td></tr>
+  </table>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <h2><span class="no">5</span>表结构 DDL</h2>
+  <p class="lead">在参考表基础上增加：用户（快照）、组织（快照）、响应与耗时（排障关键）。开发库 SQLite 同构建模，以下为生产 MySQL 版。</p>
+  <div class="tabs">
+    <button class="on" data-p="p1">access_log（入站）</button>
+    <button data-p="p2">middle_call_log（出站）</button>
+    <button data-p="p3">org + user 变更（组织管理）</button>
+  </div>
+  <div class="pane on" id="p1"><div class="code"><span class="cap">入站接口访问日志</span><button class="copy">复制</button><pre>CREATE TABLE `access_log` (
+  `id`          bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `access_time` datetime NOT NULL COMMENT '访问时间',
+  `user_id`     bigint COMMENT '登录账号 id；空=未登录接口',
+  `user_name`   varchar(64) NOT NULL DEFAULT '' COMMENT '操作人姓名快照',
+  `org_id`      bigint COMMENT '所属组织 id；空=未登录/开发者跨组织',
+  `org_name`    varchar(64) NOT NULL DEFAULT '' COMMENT '组织名快照',
+  `path`        varchar(255) NOT NULL COMMENT '请求路径',
+  `method`      varchar(16) NOT NULL COMMENT 'GET/POST等',
+  `url`         text NOT NULL COMMENT '完整请求url',
+  `ip`          varchar(64) NOT NULL COMMENT '客户端IP',
+  `user_agent`  text COMMENT 'UA客户端标识',
+  `args`        text COMMENT 'GET参数json(脱敏)',
+  `form`        text COMMENT 'POST参数json(脱敏)',
+  `status_code` smallint NOT NULL COMMENT '响应HTTP状态码',
+  `duration_ms` int NOT NULL DEFAULT 0 COMMENT '服务端耗时毫秒',
+  `created_at`  timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_access_time` (`access_time`),
+  KEY `idx_user` (`user_id`),
+  KEY `idx_org` (`org_id`),
+  KEY `idx_ip` (`ip`),
+  KEY `idx_path` (`path`(191))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='入站接口调用日志表';</pre></div></div>
+  <div class="pane" id="p2"><div class="code"><span class="cap">出站中间方调用日志</span><button class="copy">复制</button><pre>CREATE TABLE `middle_call_log` (
+  `id`             bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `call_time`      datetime NOT NULL COMMENT '调用时间',
+  `trigger_source` varchar(64) NOT NULL DEFAULT '' COMMENT '触发来源：请求路径或定时任务job名',
+  `user_id`        bigint COMMENT '发起用户(请求上下文)；定时任务为空',
+  `module`         varchar(32) NOT NULL COMMENT 'send_api/messag_api/login_api等',
+  `action`         varchar(64) NOT NULL COMMENT '如 post_text_message',
+  `uuid`           varchar(64) NOT NULL COMMENT '本次调用唯一标识，串联下发与确认',
+  `openid`         varchar(64) NOT NULL DEFAULT '' COMMENT '设备标识',
+  `request_params` text COMMENT '请求参数json(脱敏)',
+  `http_status`    smallint COMMENT 'HTTP状态码；网络异常为空',
+  `resp_code`      int COMMENT '中间方业务code',
+  `ret`            int COMMENT 'processing_result.ret；仅查询类有',
+  `response_body`  text COMMENT '原始响应(截断2000字符)',
+  `duration_ms`    int NOT NULL DEFAULT 0 COMMENT '耗时毫秒',
+  `success`        tinyint NOT NULL DEFAULT 1 COMMENT '1成功 0失败',
+  `error_msg`      varchar(255) COMMENT '失败原因',
+  `created_at`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_call_time` (`call_time`),
+  KEY `idx_uuid` (`uuid`),
+  KEY `idx_action` (`module`,`action`),
+  KEY `idx_success` (`success`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='出站中间方调用日志表';</pre></div></div>
+  <div class="pane" id="p3"><div class="code"><span class="cap">组织字典 + 账号归属（待确认后执行）</span><button class="copy">复制</button><pre>CREATE TABLE `org` (
+  `id`         bigint NOT NULL AUTO_INCREMENT,
+  `name`       varchar(64) NOT NULL COMMENT '组织名',
+  `status`     tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='组织字典（固定五条种子）';
+
+-- 种子数据：佛山 / 珠海 / 中山 / 东莞百业 / 东莞合峰
+
+ALTER TABLE `user`
+  ADD COLUMN `org_id` bigint NULL COMMENT '所属组织；developer 可空=跨组织',
+  ADD KEY `idx_org` (`org_id`);
+
+-- 存量账号迁移：按当前账号名人工指定默认组织后，agent/admin 收紧为 NOT NULL</pre></div></div>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <h2><span class="no">6</span>日志查询接口</h2>
+  <p class="lead">供开发者后台排障使用，权限 <code>developer</code>（复用 <code>require_role</code>），分页上限 100 条/页。</p>
+  <table>
+    <tr><th style="width:250px">接口</th><th>过滤参数</th></tr>
+    <tr><td><code>GET /api/logs/access</code></td><td><code>start / end</code> 时间段，<code>path</code> 前缀匹配，<code>user_id</code>，<code>org_id</code>，<code>status</code>（如 500，或 <code>>=400</code>），<code>method</code></td></tr>
+    <tr><td><code>GET /api/logs/middle</code></td><td><code>start / end</code>，<code>module</code>，<code>action</code>，<code>uuid</code>（精确，闭环追踪主入口），<code>success</code>，<code>openid</code></td></tr>
+  </table>
+  <ul>
+    <li>返回结构对齐现有 API 约定 <code>{code, msg, data:{items, total}}</code>；</li>
+    <li>新文件 <code>backend/api/logs.py</code> 一个蓝图，只读查询，不提供删除（清理只走定时任务）；</li>
+    <li>后续可在前端开发者区加"接口日志"页签（本期可选，接口先行）。</li>
+  </ul>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <h2><span class="no">7</span>项目规范条款</h2>
+  <p class="lead">落地为 <code>docs/interface-log.md</code>（与 docs/audit-log.md 并列），条款如下，评审通过后即刻生效：</p>
+  <ol class="check">
+    <li><b>入站全量自动记录</b>：Flask 钩子统一实现，任何新接口<b>零代码接入</b>；禁止在业务代码里手写访问日志。</li>
+    <li><b>出站唯一出口</b>：对中间方的所有请求必须经 <code>adapter/client.call / call_download</code>，<b>禁止在业务代码直接 <code>requests.*</code></b>；新增模块、新 action 无需额外埋点。</li>
+    <li><b>完成标准</b>：新功能验收时，"在 access_log / middle_call_log 能查到该功能的调用记录"是完成标准之一；现有功能随 P0/P1 上线即自动覆盖。</li>
+    <li><b>写失败不阻断业务</b>：日志环节整体 try/except，失败仅 <code>app.logger.warning</code>。</li>
+    <li><b>脱敏与截断</b>：password/token 类字段打码；响应体截断 2000 字符；媒体二进制只记元信息。</li>
+    <li><b>保留期 90 天</b>：并入现有每日 3:30 清理任务（audit_log 维持 180 天不变）。</li>
+    <li><b>分工边界</b>：audit_log = 业务动作审计（手动埋点、模块枚举）；access_log / middle_call_log = 接口调用流水（自动、全量、排障用）。互不替代。</li>
+  </ol>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+  <h2><span class="no">8</span>组织管理 <span class="tag ok">已确认方案 A · 待实施</span></h2>
+  <p class="lead">2026-11-02 评审结论：采用<b>方案 A（仅归属标记）</b>——组织只是账号属性与检索维度，业务数据互通；暂缓实施，以下保留 A/B 说明供回溯。</p>
+  <h3>共同部分（两个方案都做）</h3>
+  <ul>
+    <li>新增 <code>org</code> 字典表，种子固定五条：<b>佛山、珠海、中山、东莞百业、东莞合峰</b>；本期不做组织增删改界面（固定字典），后续要扩展再加；</li>
+    <li><code>user</code> 表加 <code>org_id</code>；<b>新建账号必须选择组织</b>（后端校验非空），编辑可改，停用不删；</li>
+    <li>前端「账号管理」表单增加组织下拉（数据来自 <code>GET /api/orgs</code>），列表加组织列与筛选；</li>
+    <li><code>dev</code> 开发者账号不绑组织（跨组织），引导创建逻辑不受影响；</li>
+    <li>access_log / 审计日志带组织维度，可按组织检索操作记录。</li>
+  </ul>
+  <div class="opts" id="opts">
+    <div class="opt" data-v="A">
+      <div class="rt">方案 A · 仅归属标记 <span class="pick">未选择</span></div>
+      <ul>
+        <li>组织只是账号属性与检索维度；</li>
+        <li>会话、消息、联系人等业务数据<b>全部账号互通</b>（现状不变）；</li>
+        <li>改动面最小：user 表 + 账号接口 + 前端表单。</li>
+      </ul>
+      <div class="imp">适合：组织先立起来，数据权限以后再说。</div>
+    </div>
+    <div class="opt" data-v="B">
+      <div class="rt">方案 B · 数据按组织隔离 <span class="pick">未选择</span></div>
+      <ul>
+        <li><code>agent</code> 只能看到<b>本组织账号所绑设备</b>的会话 / 消息 / 联系人（归属链：user.open_id → 设备 → 会话）；</li>
+        <li><code>admin</code> 管理本组织账号与数据；<code>developer</code> 跨组织；</li>
+        <li>会话/联系人列表接口增加组织过滤，发送、撤回等写操作同样校验归属。</li>
+      </ul>
+      <div class="imp">影响面更大：多个列表接口 + 写接口权限校验 + 回归测试。</div>
+    </div>
+  </div>
+  <div id="optState">点击上方卡片选择实施深度，回复时告知 A / B 即可。</div>
+  <div class="qa"><b>已按现状预设的默认值（如有异议请指出）：</b>组织固定五个不做管理界面 · dev 不绑组织 · 存量账号迁移时逐个指定默认组织 · 新建账号组织必选（后端强校验）。</div>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+  <h2><span class="no">9</span>实施清单</h2>
+  <p class="lead">确认后按 P0 → P1 → P2 顺序独立提交（遵循 feat/refactor 提交规范）。</p>
+  <div class="stage">
+    <div class="s"><div class="ph">P0</div><b>日志基建</b><p>access_log / middle_call_log 模型与建表 · 入站 Flask 钩子 · 出站 client 埋点 · 脱敏工具 · 清理任务并入每日 3:30 · 核心单测</p></div>
+    <div class="s"><div class="ph">P1</div><b>查询能力</b><p>backend/api/logs.py 查询接口（developer 权限）· uuid 闭环查询联调 · docs/interface-log.md 规范生效</p></div>
+    <div class="s"><div class="ph">P2</div><b>组织管理</b><p>org 表 + 种子 · user.org_id 与账号接口校验 · 前端账号表单组织下拉 · （若选 B）列表/写接口组织过滤 · 存量账号迁移</p></div>
+  </div>
+  <table>
+    <tr><th style="width:170px">影响面</th><th>说明</th></tr>
+    <tr><td>后端新增</td><td><code>models/access_log.py</code>、<code>models/middle_call_log.py</code>、<code>services/access_log.py</code>（写入口）、<code>api/logs.py</code>、<code>models/org.py</code></td></tr>
+    <tr><td>后端修改</td><td><code>app.py</code>（钩子注册、清理任务）、<code>adapter/client.py</code>（埋点）、<code>api/accounts.py</code>（组织校验）、<code>models/user.py</code>（org_id）</td></tr>
+    <tr><td>前端修改</td><td>账号管理表单/列表（组织下拉与列）；日志查询页本期可选</td></tr>
+    <tr><td>单测</td><td>钩子记录/豁免/脱敏、出站四类场景落库、账号组织必选校验、（B）组织过滤</td></tr>
+  </table>
+</section>
+
+<footer>wx_app · 接口调用日志记录方案 v1.0 · 2026-11-02 · 评审通过后实施，提交拆分遵循 feat / refactor 规范</footer>
+</main>
+</div>
+
+<script>
+// 目录高亮
+const links=[...document.querySelectorAll('nav.toc a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
+const io=new IntersectionObserver(es=>{
+  es.forEach(e=>{ if(e.isIntersecting){
+    links.forEach(l=>l.classList.remove('on'));
+    const i=secs.indexOf(e.target); if(i>-1) links[i].classList.add('on');
+  }});
+},{rootMargin:'-15% 0px -70% 0px'});
+secs.forEach(s=>s&&io.observe(s));
+
+// 代码复制
+document.querySelectorAll('.code').forEach(box=>{
+  const btn=box.querySelector('.copy'), pre=box.querySelector('pre');
+  btn.addEventListener('click',()=>{
+    navigator.clipboard.writeText(pre.innerText).then(()=>{
+      btn.textContent='已复制'; setTimeout(()=>btn.textContent='复制',1200);
+    });
+  });
+});
+
+// DDL 选项卡
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.pane').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); document.getElementById(b.dataset.p).classList.add('on');
+  });
+});
+
+// 组织方案选择
+const state=document.getElementById('optState');
+document.querySelectorAll('#opts .opt').forEach(o=>{
+  o.addEventListener('click',()=>{
+    document.querySelectorAll('#opts .opt').forEach(x=>{
+      x.classList.remove('on'); x.querySelector('.pick').textContent='未选择';
+    });
+    o.classList.add('on'); o.querySelector('.pick').textContent='已选择';
+    state.innerHTML='当前选择：<b>方案 '+o.dataset.v+'</b> —— 回复"同意，方案 '+o.dataset.v+'"即可开始实施。';
+  });
+});
+</script>
+</body>
+</html>

@@ -50,13 +50,18 @@ def get_media(message_id):
 
 def _load_message(message_id, user):
     """取消息并做数据隔离：只能拉自己绑定设备会话的媒体（项目硬约束）。"""
+    from backend.services.devices import user_openids
+
+    openids = user_openids(user.id)
+    if not openids:
+        return None
     return (
         Message.query.join(Conversation, Message.conversation_id == Conversation.id)
         .filter(
             Message.id == message_id,
             Message.deleted_at.is_(None),
             Conversation.deleted_at.is_(None),
-            Conversation.openid == (user.open_id or ""),
+            Conversation.openid.in_(openids),
         )
         .first()
     )

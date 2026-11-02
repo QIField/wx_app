@@ -58,8 +58,8 @@ def sync_once(app):
                 log_action(AuditModule.SYNC, "消息同步", f"设备 {openid}",
                            result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
                 continue
-            broadcast_messages(pushed)
-            broadcast_revokes(revokes)
+            broadcast_messages(pushed, openid)
+            broadcast_revokes(revokes, openid)
             if pushed:  # 新消息涉及的会话缺名称/头像时立即补拉（函数内部自行容错）
                 from backend.sync.profile_sync import refresh_missing_profiles
 
@@ -98,11 +98,12 @@ def sync_device(openid):
     return pushed, revokes
 
 
-def broadcast_messages(pushed):
+def broadcast_messages(pushed, openid=""):
     """commit 之后才广播：保证前端听到推送时库里一定能查到。
 
     群消息发言人昵称/头像实时关联群成员名册（存库是 wxid 原文），
     前端直接消费推送数据，所以这里解析完再推。
+    openid 随事件下发：多账号前端靠它路由到对应账号卡片（跨账号 toast）。
     """
     if not pushed:
         return
@@ -122,6 +123,7 @@ def broadcast_messages(pushed):
         hub.broadcast("new_message", {
             "message_id": saved["message_id"],
             "conversation_id": saved["conversation_id"],
+            "openid": openid,
             "direction": saved["direction"],
             "msg_type": saved["msg_type"],
             "content": saved["content"],
@@ -132,11 +134,11 @@ def broadcast_messages(pushed):
         })
 
 
-def broadcast_revokes(revokes):
-    """撤回事件广播：前端把对应气泡换成微信样式灰条。"""
+def broadcast_revokes(revokes, openid=""):
+    """撤回事件广播：前端把对应气泡换成微信样式灰条；openid 供多账号路由。"""
     from backend.ws import hub
     for event in revokes:
-        hub.broadcast("message_revoked", event)
+        hub.broadcast("message_revoked", {**event, "openid": openid})
 
 
 def _get_cursor(openid):
