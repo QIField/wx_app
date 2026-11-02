@@ -2,6 +2,12 @@
 
 职责：只做组装，不写业务逻辑。
 """
+import os
+import sys
+
+# 宝塔等面板以脚本方式直接运行本文件时，backend 包不在搜索路径里，补上项目根目录
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from datetime import datetime
 
 from flask import Flask, jsonify, request
