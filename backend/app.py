@@ -36,9 +36,31 @@ def create_app() -> Flask:
     sock.init_app(app)
 
     register_routes(app)
+    register_frontend(app)
     register_error_handlers(app)
     register_access_log_hooks(app)
     return app
+
+
+def register_frontend(app: Flask) -> None:
+    """生产托管前端静态文件 frontend/dist：页面和接口同源，无需另配 nginx 静态站。
+
+    dist 不存在（如单测环境）时跳过；根路径及未命中文件的路径统一回退 index.html。
+    """
+    from flask import send_from_directory
+
+    dist = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist"
+    )
+    if not os.path.isdir(dist):
+        return
+
+    @app.get("/")
+    @app.get("/<path:path>")
+    def spa(path: str = ""):
+        if path and os.path.isfile(os.path.join(dist, path)):
+            return send_from_directory(dist, path)
+        return send_from_directory(dist, "index.html")
 
 
 def register_access_log_hooks(app: Flask) -> None:
