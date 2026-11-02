@@ -16,7 +16,13 @@ BATCH_LIMIT = 50  # 每轮最多确认的任务数
 
 
 def confirm_once(app):
-    """跑一轮确认。需要 app 上下文（由定时器或测试触发）。"""
+    """跑一轮确认。需要 app 上下文（由定时器或测试触发）。
+
+    已判定离线设备的任务不查询结果（结果不可能生成，白烧重试次数），
+    等设备翻身在线后继续收尾。
+    """
+    from backend.services.devices import offline_devices
+
     with app.app_context():
         tasks = (
             SendTask.query.filter(
@@ -27,7 +33,10 @@ def confirm_once(app):
             .limit(BATCH_LIMIT)
             .all()
         )
+        offline = offline_devices()
         for task in tasks:
+            if _task_openid(task) in offline:
+                continue
             _confirm_one(task)
         db.session.commit()
 

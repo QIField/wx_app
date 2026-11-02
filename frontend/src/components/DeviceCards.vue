@@ -13,7 +13,7 @@ const chat = useChatStore()
       class="dev-card"
       :class="{ on: d.openid === chat.activeOpenid }"
       :title="`${d.display_name}（${d.online === 1 ? '在线' : d.online === 0 ? '离线' : '检测中'}）`"
-      @click="chat.switchDevice(d.openid)"
+      @click="chat.clickDevice(d.openid)"
     >
       <span class="dev-dot" :class="{ on: d.online === 1 }"></span>
       <span class="dev-name">{{ d.display_name }}</span>

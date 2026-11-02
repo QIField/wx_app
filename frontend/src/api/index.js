@@ -81,6 +81,10 @@ export const fetchAdminStats = () => http.get('/admin/stats')
 
 export const fetchDevices = () => http.get('/devices')
 
+/** 点击账号卡片即时查一次在线状态（调中间方 check_online 并回写）。 */
+export const checkDeviceOnline = (openid) =>
+  http.post(`/devices/${openid}/online-check`)
+
 export const fetchConversations = (openid) =>
   http.get('/conversations', { params: { openid: openid || undefined } })
 

@@ -2,6 +2,8 @@
 
 职责：只做组装，不写业务逻辑。
 """
+from datetime import datetime
+
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
@@ -148,13 +150,15 @@ def init_scheduler(app: Flask):
         id="confirm_send",
         max_instances=1,
     )
-    # 设备在线状态轮询：check_online 回写 user_device.online（顶栏卡片在线点）
+    # 设备在线状态检测：check_online 回写 user_device.online（顶栏卡片在线点）。
+    # 启动立即跑一次，之后每 10 分钟一轮；判定离线的设备各轮询任务自动跳过
     sched.add_job(
         scheduled("device_online", refresh_all_device_online),
         "interval",
         seconds=DEVICE_CHECK_INTERVAL_SECONDS,
         id="device_online",
         max_instances=1,
+        next_run_time=datetime.now(),
     )
     # 资料同步统一走任务队列：定时轮只投递任务，由单 worker 与登录触发串行消费
     sched.add_job(

@@ -42,11 +42,14 @@ def sync_profiles(app):
 
 
 def refresh_group_member_avatars(app):
-    """群成员头像兜底补拉：逐设备补缺额，有更新就广播前端刷新。"""
-    from backend.services.devices import active_bound_devices
+    """群成员头像兜底补拉：逐设备补缺额，有更新就广播前端刷新。
+
+    已判定离线的设备跳过，等在线检测翻身自动恢复。
+    """
+    from backend.services.devices import pollable_devices
     from backend.sync import group_member
 
-    for openid in active_bound_devices():
+    for openid in pollable_devices():
         try:
             if group_member.refresh_avatars_of_device(openid):
                 db.session.commit()

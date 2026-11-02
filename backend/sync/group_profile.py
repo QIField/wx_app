@@ -84,12 +84,22 @@ def dispatch_group_tasks(openid=None):
     """给缺资料且未在下发中的群补发 chatroom_info 任务（按会话所属设备下发）。
 
     openid 传入时只处理该设备的群（登录全量路径），缺省处理全部。
+    已判定离线的设备不发任务（失败会白烧重试次数），翻身在线后自动恢复。
     """
+    from backend.services.devices import offline_devices
+
+    offline = offline_devices()
+    if openid:
+        if openid in offline:
+            return
+        offline = set()
     pending_wxids = {(dev_openid, wxid) for _, wxid, dev_openid in _pending.values()}
     slots = PROFILE_BATCH - len(_pending)
     if slots <= 0:
         return
     for conv in unnamed_groups(limit=slots, openid=openid):
+        if conv.openid in offline:
+            continue
         key = (conv.openid, conv.wxid)
         if key in pending_wxids:
             continue

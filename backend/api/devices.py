@@ -5,7 +5,7 @@ from sqlalchemy import func
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.services.auth import require_role
-from backend.services.devices import user_devices
+from backend.services.devices import check_device_online, user_devices
 
 bp = Blueprint("devices", __name__)
 
@@ -32,3 +32,21 @@ def list_devices():
     return jsonify(code=0, msg="success", data=[
         {**d.to_json(), "unread": unread.get(d.openid, 0)} for d in devices
     ])
+
+
+@bp.post("/api/devices/<openid>/online-check")
+@require_role()
+def check_online_now(openid):
+    """点击账号卡片即时查一次在线状态：调中间方 check_online 并回写库。
+
+    只查当前登录人自己绑定的设备，别人的设备按无权拒绝。
+    """
+    device = next(
+        (d for d in user_devices(g.current_user.id) if d.openid == openid), None
+    )
+    if device is None:
+        return jsonify(code=403, msg="无权访问该设备"), 403
+    device.online = check_device_online(openid)
+    db.session.commit()
+    return jsonify(code=0, msg="success",
+                   data={"openid": openid, "online": device.online})

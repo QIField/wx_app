@@ -4,6 +4,7 @@
 （2026-10-31 实测），这里按 XML 根节点与子节点把真实类型还原出来，
 供收消息入库时重新分类、前端按真实消息渲染。
 """
+import re
 import xml.etree.ElementTree as ET
 
 # 分类结果常量（收消息侧映射到 Message.MSG_*，前端同语义）
@@ -55,6 +56,93 @@ def classify(content):
             sub = 0
         return FILE if sub == _APPMSG_FILE_TYPE else LINK
     return None
+
+
+def sysmsg_text(content):
+    """未分类的 <sysmsg> 系统 XML → 自带的可读灰条文案；取不到返回 None。
+
+    撤回样式文案在 <replacemsg>，部分事件在 sysmsg 直接子节点 <template>。
+    注意拍一拍的 template 嵌在 <pat> 里、群事件在 content_template 里，
+    分别由 pat_info/template_text 处理，这里都取不到。
+    """
+    root = _parse(content)
+    if root is None or root.tag.lower() != "sysmsg":
+        return None
+    if (root.attrib.get("type") or "").lower() == "revokemsg":
+        return None  # 撤回走 revoke 专门流程，不在这里转文案
+    for tag in ("replacemsg", "template"):
+        node = root.find(tag)
+        if node is None:
+            continue
+        text = "".join(node.itertext()).strip()
+        if text:
+            return text
+    return None
+
+
+def pat_info(content):
+    """<sysmsg type="pat"> 拍一拍 → {chatusername, fromusername,
+    pattedusername, patsuffix}；非拍一拍返回空 dict。
+
+    XML 里只有 wxid 没有昵称，昵称由 message_sync 查群成员名册补齐。
+    """
+    root = _parse(content)
+    if root is None or (root.attrib.get("type") or "").lower() != "pat":
+        return {}
+    node = root.find("pat")
+    if node is None:
+        return {}
+    pick = lambda tag: (node.findtext(tag) or "").strip()
+    return {
+        "chatusername": pick("chatusername"),
+        "fromusername": pick("fromusername"),
+        "pattedusername": pick("pattedusername"),
+        "patsuffix": pick("patsuffix"),
+    }
+
+
+def template_text(content):
+    """<sysmsg type="sysmsgtemplate"> 群事件 → 替换占位符后的可读文案。
+
+    结构实测（2026-11-02）：<template>$name$已邀请…</template> 占位符对应
+    <link_list><link name="name"><memberlist><member><nickname>；
+    同名多成员用 <separator> 连接。有占位符替换不齐就返回 None（转噪音）。
+    """
+    root = _parse(content)
+    if root is None:
+        return None
+    ct = root.find(".//content_template")
+    if ct is None:
+        return None
+    tmpl = (ct.findtext("template") or "").strip()
+    if not tmpl:
+        return None
+    values = {}
+    for link in ct.findall("link_list/link"):
+        name = link.attrib.get("name") or ""
+        nicknames = [
+            n for n in (
+                (m.findtext("nickname") or "").strip()
+                for m in link.findall("memberlist/member")
+            ) if n
+        ]
+        if name and nicknames:
+            sep = (link.findtext("separator") or "、").strip() or "、"
+            values[name] = sep.join(nicknames)
+    missing = False
+
+    def _fill(match):
+        nonlocal missing
+        value = values.get(match.group(1))
+        if value is None:
+            missing = True
+            return match.group(0)
+        return value
+
+    text = re.sub(r"\$(\w+)\$", _fill, tmpl).strip()
+    if missing or not text:
+        return None
+    return text
 
 
 def revoke_info(content):

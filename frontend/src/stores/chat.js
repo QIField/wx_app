@@ -1,7 +1,7 @@
 /** 聊天共享状态（Pinia）：多设备绑定、会话列表、当前会话、消息、WebSocket 事件分发。 */
 import { defineStore } from 'pinia'
 import {
-  connectWs, fetchConversations, fetchDevices, fetchMessages,
+  checkDeviceOnline, connectWs, fetchConversations, fetchDevices, fetchMessages,
   markConversationRead, openConversation, sendTextMessage,
 } from '../api'
 
@@ -13,10 +13,12 @@ function nowStamp() {
     + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-/** 会话摘要文案：系统灰条/残留微信 XML（未识别类型）统一显示 [系统消息]。 */
+/** 会话摘要文案：未识别的微信 XML 显示 [系统消息]；系统灰条自带可读文案直接用。 */
 function summaryOf(d) {
   const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
-  return (d.payload?.system || isXml) ? '[系统消息]' : (d.content || '')
+  if (isXml) return '[系统消息]'
+  if (d.payload?.system) return d.content || '[系统消息]'
+  return d.content || ''
 }
 
 export const useChatStore = defineStore('chat', {
@@ -45,6 +47,22 @@ export const useChatStore = defineStore('chat', {
       if ((selectFirst || !this.activeOpenid) && this.devices.length) {
         this.activeOpenid = this.devices[0].openid
       }
+    },
+
+    /** 点击账号卡片：先即时查一次在线状态刷新圆点；非当前卡片则切换会话视图。 */
+    clickDevice(openid) {
+      this.refreshDeviceOnline(openid) // 不等待：检测结果回来就地更新卡片圆点
+      if (openid === this.activeOpenid) return
+      return this.switchDevice(openid)
+    },
+
+    /** 即时在线检测：只更新对应卡片的圆点，失败保持原状。 */
+    async refreshDeviceOnline(openid) {
+      try {
+        const data = await checkDeviceOnline(openid)
+        const dev = this.myDevice(openid)
+        if (dev) dev.online = data.online
+      } catch { /* 检测失败不改状态，等定时检测纠正 */ }
     },
 
     /** 切换聊天账号：清当前会话并重拉列表（通讯录由页面监听 activeOpenid 重拉）。 */

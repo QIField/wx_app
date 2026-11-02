@@ -156,6 +156,33 @@ def test_check_device_online_parses_result(app, monkeypatch):
     assert check_device_online("err") == 0
 
 
+def test_online_check_endpoint(app, client, monkeypatch):
+    """点击卡片即时检测：调 check_online 回写库并返回最新状态。"""
+    from backend.models.user_device import UserDevice
+
+    monkeypatch.setattr(
+        "backend.api.devices.check_device_online", lambda openid: 1)
+
+    resp = client.post("/api/devices/dev01/online-check")
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"openid": "dev01", "online": 1}
+    assert UserDevice.query.filter_by(openid="dev01").one().online == 1
+
+
+def test_online_check_rejects_foreign_device(app, client, monkeypatch):
+    """别人的绑定设备不能借自己的登录态检测：403，且不写库。"""
+    from backend.models.user import User
+    from backend.models.user_device import UserDevice
+    from backend.tests.conftest import make_user
+
+    monkeypatch.setattr(
+        "backend.api.devices.check_device_online", lambda openid: 1)
+    make_user(username="cs08", name="别家客服", open_ids=["dev_other"])
+
+    assert client.post("/api/devices/dev_other/online-check").status_code == 403
+    assert UserDevice.query.filter_by(openid="dev_other").one().online == -1
+
+
 def test_unbound_account_sees_empty_lists(app):
     """未绑定设备：会话/通讯录/设备卡片都返回空，不报错。"""
     nobody = make_user(username="cs10", name="无设备")

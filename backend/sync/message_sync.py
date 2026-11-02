@@ -19,8 +19,8 @@ from backend.models.message import Message
 from backend.models.sync_cursor import SyncCursor
 from backend.services import conversations as conversation_service
 from backend.services.audit import AuditLog, AuditModule, log_action
-from backend.services.devices import active_bound_devices
-from backend.sync import msg_xml, revoke
+from backend.services.devices import pollable_devices
+from backend.sync import msg_xml, revoke, sysmsg
 from backend.sync.media_predownload import predownload_media
 
 PAGE_SIZE = 100        # 每轮拉一页；单轮增量超一页的情况极少，靠下一轮补
@@ -48,9 +48,12 @@ _KIND_TO_TYPE = {
 
 
 def sync_once(app):
-    """跑一轮同步：遍历所有绑定设备的账号，逐设备拉增量。由定时器或测试触发。"""
+    """跑一轮同步：遍历所有绑定设备的账号，逐设备拉增量。由定时器或测试触发。
+
+    已判定离线的设备整轮跳过（不发 get_message），等在线检测翻身自动恢复。
+    """
     with app.app_context():
-        for openid in active_bound_devices():
+        for openid in pollable_devices():
             try:
                 pushed, revokes = sync_device(openid)
             except Exception as exc:  # noqa: BLE001 单设备失败不拖垮其他设备
@@ -172,9 +175,11 @@ def _save_message(openid, item, revokes=None):
 
     撤回通知不入库：按 msgid 定位原消息打 revoked 标记，事件挂到 revokes；
     原消息找不到（未同步过）就落一条系统灰条兜底，保证撤回这件事可见。
-    正常入库时返回推送信息字典（commit 后供广播用）；重复或坏数据返回 None。
+    噪音消息（51 状态同步/游戏中心等微信不渲染的事件）入库即软删：留底
+    不展示，不建会话、不广播、不刷摘要。正常入库时返回推送信息字典
+    （commit 后供广播用）；重复或坏数据返回 None。
     """
-    fields = _normalize(item)
+    fields = _normalize(item, openid)
     if fields is None:
         return None
 
@@ -182,36 +187,35 @@ def _save_message(openid, item, revokes=None):
     if fields["revoke"]:
         return revoke.apply_revoke(openid, fields, revokes)
 
-    # 去重：middle_msg_id 已存在就整条跳过
+    # 去重：middle_msg_id 已存在就整条跳过（含已软删的，重推不复活）
     if fields["middle_msg_id"]:
-        exists = (
-            Message.query.filter_by(middle_msg_id=fields["middle_msg_id"])
-            .filter(Message.deleted_at.is_(None))
-            .first()
-        )
+        exists = Message.query.filter_by(
+            middle_msg_id=fields["middle_msg_id"]
+        ).first()
         if exists is not None:
             return None
 
+    if fields["noise"]:
+        # 噪音：会话不存在就不建不存（杜绝"自己跟自己"的同步垃圾会话）
+        conv = conversation_service.get_or_create(
+            openid, fields["peer_wxid"], fields["chat_type"], create=False
+        )
+        if conv is None:
+            return None
+        db.session.add(_build_message(fields, conv, deleted=True))
+        return None  # 不广播、不刷会话摘要
+
     conv = conversation_service.get_or_create(openid, fields["peer_wxid"], fields["chat_type"])
 
-    msg = Message(
-        conversation_id=conv.id,
-        msg_type=fields["msg_type"],
-        direction=fields["direction"],
-        sender_wxid=fields["sender_wxid"],
-        sender_name=fields["sender_name"],
-        content=fields["content"],
-        payload=fields["payload"],
-        middle_msg_id=fields["middle_msg_id"],
-        new_msg_id=fields["new_msg_id"],
-        create_time=fields["create_time"],
-    )
+    msg = _build_message(fields, conv)
     db.session.add(msg)
 
     # 维护会话：最后一条消息冗余；只有收到的才计未读
     if fields["direction"] == Message.DIR_IN:
         conv.unread_count = (conv.unread_count or 0) + 1
-    conv.last_msg = _short_summary(fields["msg_type"], fields["content"])
+    conv.last_msg = conversation_service.short_summary(
+        fields["msg_type"], fields["content"]
+    )
     conv.last_msg_at = fields["create_time"]
 
     return {
@@ -227,21 +231,33 @@ def _save_message(openid, item, revokes=None):
     }
 
 
-def _normalize(item):
+def _build_message(fields, conv, deleted=False):
+    """fields → Message 行；noise 走软删留底（deleted_at=now）。"""
+    return Message(
+        conversation_id=conv.id,
+        msg_type=fields["msg_type"],
+        direction=fields["direction"],
+        sender_wxid=fields["sender_wxid"],
+        sender_name=fields["sender_name"],
+        content=fields["content"],
+        payload=fields["payload"],
+        middle_msg_id=fields["middle_msg_id"],
+        new_msg_id=fields["new_msg_id"],
+        create_time=fields["create_time"],
+        deleted_at=datetime.now() if deleted else None,
+    )
+
+
+def _normalize(item, openid=""):
     """中间方一条消息 → 入库字段（结构按 2026-10-29 联调实测）。
 
-    方向规则：from == 设备wxid（raw_json.Wxid）视为自己发出的，否则为客户发来。
-    content 实为微信 XML 时（实测图片/链接/撤回都塞在 msg_type=1 里）按内容
-    还原真实类型；撤回通知带出定位信息交 revoke.apply_revoke 处理。
+    方向规则见 _direction_and_sender；content 实为微信 XML 时（实测
+    图片/链接/撤回都塞在 msg_type=1 里）按内容还原真实类型，撤回通知
+    带出定位信息交 revoke.apply_revoke 处理，系统事件交 sysmsg.resolve。
     """
     try:
-        from_wxid = item.get("from_wxid", "")
-        to_wxid = item.get("to_wxid", "")
         raw = _parse_raw_json(item.get("raw_json"))
-        self_wxid = raw.get("Wxid") or to_wxid
-        is_self = bool(item.get("is_sender")) or from_wxid == self_wxid
-        direction = Message.DIR_OUT if is_self else Message.DIR_IN
-        peer_wxid = to_wxid if is_self else from_wxid
+        peer_wxid, content, sender_wxid, direction = _direction_and_sender(item, raw)
         if not peer_wxid:
             return None
 
@@ -256,28 +272,34 @@ def _normalize(item):
         if create_time is None:
             return None
 
-        content = item.get("content") or ""
-        sender_wxid = from_wxid
-        # 群消息 content = "发言人wxid:\n正文"，拆出发言人
-        if not is_self and "@chatroom" in peer_wxid and ":\n" in content:
-            head, _, rest = content.partition(":\n")
-            if head and "\n" not in head:
-                sender_wxid = head
-                content = rest
-
         # 按内容还原真实类型（撤回通知单独标记，卡片类补结构化信息给前端）
         revoke = None
+        sys_notice = False
+        noise = False
         kind = msg_xml.classify(content)
         if kind == msg_xml.REVOKE:
             revoke = msg_xml.revoke_info(content)
         elif kind is not None:
             msg_type = _KIND_TO_TYPE[kind]
+        elif raw_type == sysmsg.STATUS_NOTIFY or content.lstrip().startswith("<"):
+            # 撤回之外的系统事件：能转文案的转微信同款灰条，
+            # 微信不渲染的（51/游戏中心等）标噪音软删
+            sys_gray, noise = sysmsg.resolve(content, raw_type, openid)
+            if sys_gray:
+                content = sys_gray
+                sys_notice = True
         payload = dict(item)
+        if sys_notice:
+            payload["system"] = True
+        if noise:
+            payload["noise"] = True
         if kind in (msg_xml.LINK, msg_xml.FILE):
             payload["app"] = msg_xml.app_info(content)
 
         return {
-            "direction": direction,
+            "direction": (
+                Message.DIR_OUT if sys_notice else direction
+            ),  # 系统灰条方向无意义，置出方向避免占未读数
             "peer_wxid": peer_wxid,
             "chat_type": (
                 Conversation.CHAT_GROUP
@@ -285,11 +307,14 @@ def _normalize(item):
                 else Conversation.CHAT_SINGLE
             ),
             "sender_wxid": sender_wxid,
-            "sender_name": item.get("sender_name") or sender_wxid,
+            "sender_name": (
+                "系统" if sys_notice else (item.get("sender_name") or sender_wxid)
+            ),
             "msg_type": msg_type,
             "content": content,
             "payload": payload,
             "revoke": revoke,
+            "noise": noise,
             "middle_msg_id": str(item.get("msg_id") or ""),
             "new_msg_id": str(
                 item.get("new_msg_id")
@@ -301,6 +326,26 @@ def _normalize(item):
         }
     except Exception:
         return None  # 单条坏数据不拖垮整轮
+
+
+def _direction_and_sender(item, raw):
+    """方向与发言人：from == 设备wxid（raw_json.Wxid）视为自己发出，
+    对方取 to_wxid；否则为客户发来，对方取 from_wxid。
+    群消息 content = "发言人wxid:\n正文"，拆出发言人。
+    """
+    from_wxid = item.get("from_wxid", "")
+    to_wxid = item.get("to_wxid", "")
+    content = item.get("content") or ""
+    is_self = bool(item.get("is_sender")) or from_wxid == (raw.get("Wxid") or to_wxid)
+    peer_wxid = to_wxid if is_self else from_wxid
+    sender_wxid = from_wxid
+    if not is_self and "@chatroom" in peer_wxid and ":\n" in content:
+        head, _, rest = content.partition(":\n")
+        if head and "\n" not in head:
+            sender_wxid = head
+            content = rest
+    direction = Message.DIR_OUT if is_self else Message.DIR_IN
+    return peer_wxid, content, sender_wxid, direction
 
 
 def _parse_raw_json(value):
@@ -344,25 +389,3 @@ def _parse_time(value):
         except ValueError:
             continue
     return None
-
-
-def _short_summary(msg_type, content):
-    """会话列表的摘要：文本截 50 字，XML 卡片取标题，其他类型显示标签。"""
-    labels = {
-        Message.MSG_IMAGE: "[图片]",
-        Message.MSG_FILE: "[文件]",
-        Message.MSG_VIDEO: "[视频]",
-        Message.MSG_LINK: "[链接]",
-        Message.MSG_VOICE: "[语音]",
-        Message.MSG_EMOJI: "[表情]",
-    }
-    text = labels.get(msg_type)
-    if text is None:
-        text = content or ""
-        if text.lstrip().startswith("<"):
-            text = "[系统消息]"  # 拍一拍/游戏中心等无法识别的系统 XML
-    if msg_type in (Message.MSG_LINK, Message.MSG_FILE):
-        title = msg_xml.app_info(content).get("title")
-        if title:
-            text = f"{text} {title}"
-    return text[:50]

@@ -1,4 +1,6 @@
 """测试公共夹具：内存数据库 + 干净的 app 实例 + 登录态客户端。"""
+from datetime import datetime, timedelta
+
 import pytest
 from sqlalchemy.pool import StaticPool
 
@@ -107,6 +109,45 @@ def bind_device(user, openid, remark=None):
     _db.session.add(row)
     _db.session.commit()
     return row
+
+
+def make_item(**over):
+    """造一条"刚发生"的收消息：时间晚于初始游标（首次从最近1小时拉）。"""
+    item = {
+        "msg_id": "m1001",
+        "new_msg_id": "n1001",
+        "from_wxid": "wxid_customer",
+        "to_wxid": "wxid_me",
+        "msg_type": 1,
+        "content": "变速箱修好多钱",
+        "create_time": (datetime.now() + timedelta(minutes=1)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+    }
+    item.update(over)
+    return item
+
+
+def make_body(items):
+    """中间方 get_message 的标准返回壳。"""
+    return {"code": 0, "msg": "success", "data": {"list": items}}
+
+
+def patch_pull(monkeypatch, body):
+    """替换收消息的中间方调用，并记录收到的查询参数。"""
+    from backend.sync import message_sync
+
+    captured = {}
+
+    def fake_call(module, action, params=None, uuid=None, openid=""):
+        captured["module"] = module
+        captured["action"] = action
+        captured["params"] = params
+        captured["openid"] = openid
+        return body
+
+    monkeypatch.setattr(message_sync.middle_client, "call", fake_call)
+    return captured
 
 
 def login_headers(user):

@@ -12,17 +12,9 @@ from backend.app import create_app
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
+from backend.services import conversations as conversation_service
 from backend.sync import msg_xml, revoke
-from backend.sync.message_sync import _short_summary
-
-_KIND = {
-    msg_xml.IMAGE: Message.MSG_IMAGE,
-    msg_xml.VIDEO: Message.MSG_VIDEO,
-    msg_xml.VOICE: Message.MSG_VOICE,
-    msg_xml.EMOJI: Message.MSG_EMOJI,
-    msg_xml.FILE: Message.MSG_FILE,
-    msg_xml.LINK: Message.MSG_LINK,
-}
+from backend.sync.message_sync import _KIND_TO_TYPE as _KIND
 
 STAT_KEYS = ("image", "video", "voice", "emoji", "link", "file",
              "revoke", "skip")
@@ -92,7 +84,9 @@ def _refresh_xml_summaries():
             .first()
         )
         if last is not None:
-            conv.last_msg = _short_summary(last.msg_type, last.content)
+            conv.last_msg = conversation_service.short_summary(
+                last.msg_type, last.content
+            )
 
 
 def _openid_of(msg):

@@ -1,58 +1,25 @@
-"""收消息轮询单测：mock 中间方 get_message，验证入库与游标。"""
+﻿"""收消息轮询单测：mock 中间方 get_message，验证入库与游标。
+
+系统灰条与噪音的用例在 test_message_sysmsg.py。
+"""
+import json
 from datetime import datetime, timedelta
 
-import json
 import pytest
 
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
 from backend.models.sync_cursor import SyncCursor
-from backend.sync import message_sync
+from backend.sync import message_sync, msg_xml
 
-from backend.tests.conftest import make_user
+from backend.tests.conftest import make_body, make_item, make_user, patch_pull
 
 
 @pytest.fixture(autouse=True)
 def device(app):
     """同步以绑定设备的启用账号为准：造一台 dev01 设备。"""
     return make_user(open_ids=["dev01"])
-
-
-def make_item(**over):
-    """造一条"刚发生"的消息：时间晚于初始游标（首次从最近1小时拉）。"""
-    item = {
-        "msg_id": "m1001",
-        "new_msg_id": "n1001",
-        "from_wxid": "wxid_customer",
-        "to_wxid": "wxid_me",
-        "msg_type": 1,
-        "content": "变速箱修好多钱",
-        "create_time": (datetime.now() + timedelta(minutes=1)).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
-    }
-    item.update(over)
-    return item
-
-
-def make_body(items):
-    return {"code": 0, "msg": "success", "data": {"list": items}}
-
-
-def patch_pull(monkeypatch, body):
-    """替换中间方调用，并记录收到的查询参数。"""
-    captured = {}
-
-    def fake_call(module, action, params=None, uuid=None, openid=""):
-        captured["module"] = module
-        captured["action"] = action
-        captured["params"] = params
-        captured["openid"] = openid
-        return body
-
-    monkeypatch.setattr(message_sync.middle_client, "call", fake_call)
-    return captured
 
 
 def make_real_item(**over):
@@ -138,8 +105,27 @@ def test_sync_empty_round(app, monkeypatch):
 
     assert Message.query.count() == 0
     assert Conversation.query.count() == 0
-    cursor = SyncCursor.query.one()
-    assert cursor.last_sync_time <= datetime.now() - timedelta(minutes=30)
+
+
+def test_sync_skips_offline_device(app, monkeypatch):
+    """已判定离线（online=0）的设备整轮跳过，不发 get_message；未知/在线照常轮询。"""
+    from backend.models.user_device import UserDevice
+
+    captured = patch_pull(monkeypatch, make_body([make_item()]))
+
+    # 未知（-1，刚启动还没检测过）：照常轮询
+    message_sync.sync_once(app)
+    assert captured["openid"] == "dev01"
+    assert Message.query.count() == 1
+    msg_time = SyncCursor.query.one().last_sync_time
+
+    # 判定离线：跳过，不再发请求，游标也不动
+    UserDevice.query.filter_by(openid="dev01").update({"online": 0})
+    db.session.commit()
+    captured.clear()
+    message_sync.sync_once(app)
+    assert captured == {}
+    assert SyncCursor.query.one().last_sync_time == msg_time
 
 
 def test_sync_out_direction_no_unread(app, monkeypatch):

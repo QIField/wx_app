@@ -7,7 +7,7 @@ from backend.adapter import client
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.services.audit import AuditLog, AuditModule, log_action
-from backend.services.devices import active_bound_devices
+from backend.services.devices import pollable_devices
 from backend.sync.task_query import (
     as_dict,
     new_task_uuid,
@@ -21,8 +21,11 @@ FRIEND_BATCH = 20  # brief_info 单次最多 20 个 wxid（文档约定）
 
 
 def sync_friend_profiles():
-    """兜底扫描：逐设备拉好友列表并补资料，任一设备失败不影响其他设备。"""
-    for openid in active_bound_devices():
+    """兜底扫描：逐设备拉好友列表并补资料，任一设备失败不影响其他设备。
+
+    已判定离线的设备跳过，等在线检测翻身自动恢复。
+    """
+    for openid in pollable_devices():
         sync_friend_profiles_of_device(openid)
 
 

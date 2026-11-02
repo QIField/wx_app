@@ -11,7 +11,7 @@ from backend.adapter import client
 from backend.extensions import db
 from backend.models.contact import Contact
 from backend.services.audit import AuditLog, AuditModule, log_action
-from backend.services.devices import active_bound_devices
+from backend.services.devices import pollable_devices
 from backend.sync import friend_profile, group_profile
 from backend.sync.task_query import as_dict, new_task_uuid, query_record, unwrap_result
 
@@ -19,8 +19,11 @@ FRIEND_PROFILE_BATCHES = 10  # 每轮最多补 10 批 brief_info（20/批），�
 
 
 def sync_contacts():
-    """兜底轮入口：逐设备同步通讯录，任一设备失败不影响其他设备。"""
-    for openid in active_bound_devices():
+    """兜底轮入口：逐设备同步通讯录，任一设备失败不影响其他设备。
+
+    已判定离线的设备跳过，等在线检测翻身自动恢复。
+    """
+    for openid in pollable_devices():
         try:
             sync_contacts_of_device(openid)
         except Exception as exc:  # noqa: BLE001
