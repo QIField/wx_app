@@ -203,4 +203,8 @@ if __name__ == "__main__":
         ensure_bootstrap_developer()
     init_scheduler(app)
     # use_reloader=False：防止调试重载导致定时器跑两份
-    app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
+    # dev：仅本机 + 调试；prod：对外开放 + 关调试（WebSocket 依赖 werkzeug，不能用 waitress/gunicorn 常规 worker）
+    if APP_ENV == "prod":
+        app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    else:
+        app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
