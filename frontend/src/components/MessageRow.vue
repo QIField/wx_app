@@ -94,7 +94,7 @@ function onReEdit() {
     <span v-else class="avatar" :class="msg.direction === 2 ? 'agent' : 'client'">{{ avatarOf(msg) }}</span>
     <div class="body">
       <div class="name">{{ nameOf(msg) }}</div>
-      <div class="bubble" :class="{ tight: isTight }">
+      <div class="bubble" :class="{ tight: isTight }" :title="msg.create_time">
         <span v-if="msg.msg_type === 2" class="ph ph-img" :class="{ on: loaded }">
           <img
             class="media img fade"
@@ -150,9 +150,9 @@ function onReEdit() {
         <div v-else-if="msg.msg_type !== 1" class="content type-label">[未知类型]</div>
         <div v-else class="content">{{ msg.content }}</div>
 
-        <div class="meta">
-          <span v-if="msg.direction === 2" :class="['st', { fail: msg.status === 2 }]">{{ STATUS_LABEL[msg.status] }}</span>
-          <span class="num">{{ msg.create_time?.slice(11, 16) }}</span>
+        <!-- 时间不再逐条显示（由时间分隔线承担），仅出方向保留发送状态；完整时间悬停气泡可见 -->
+        <div v-if="msg.direction === 2" class="meta">
+          <span :class="['st', { fail: msg.status === 2 }]">{{ STATUS_LABEL[msg.status] }}</span>
         </div>
       </div>
     </div>

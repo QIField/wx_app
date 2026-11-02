@@ -31,15 +31,36 @@ function onGrabUp() {
   drag = null
 }
 
-/* 相邻消息间隔超过 30 分钟时插一条时间分隔线（参照标准界面蓝色时间线） */
+/* 时间分隔线：相邻消息间隔超过 5 分钟才插一条（此前按分钟变化就插，导致刷屏重复）。
+   气泡上不再逐条显示时分，完整时间戳悬停气泡可见；标签按远近智能显示。 */
+const TIME_GAP = 5 * 60 * 1000
+const WEEK_CN = '日一二三四五六'
+
+function timeLabel(t) {
+  const d = new Date(String(t).replace(' ', 'T'))
+  const now = new Date()
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const dayDiff = Math.floor(
+    (new Date(now.getFullYear(), now.getMonth(), now.getDate()) -
+      new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000
+  )
+  if (dayDiff <= 0) return hm
+  if (dayDiff === 1) return `昨天 ${hm}`
+  if (dayDiff < 7) return `星期${WEEK_CN[d.getDay()]} ${hm}`
+  const md = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return d.getFullYear() === now.getFullYear() ? `${md} ${hm}` : `${d.getFullYear()}-${md} ${hm}`
+}
+
 const timeline = computed(() => {
   const out = []
   let last = null
   for (const m of chat.currentMessages) {
-    const t = m.create_time ? m.create_time.slice(0, 16) : null
-    if (t && (!last || t !== last)) out.push({ type: 'time', id: 't' + m.id, label: m.create_time.slice(5, 16) })
+    const t = m.create_time ? Date.parse(String(m.create_time).replace(' ', 'T')) : NaN
+    if (!Number.isNaN(t) && (last === null || t - last >= TIME_GAP)) {
+      out.push({ type: 'time', id: 't' + m.id, label: timeLabel(m.create_time) })
+    }
     out.push({ type: 'msg', ...m })
-    last = t
+    if (!Number.isNaN(t)) last = t
   }
   return out
 })
@@ -191,13 +212,15 @@ async function onReEdit(content) {
 .scroll { flex: 1; background: var(--c-bg); }
 .tip { text-align: center; color: var(--c-text-sub); font-size: 12px; padding: 8px; }
 
-.time-line {
-  display: flex; align-items: center; gap: 10px;
-  margin: 14px 0 10px;
-  color: var(--c-primary); font-size: 11px;
-}
-.time-line::before, .time-line::after {
-  content: ''; flex: 1; height: 1px; background: #c9dbff;
+/* 时间分隔线：居中小胶囊，只在时间断层出现（与 badge 同风格），不再通栏压线 */
+.time-line { display: flex; justify-content: center; margin: 14px 0 10px; }
+.time-line span {
+  font-size: 11px; line-height: 1;
+  color: var(--c-primary);
+  background: var(--c-primary-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+  user-select: none;
 }
 
 /* 骨架屏：进会话先给呼吸占位，避免白屏后整批气泡突现 */
