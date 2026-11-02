@@ -13,6 +13,7 @@ from backend.config import (
     PROFILE_INTERVAL_SECONDS,
     SEND_CONFIRM_INTERVAL,
 )
+from backend.db_migrate import upgrade_existing_schema
 from backend.extensions import db, sock
 from backend.models import Conversation, Message, SendTask  # noqa: F401 触发表注册
 
@@ -109,51 +110,6 @@ def ensure_bootstrap_developer():
             password_hash=generate_password_hash("123456"),
         ))
         db.session.commit()
-
-
-def upgrade_existing_schema():
-    """开发库轻量迁移：create_all 只建新表，不会给存量表补列。
-
-    2026-11-02 多账号绑定改造：user.open_id（一对一）→ user_device（一对多）；
-    message 增加操作人快照列（operator_id/operator_name，发消息溯源）。
-    """
-    _try_alter("ALTER TABLE user ADD COLUMN org_id BIGINT")
-    _try_alter("ALTER TABLE message ADD COLUMN operator_id BIGINT")
-    _try_alter("ALTER TABLE message ADD COLUMN operator_name VARCHAR(64)")
-    _backfill_user_devices()
-    _try_drop_user_openid()
-
-
-def _try_alter(sql):
-    """执行一条 ALTER；列已存在（重复启动）时忽略。"""
-    from sqlalchemy import text
-
-    try:
-        db.session.execute(text(sql))
-        db.session.commit()
-    except Exception:  # noqa: BLE001
-        db.session.rollback()
-
-
-def _backfill_user_devices():
-    """存量 user.open_id 一次性搬入 user_device（幂等：已存在的 openid 跳过）。"""
-    from backend.models.user_device import UserDevice
-    from sqlalchemy import text
-
-    result = db.session.execute(text(
-        "INSERT INTO user_device (user_id, openid, online, created_at, updated_at) "
-        "SELECT id, open_id, :unknown, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM user "
-        "WHERE open_id IS NOT NULL AND open_id != '' "
-        "AND open_id NOT IN (SELECT openid FROM user_device)"
-    ), {"unknown": UserDevice.ONLINE_UNKNOWN})
-    if result.rowcount:
-        db.session.commit()
-
-
-def _try_drop_user_openid():
-    """迁移完成后删掉 user.open_id 旧列（SQLite 因 UNIQUE 约束删不掉就保留，
-    模型已不含该字段，不影响运行；MySQL 生产库可正常删）。"""
-    _try_alter("ALTER TABLE user DROP COLUMN open_id")
 
 
 def init_scheduler(app: Flask):
