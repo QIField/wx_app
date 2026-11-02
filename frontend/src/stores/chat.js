@@ -13,6 +13,12 @@ function nowStamp() {
     + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/** 会话摘要文案：系统灰条/残留微信 XML（未识别类型）统一显示 [系统消息]。 */
+function summaryOf(d) {
+  const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
+  return (d.payload?.system || isXml) ? '[系统消息]' : (d.content || '')
+}
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     conversations: [],   // 当前设备下的左栏列表
@@ -175,11 +181,10 @@ export const useChatStore = defineStore('chat', {
       const dev = this.myDevice(d.openid)
       if (!dev) return
       if (d.direction === 1) dev.unread = (dev.unread || 0) + 1
-      const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
       this.crossMsg = {
         openid: d.openid,
         name: dev.display_name || d.openid,
-        content: d.payload?.system || isXml ? '[系统消息]' : (d.content || ''),
+        content: summaryOf(d),
       }
     },
 
@@ -197,8 +202,7 @@ export const useChatStore = defineStore('chat', {
       const conv = this.conversations.find((c) => c.id === d.conversation_id)
       if (conv) {
         // 系统灰条直接用原文；残留的微信 XML（未识别类型）不进会话摘要
-        const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
-        conv.last_msg = d.payload?.system || isXml ? '[系统消息]' : d.content
+        conv.last_msg = summaryOf(d)
         conv.last_msg_at = d.create_time
         // 打开着的会话同样累计未读：只有用户点击会话窗口内容才清零
         if (d.direction === 1) conv.unread_count = (conv.unread_count || 0) + 1

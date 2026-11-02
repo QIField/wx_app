@@ -1,6 +1,7 @@
 /** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项、联系人档案（备注/标签）。 */
 import { defineStore } from 'pinia'
 import { fetchContacts, fetchContactProfile, saveContactProfile } from '../api'
+import { matchKeyword } from '../utils/format'
 import { useChatStore } from './chat'
 
 export const useContactsStore = defineStore('contacts', {
@@ -18,10 +19,7 @@ export const useContactsStore = defineStore('contacts', {
     currentList: (s) => (s.tab === 'friends' ? s.friends : s.groups),
 
     filteredList(s) {
-      const q = s.keyword.trim().toLowerCase()
-      if (!q) return s.currentList
-      return s.currentList.filter((c) =>
-        [c.name, c.wxid].some((x) => x && x.toLowerCase().includes(q)))
+      return s.currentList.filter((c) => matchKeyword([c.name, c.wxid], s.keyword))
     },
 
     selectedContact(s) {
@@ -32,11 +30,9 @@ export const useContactsStore = defineStore('contacts', {
 
     /** 当前 tab 无结果而另一 tab 有结果时，提示切换（数量）。 */
     crossHintCount(s) {
-      const q = s.keyword.trim().toLowerCase()
-      if (!q) return 0
+      if (!s.keyword.trim()) return 0
       const other = s.tab === 'friends' ? s.groups : s.friends
-      return other.filter((c) =>
-        [c.name, c.wxid].some((x) => x && x.toLowerCase().includes(q))).length
+      return other.filter((c) => matchKeyword([c.name, c.wxid], s.keyword)).length
     },
   },
 

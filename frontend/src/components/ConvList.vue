@@ -2,7 +2,7 @@
 /** 左栏：会话列表（微信风格搜索框 + 紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。 */
 import { computed, ref } from 'vue'
 import { useChatStore } from '../stores/chat'
-import { fmtTime, highlight } from '../utils/format'
+import { fmtTime, highlight, matchKeyword } from '../utils/format'
 import UnreadBadge from './UnreadBadge.vue'
 
 const chat = useChatStore()
@@ -10,12 +10,8 @@ const chat = useChatStore()
 const keyword = ref('')
 
 /** 本地过滤：命中会话名或 wxid 才显示（微信同款即时搜索）。 */
-const filtered = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return chat.conversations
-  return chat.conversations.filter(
-    (c) => [c.name, c.wxid].some((x) => x && x.toLowerCase().includes(kw)))
-})
+const filtered = computed(() =>
+  chat.conversations.filter((c) => matchKeyword([c.name, c.wxid], keyword.value)))
 
 function first(c) {
   const s = c.name || c.wxid || '?'

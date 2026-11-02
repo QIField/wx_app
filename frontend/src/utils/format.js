@@ -21,3 +21,10 @@ export function highlight(text, keyword) {
   if (i < 0) return safe
   return safe.slice(0, i) + '<mark>' + safe.slice(i, i + kwEsc.length) + '</mark>' + safe.slice(i + kwEsc.length)
 }
+
+/** 关键词命中：任一字段不区分大小写包含关键词（空字段跳过，空关键词恒命中）。 */
+export function matchKeyword(fields, keyword) {
+  const kw = (keyword || '').trim().toLowerCase()
+  if (!kw) return true
+  return fields.some((x) => x && String(x).toLowerCase().includes(kw))
+}

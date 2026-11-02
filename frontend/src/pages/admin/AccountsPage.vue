@@ -9,6 +9,7 @@ import {
   toggleAccountStatus,
   updateAccount,
 } from '../../api'
+import { matchKeyword } from '../../utils/format'
 
 const props = defineProps({
   me: { type: Object, required: true },
@@ -26,13 +27,8 @@ const isSelf = (u) => u.id === props.me.id
 const devLocked = (u) => props.me.role === 'admin' && u.role === 'developer'
 const canBind = props.me.role === 'developer'
 
-const filtered = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return list.value
-  return list.value.filter(
-    (u) => u.username.toLowerCase().includes(kw) || u.name.toLowerCase().includes(kw)
-  )
-})
+const filtered = computed(() =>
+  list.value.filter((u) => matchKeyword([u.username, u.name], keyword.value)))
 
 async function load() {
   loading.value = true
