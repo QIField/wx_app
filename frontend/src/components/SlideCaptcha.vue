@@ -2,6 +2,7 @@
 /** 滑块拼图验证（拖动验证）：Canvas 星空拼图 + 轨迹人机校验。
     纯前端门禁组件：验证通过 emit('verified')，登录失败由父组件调用 reset() 重开一局。 */
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { renderSlideScene } from '../utils/slideScene'
 
 const emit = defineEmits(['verified'])
 
@@ -50,130 +51,21 @@ function randGap() {
   }
 }
 
-/* ===== Canvas 绘制 ===== */
+/* ===== Canvas 绘制（委托 utils/slideScene） ===== */
 
-/** 拼图轮廓：圆角方块 + 右侧圆形凸起，背景缺口与滑块拼块共用同一 path */
-function tracePath(ctx, x, y) {
-  const s = S, r = 8, tab = 8, mid = y + s / 2
-  ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.lineTo(x + s - r, y)
-  ctx.quadraticCurveTo(x + s, y, x + s, y + r)
-  ctx.lineTo(x + s, mid - tab)
-  ctx.arc(x + s, mid, tab, -Math.PI / 2, Math.PI / 2, false)
-  ctx.lineTo(x + s, y + s - r)
-  ctx.quadraticCurveTo(x + s, y + s, x + s - r, y + s)
-  ctx.lineTo(x + r, y + s)
-  ctx.quadraticCurveTo(x, y + s, x, y + s - r)
-  ctx.lineTo(x, y + r)
-  ctx.quadraticCurveTo(x, y, x + r, y)
-  ctx.closePath()
-}
-
-/** 夜空场景：深蓝渐变 + 星云 + 星点 + 星座连线（呼应登录页品牌星图） */
-function paintScene(ctx, w, h) {
-  const lg = ctx.createLinearGradient(0, 0, 0, h)
-  lg.addColorStop(0, '#16294f')
-  lg.addColorStop(1, '#0e1c3c')
-  ctx.fillStyle = lg
-  ctx.fillRect(0, 0, w, h)
-
-  const glow = (cx, cy, r, color) => {
-    const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-    rg.addColorStop(0, color)
-    rg.addColorStop(1, 'rgba(10, 22, 48, 0)')
-    ctx.fillStyle = rg
-    ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
-  }
-  glow(w * 0.78, h * 0.3, 90, 'rgba(29, 93, 228, 0.32)')
-  glow(w * 0.2, h * 0.8, 80, 'rgba(90, 140, 255, 0.18)')
-
-  for (let i = 0; i < 46; i++) {
-    ctx.globalAlpha = 0.35 + Math.random() * 0.65
-    ctx.fillStyle = Math.random() < 0.85 ? '#d8e4fc' : '#8fb4ff'
-    ctx.beginPath()
-    ctx.arc(Math.random() * w, Math.random() * h, 0.4 + Math.random() * 1.1, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.globalAlpha = 1
-
-  for (let c = 0; c < 2; c++) paintConstellation(ctx, w, h)
-}
-
-function paintConstellation(ctx, w, h) {
-  const ox = Math.random() * (w - 90) + 20
-  const oy = Math.random() * (h - 70) + 15
-  const pts = Array.from({ length: 4 }, () => ({
-    x: ox + Math.random() * 60,
-    y: oy + Math.random() * 40,
-  }))
-  ctx.strokeStyle = 'rgba(148, 178, 255, 0.4)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)))
-  ctx.stroke()
-  ctx.fillStyle = 'rgba(216, 228, 252, 0.95)'
-  pts.forEach((p) => {
-    ctx.beginPath()
-    ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2)
-    ctx.fill()
-  })
-}
-
-/** 重绘一局：场景画布 → 背景挖缺口 → 拼块取材 */
+/** 重绘一局：组件只提供几何参数，绘制交给 slideScene 工具 */
 function redraw() {
   if (!bgRef.value || !pieceRef.value) return // 已卸载（延迟重置兜底）
-  const w = stageW.value
-  const { x: gx, y: gy } = gap.value
-  const dpr = window.devicePixelRatio || 1
-
-  const scene = document.createElement('canvas')
-  scene.width = w * dpr
-  scene.height = STAGE_H * dpr
-  const sctx = scene.getContext('2d')
-  sctx.scale(dpr, dpr)
-  paintScene(sctx, w, STAGE_H)
-
-  const bg = bgRef.value
-  bg.width = w * dpr
-  bg.height = STAGE_H * dpr
-  Object.assign(bg.style, { width: `${w}px`, height: `${STAGE_H}px` })
-  const bctx = bg.getContext('2d')
-  bctx.scale(dpr, dpr)
-  bctx.drawImage(scene, 0, 0, w, STAGE_H)
-
-  bctx.save()
-  bctx.globalCompositeOperation = 'destination-out'
-  tracePath(bctx, gx, gy)
-  bctx.fill()
-  bctx.restore()
-  bctx.save()
-  tracePath(bctx, gx, gy)
-  bctx.strokeStyle = 'rgba(6, 14, 34, 0.9)'
-  bctx.lineWidth = 2
-  bctx.stroke()
-  bctx.restore()
-
-  const pc = pieceRef.value
-  const psz = S + PAD * 2
-  pc.width = psz * dpr
-  pc.height = psz * dpr
-  Object.assign(pc.style, { width: `${psz}px`, height: `${psz}px` })
-  const pctx = pc.getContext('2d')
-  pctx.scale(dpr, dpr)
-  pctx.save()
-  pctx.translate(PAD - gx, PAD - gy)
-  tracePath(pctx, gx, gy)
-  pctx.clip()
-  pctx.drawImage(scene, 0, 0, w, STAGE_H)
-  pctx.restore()
-  pctx.save()
-  pctx.translate(PAD - gx, PAD - gy)
-  tracePath(pctx, gx, gy)
-  pctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
-  pctx.lineWidth = 1.5
-  pctx.stroke()
-  pctx.restore()
+  renderSlideScene({
+    bgCanvas: bgRef.value,
+    pieceCanvas: pieceRef.value,
+    width: stageW.value,
+    height: STAGE_H,
+    gapX: gap.value.x,
+    gapY: gap.value.y,
+    pieceSize: S,
+    pad: PAD,
+  })
 }
 
 /* ===== 交互 ===== */
