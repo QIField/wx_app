@@ -32,8 +32,12 @@ http.interceptors.response.use(
         Object.assign(new Error(data.msg || '请先修改初始密码'), { code: 'PASSWORD_CHANGE_REQUIRED' })
       )
     }
-    // 令牌失效：清掉回登录页（/auth/me 交给启动流程自己处理，避免刷新循环）
-    if (err.response?.status === 401 && err.config?.url !== '/auth/me') {
+    // 令牌失效：清掉回登录页（/auth/me、/auth/login 交给调用方自己处理：
+    // 前者避免刷新循环，后者是账号密码错误，必须在登录页内提示而非跳页）
+    if (
+      err.response?.status === 401 &&
+      !['/auth/me', '/auth/login'].includes(err.config?.url)
+    ) {
       setToken('')
       location.replace('/')
       return new Promise(() => {})
