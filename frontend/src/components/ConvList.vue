@@ -6,8 +6,8 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf, fmtTime, highlight, matchKeyword } from '../utils/format'
 import ContextMenu from './ContextMenu.vue'
+import ContactAvatar from './ContactAvatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
-import AnonAvatar from './AnonAvatar.vue'
 
 const chat = useChatStore()
 
@@ -74,9 +74,7 @@ async function onMenuSelect(key) {
         @click="chat.selectConversation(c.id)"
         @contextmenu.prevent="onMenu($event, c)"
       >
-        <img v-if="c.avatar" class="avatar img" :src="c.avatar" alt="" referrerpolicy="no-referrer" />
-        <AnonAvatar v-else-if="!c.name" :alias="c.alias" class="avatar" />
-        <span v-else class="avatar" :class="{ group: c.chat_type === 2 }">{{ displayNameOf(c).slice(0, 1).toUpperCase() }}</span>
+        <ContactAvatar :name="c.name" :alias="c.alias" :avatar="c.avatar" :chat-type="c.chat_type" class="avatar" />
         <div class="body">
           <div class="row1">
             <!-- 命中关键词高亮（v-html 内容来自本地数据 + highlight 已转义） -->
@@ -183,7 +181,6 @@ async function onMenuSelect(key) {
   display: flex; align-items: center; justify-content: center;
 }
 .avatar.group { background: var(--c-ok); }
-.avatar.img { object-fit: cover; background: var(--c-panel); }
 
 .body { flex: 1; min-width: 0; }
 .row1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

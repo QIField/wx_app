@@ -4,7 +4,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { useContactsStore } from '../stores/contacts'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf, fmtTime, nameResolved } from '../utils/format'
-import AnonAvatar from './AnonAvatar.vue'
+import ContactAvatar from './ContactAvatar.vue'
 
 const emit = defineEmits(['enter-chat'])
 const contacts = useContactsStore()
@@ -96,9 +96,13 @@ async function enterChat() {
   <div class="contact-detail">
     <template v-if="contact">
       <div class="d-head">
-        <img v-if="contact.avatar" class="avatar img" :src="contact.avatar" alt="" referrerpolicy="no-referrer">
-        <AnonAvatar v-else-if="!nameResolved(contact)" :alias="contact.alias" class="avatar" />
-        <span v-else class="avatar" :class="{ group: contact.chat_type === 2 }">{{ displayNameOf(contact).slice(0, 1) }}</span>
+        <ContactAvatar
+          :name="contact.name"
+          :alias="contact.alias"
+          :avatar="contact.avatar"
+          :chat-type="contact.chat_type"
+          class="avatar"
+        />
         <div class="d-title">
           <div class="d-name">{{ displayNameOf(contact) }}</div>
           <!-- 脱敏契约：不再展示「微信号」，改匿名标识 / 资料未同步提示 -->
@@ -194,7 +198,6 @@ async function enterChat() {
   user-select: none;
 }
 .avatar.group { background: var(--c-ok); }
-.avatar.img { object-fit: cover; background: var(--c-surface); }
 .d-title { flex: 1; min-width: 0; }
 .d-name { font-size: 17px; font-weight: 600; }
 .d-sub { margin-top: 3px; font-size: 12px; color: var(--c-text-sub); }

@@ -3,8 +3,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useContactsStore } from '../stores/contacts'
 import { displayNameOf, fmtTime, highlight } from '../utils/format'
+import ContactAvatar from './ContactAvatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
-import AnonAvatar from './AnonAvatar.vue'
 
 const contacts = useContactsStore()
 const qInput = ref(null)
@@ -35,6 +35,23 @@ const letterGroups = computed(() => {
     map.get(c.letter).push(c)
   }
   return [...map.entries()]
+})
+
+/** 渲染行（统一好友/群聊两套模板）：好友为「字母头 + 条目」扁平序列，群聊为纯条目。 */
+const rows = computed(() => {
+  const sel = contacts.tab === 'friends' ? 'friend' : 'group'
+  const out = []
+  if (sel === 'friend') {
+    for (const [letter, list] of letterGroups.value) {
+      out.push({ key: `h-${letter}`, header: letter })
+      list.forEach((c, i) =>
+        out.push({ key: `f-${c.id}`, sel, contact: c, delay: Math.min(i * 25, 250) }))
+    }
+  } else {
+    contacts.filteredList.forEach((c, i) =>
+      out.push({ key: `g-${c.id}`, sel, contact: c, delay: Math.min(i * 25, 250) }))
+  }
+  return out
 })
 
 const crossHint = computed(() =>
@@ -109,65 +126,39 @@ function isSelected(type, id) {
       <!-- 空态 -->
       <el-empty v-else-if="!contacts.filteredList.length" :description="emptyText" :image-size="60" />
 
-      <!-- 好友：字母分组 -->
-      <template v-else-if="contacts.tab === 'friends'">
-        <template v-for="[letter, list] in letterGroups" :key="letter">
-          <div class="letter-head num">{{ letter }}</div>
+      <!-- 好友字母分组 / 群聊平铺：归一为扁平行序列，单循环渲染 -->
+      <template v-else>
+        <template v-for="row in rows" :key="row.key">
+          <div v-if="row.header" class="letter-head num">{{ row.header }}</div>
           <div
-            v-for="(c, i) in list"
-            :key="c.id"
+            v-else
             class="item"
-            :class="{ active: isSelected('friend', c.id) }"
-            :style="{ animationDelay: Math.min(i * 25, 250) + 'ms' }"
-            @click="contacts.select('friend', c.id)"
+            :class="{ active: isSelected(row.sel, row.contact.id) }"
+            :style="{ animationDelay: row.delay + 'ms' }"
+            @click="contacts.select(row.sel, row.contact.id)"
           >
-            <img v-if="c.avatar" class="avatar img" :src="c.avatar" alt="" referrerpolicy="no-referrer">
-            <AnonAvatar v-else-if="!c.name" :alias="c.alias" class="avatar" />
-            <span v-else class="avatar">{{ displayNameOf(c).slice(0, 1) }}</span>
+            <ContactAvatar
+              :name="row.contact.name"
+              :alias="row.contact.alias"
+              :avatar="row.contact.avatar"
+              :chat-type="row.contact.chat_type"
+              class="avatar"
+            />
             <div class="body">
               <div class="row1">
-                <span class="name" v-html="highlight(displayNameOf(c), contacts.keyword)"></span>
+                <span class="name" v-html="highlight(displayNameOf(row.contact), contacts.keyword)"></span>
                 <span class="flags">
-                  <span v-if="c.pinned" class="pin">置顶</span>
-                  <span class="time num">{{ fmtTime(c.last_msg_at) }}</span>
+                  <span v-if="row.contact.pinned" class="pin">置顶</span>
+                  <span class="time num">{{ fmtTime(row.contact.last_msg_at) }}</span>
                 </span>
               </div>
               <div class="row2">
-                <span class="preview num" v-html="highlight(previewOf(c), contacts.keyword)"></span>
-                <UnreadBadge :count="c.unread_count" />
+                <span class="preview num" v-html="highlight(previewOf(row.contact), contacts.keyword)"></span>
+                <UnreadBadge :count="row.contact.unread_count" />
               </div>
             </div>
           </div>
         </template>
-      </template>
-
-      <!-- 群聊：平铺 -->
-      <template v-else>
-        <div
-          v-for="(c, i) in contacts.filteredList"
-          :key="c.id"
-          class="item"
-          :class="{ active: isSelected('group', c.id) }"
-          :style="{ animationDelay: Math.min(i * 25, 250) + 'ms' }"
-          @click="contacts.select('group', c.id)"
-        >
-          <img v-if="c.avatar" class="avatar img" :src="c.avatar" alt="" referrerpolicy="no-referrer">
-          <AnonAvatar v-else-if="!c.name" :alias="c.alias" class="avatar" />
-          <span v-else class="avatar group">{{ displayNameOf(c).slice(0, 1) }}</span>
-          <div class="body">
-            <div class="row1">
-              <span class="name" v-html="highlight(displayNameOf(c), contacts.keyword)"></span>
-              <span class="flags">
-                <span v-if="c.pinned" class="pin">置顶</span>
-                <span class="time num">{{ fmtTime(c.last_msg_at) }}</span>
-              </span>
-            </div>
-            <div class="row2">
-              <span class="preview num" v-html="highlight(previewOf(c), contacts.keyword)"></span>
-              <UnreadBadge :count="c.unread_count" />
-            </div>
-          </div>
-        </div>
       </template>
     </el-scrollbar>
   </div>
@@ -287,7 +278,6 @@ function isSelected(type, id) {
   display: flex; align-items: center; justify-content: center;
 }
 .avatar.group { background: var(--c-ok); }
-.avatar.img { object-fit: cover; background: var(--c-surface); }
 
 .body { flex: 1; min-width: 0; }
 .row1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
