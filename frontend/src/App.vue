@@ -7,18 +7,21 @@ import WorkbenchPage from './pages/WorkbenchPage.vue'
 import AdminLayout from './pages/AdminLayout.vue'
 import DashboardPage from './pages/admin/DashboardPage.vue'
 import AccountsPage from './pages/admin/AccountsPage.vue'
+import OrgsPage from './pages/admin/OrgsPage.vue'
 import LogsPage from './pages/admin/LogsPage.vue'
 import ForceChangePassword from './components/ForceChangePassword.vue'
 
 const booted = ref(false)
 const me = ref(null)          // 当前登录人（/api/auth/me）
 const view = ref('login')     // login | workbench | admin
-const page = ref('dashboard') // 管理后台内页：dashboard | accounts | logs
+const page = ref('dashboard') // 管理后台内页：dashboard | accounts | orgs | logs
 const changingPwd = ref(false) // 初始密码账号的强制改密弹窗
 
 const toasts = ref([])
 let toastSeq = 0
 function toast(msg, type = 'ok') {
+  // 兼容子页面 emit('toast', { msg, type }) 的载荷写法
+  if (msg && typeof msg === 'object') { type = msg.type || 'ok'; msg = msg.msg || '' }
   const id = ++toastSeq
   toasts.value.push({ id, msg, type })
   setTimeout(() => { toasts.value = toasts.value.filter((t) => t.id !== id) }, 2600)
@@ -75,6 +78,7 @@ function onLoggedOut() {
   <AdminLayout v-else-if="booted && view === 'admin'" v-model:page="page" :me="me" @logout="onLoggedOut" @open-workbench="view = 'workbench'">
     <DashboardPage v-if="page === 'dashboard'" :me="me" />
     <AccountsPage v-else-if="page === 'accounts'" :me="me" @toast="toast" />
+    <OrgsPage v-else-if="page === 'orgs'" @toast="toast" />
     <LogsPage v-else-if="page === 'logs'" @toast="toast" />
   </AdminLayout>
 

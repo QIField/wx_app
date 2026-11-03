@@ -68,7 +68,16 @@ export const resetAccountPassword = (id) => http.put(`/accounts/${id}/password`)
 
 /* ===== 组织字典 ===== */
 
+/** 启用中的组织：账号表单等使用处的下拉数据源（每次实时查询）。 */
 export const fetchOrgs = () => http.get('/orgs')
+
+/** 全量组织（含已删除）：组织管理表格数据源。 */
+export const fetchAllOrgs = () => http.get('/orgs/all')
+
+export const createOrg = (name) => http.post('/orgs', { name })
+
+/** 组织状态：0=软删除（行保留，可恢复）1=启用。 */
+export const updateOrgStatus = (id, status) => http.put(`/orgs/${id}/status`, { status })
 
 /* ===== 审计日志 / 总览 ===== */
 

@@ -16,6 +16,7 @@ const navs = computed(() => {
   const items = [
     { key: 'dashboard', label: '总览', roles: ['developer', 'admin'], icon: 'grid' },
     { key: 'accounts', label: '账号管理', roles: ['developer', 'admin'], icon: 'users' },
+    { key: 'orgs', label: '组织管理', roles: ['developer', 'admin'], icon: 'org' },
     { key: 'logs', label: '操作日志', roles: ['developer'], icon: 'history' },
   ]
   return items.filter((n) => n.roles.includes(props.me.role))
@@ -24,6 +25,7 @@ const navs = computed(() => {
 const ICONS = {
   grid: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
   users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 7a4 4 0 1 0 0 0.01 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
+  org: 'M3 21h18 M5 21V7l7-4 7 4v14 M9 9h.01 M9 12h.01 M9 15h.01 M15 9h.01 M15 12h.01 M15 15h.01',
   history: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8 M3 3v5h5 M12 7v5l4 2',
 }
 </script>
