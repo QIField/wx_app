@@ -3,6 +3,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
+import { displayNameOf } from '../utils/format'
 import MessageRow from './MessageRow.vue'
 
 const chat = useChatStore()
@@ -136,7 +137,7 @@ async function onReEdit(content) {
   <div class="chat" @mousedown="chat.markCurrentRead()">
     <div class="head">
       <template v-if="chat.currentConv">
-        <span class="peer">{{ chat.currentConv.name || chat.currentConv.wxid }}</span>
+        <span class="peer">{{ displayNameOf(chat.currentConv) }}</span>
         <el-tag v-if="chat.currentConv.chat_type === 2" size="small" type="info" effect="plain">群聊</el-tag>
       </template>
       <span v-else>选择左侧会话</span>

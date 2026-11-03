@@ -101,9 +101,9 @@ export const checkDeviceOnline = (openid) =>
 export const fetchConversations = (openid) =>
   http.get('/conversations', { params: { openid: openid || undefined } })
 
-/** 主动发起会话：按 wxid 建/取会话（chat_type: 1好友 2群），联系人须在通讯录里。 */
-export const openConversation = (wxid, chatType, openid) =>
-  http.post('/conversations', { wxid, chat_type: chatType }, { params: { openid: openid || undefined } })
+/** 主动发起会话：按 contact_id 建/取会话（chat_type: 1好友 2群），不传 wxid（脱敏契约）。 */
+export const openConversation = (contactId, chatType, openid) =>
+  http.post('/conversations', { contact_id: contactId, chat_type: chatType }, { params: { openid: openid || undefined } })
 
 /** 会话操作：置顶（{pinned:0|1}）/ 清未读（{read:true}）。 */
 export const updateConversation = (convId, payload) =>
@@ -135,11 +135,11 @@ export const fetchContacts = (type, keyword, openid) =>
 export const fetchSendLogs = (openid) =>
   http.get('/send-logs', { params: { openid: openid || undefined } })
 
-/** 联系人档案：备注/标签（业务自建，按 wxid，好友与群通用）。 */
-export const fetchContactProfile = (wxid) => http.get(`/contacts/${wxid}/profile`)
+/** 联系人档案：备注/标签（业务自建，按通讯录行 id，好友与群通用；不传 wxid）。 */
+export const fetchContactProfile = (contactId) => http.get(`/contacts/${contactId}/profile`)
 
-export const saveContactProfile = (wxid, payload) =>
-  http.put(`/contacts/${wxid}/profile`, payload)
+export const saveContactProfile = (contactId, payload) =>
+  http.put(`/contacts/${contactId}/profile`, payload)
 
 /** WebSocket 长连接：收到推送回调 onEvent(event, data)。 */
 export function connectWs(onEvent) {

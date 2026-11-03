@@ -372,12 +372,13 @@ def test_audit_logs_keyword_search(client, app):
 def test_workbench_filtered_by_openid(client, app):
     """工作台会话按登录人设备过滤：另一台设备的会话看不到。"""
     from backend.models.conversation import Conversation
+    from backend.services import anonymize
 
     db.session.add(Conversation(openid="other-device", wxid="wxid_x", chat_type=1))
     db.session.add(Conversation(openid="dev01", wxid="wxid_mine", chat_type=1))
     db.session.commit()
 
     resp = client.get("/api/conversations")
-    wxids = [c["wxid"] for c in resp.get_json()["data"]]
+    names = [c["alias"] for c in resp.get_json()["data"]]  # 出参无 wxid，用 alias 判别
 
-    assert wxids == ["wxid_mine"]
+    assert names == [anonymize.alias_of("wxid_mine")]

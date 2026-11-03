@@ -3,7 +3,8 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useContactsStore } from '../stores/contacts'
 import { useChatStore } from '../stores/chat'
-import { fmtTime } from '../utils/format'
+import { displayNameOf, fmtTime, nameResolved } from '../utils/format'
+import AnonAvatar from './AnonAvatar.vue'
 
 const emit = defineEmits(['enter-chat'])
 const contacts = useContactsStore()
@@ -23,11 +24,11 @@ const draftTags = ref([])
 const tagInput = ref('')
 const editErr = ref('')
 
-// 切换选中联系人：退出编辑态并拉取档案
-watch(() => contact.value?.wxid, (wxid) => {
+// 切换选中联系人：退出编辑态并拉取档案（按通讯录行 id，不传 wxid——脱敏契约）
+watch(() => contact.value?.id, (id) => {
   editing.value = false
   editErr.value = ''
-  if (wxid) contacts.loadProfile(wxid)
+  if (id) contacts.loadProfile(id)
 }, { immediate: true })
 
 function startEdit() {
@@ -60,7 +61,7 @@ async function saveEdit() {
   }
   saving.value = true
   try {
-    await contacts.saveProfile(contact.value.wxid, {
+    await contacts.saveProfile(contact.value.id, {
       remark: draftRemark.value.trim(),
       tags: [...draftTags.value],
     })
@@ -72,14 +73,14 @@ async function saveEdit() {
   }
 }
 
-/** 发消息：本地已有会话直接进；没有就按 wxid 建会话（后端校验通讯录）再进。 */
+/** 发消息：按 contact_id 建/取会话再进（后端校验归属；不传 wxid——脱敏契约）。 */
 const opening = ref(false)
 async function enterChat() {
   const c = contact.value
   if (!c || opening.value) return
   opening.value = true
   try {
-    await chat.openWithContact(c.wxid, c.chat_type)
+    await chat.openWithContact(c.id, c.chat_type, c.conversation_id)
     emit('enter-chat')
   } catch (e) {
     hint.value = e.message || '发起会话失败'
@@ -96,10 +97,13 @@ async function enterChat() {
     <template v-if="contact">
       <div class="d-head">
         <img v-if="contact.avatar" class="avatar img" :src="contact.avatar" alt="" referrerpolicy="no-referrer">
-        <span v-else class="avatar" :class="{ group: contact.chat_type === 2 }">{{ contact.name.slice(0, 1) }}</span>
+        <AnonAvatar v-else-if="!nameResolved(contact)" :alias="contact.alias" class="avatar" />
+        <span v-else class="avatar" :class="{ group: contact.chat_type === 2 }">{{ displayNameOf(contact).slice(0, 1) }}</span>
         <div class="d-title">
-          <div class="d-name">{{ contact.name }}</div>
-          <div class="d-sub num">微信号：{{ contact.wxid }}</div>
+          <div class="d-name">{{ displayNameOf(contact) }}</div>
+          <!-- 脱敏契约：不再展示「微信号」，改匿名标识 / 资料未同步提示 -->
+          <div v-if="nameResolved(contact)" class="d-sub num">匿名标识：{{ contact.alias }}</div>
+          <div v-else class="d-sub">资料未同步 · 以匿名编码代称</div>
         </div>
         <span class="type-chip">{{ typeName }}</span>
       </div>

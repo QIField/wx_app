@@ -154,6 +154,24 @@ def test_sync_group_message(app, monkeypatch):
     assert conv.chat_type == Conversation.CHAT_GROUP
 
 
+def test_sync_broadcast_masks_wxid(app, monkeypatch):
+    """脱敏契约：WS new_message 推送不含 wxid 原文；无昵称发言人回退匿名编码。"""
+    from backend.ws import hub
+
+    broadcasts = []
+    monkeypatch.setattr(hub, "broadcast", lambda event, data: broadcasts.append((event, data)))
+    patch_pull(monkeypatch, make_body([make_item()]))
+    message_sync.sync_once(app)
+
+    events = [d for e, d in broadcasts if e == "new_message"]
+    assert events, "应有 new_message 推送"
+    ev = events[0]
+    assert "sender_wxid" not in ev
+    assert ev["sender_name"].startswith("匿名 ")  # 存库快照是 wxid 原文，推送前必须匿名化
+    assert ev["sender_avatar"] is None            # 无昵称 → 头像一并匿名
+    assert ev["sender_alias"]
+
+
 def test_sync_pull_error_silent(app, monkeypatch):
     """拉取失败：不崩、游标不动，下一轮重来。"""
     from backend.adapter.client import MiddleApiError

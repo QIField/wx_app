@@ -38,6 +38,19 @@ def test_devices_cards_with_unread(app, client):
     assert set(data[0]) >= {"openid", "remark", "display_name", "online", "unread"}
 
 
+def test_devices_display_name_fallback(app, client):
+    """脱敏契约：无备注的设备按绑定顺序回退「设备N」，不回退 openid。"""
+    from backend.models.user import User
+
+    me = User.query.filter_by(username="cs01").one()
+    bind_device(me, "dev02", remark="售前小号")  # dev01 无备注、dev02 有备注
+
+    data = client.get("/api/devices", headers=login_headers(me)).get_json()["data"]
+
+    assert data[0]["display_name"] == "设备1"
+    assert data[1]["display_name"] == "售前小号"
+
+
 def test_devices_requires_login(app):
     """未登录拿设备卡片：401。"""
     assert app.test_client().get("/api/devices").status_code == 401

@@ -105,12 +105,14 @@ def broadcast_messages(pushed, openid=""):
     """commit 之后才广播：保证前端听到推送时库里一定能查到。
 
     群消息发言人昵称/头像实时关联群成员名册（存库是 wxid 原文），
-    前端直接消费推送数据，所以这里解析完再推。
+    前端直接消费推送数据，所以这里解析完再推；无昵称时按脱敏契约
+    回退「匿名 + 编码」，绝不把 wxid 原文推给前端。
     openid 随事件下发：多账号前端靠它路由到对应账号卡片（跨账号 toast）。
     """
     if not pushed:
         return
     from backend.models.conversation import Conversation
+    from backend.services import anonymize
     from backend.sync import group_member
     from backend.ws import hub
 
@@ -123,6 +125,9 @@ def broadcast_messages(pushed, openid=""):
 
     for saved in pushed:
         info = sender_maps.get(saved["conversation_id"], {}).get(saved["sender_wxid"] or "")
+        nickname = anonymize.resolved_name(
+            (info or {}).get("nickname"), saved["sender_wxid"])
+        snapshot = anonymize.resolved_name(saved["sender_name"], saved["sender_wxid"])
         hub.broadcast("new_message", {
             "message_id": saved["message_id"],
             "conversation_id": saved["conversation_id"],
@@ -131,8 +136,9 @@ def broadcast_messages(pushed, openid=""):
             "msg_type": saved["msg_type"],
             "content": saved["content"],
             "payload": saved.get("payload") or {},  # 系统灰条带 system 标记；卡片信息前端兜底解析
-            "sender_name": (info or {}).get("nickname") or saved["sender_name"],
-            "sender_avatar": (info or {}).get("avatar"),
+            "sender_name": nickname or snapshot or anonymize.anon_label(saved["sender_wxid"]),
+            "sender_avatar": (info or {}).get("avatar") if nickname else None,
+            "sender_alias": anonymize.alias_of(saved["sender_wxid"]),
             "create_time": saved["create_time"].strftime("%Y-%m-%d %H:%M:%S"),
         })
 

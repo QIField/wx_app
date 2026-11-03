@@ -30,8 +30,11 @@ class UserDevice(db.Model):
 
     @property
     def display_name(self):
-        """卡片显示名：备注优先，无备注回退 openid。"""
-        return self.remark or self.openid
+        """卡片显示名：备注优先；无备注返回空串，由 API 层按绑定顺序补「设备N」。
+
+        脱敏契约：不再回退 openid（那是设备微信号，不能出现在前端展示里）。
+        """
+        return self.remark or ""
 
     def to_json(self):
         """绑定信息；online 供顶栏卡片在线点显示。"""

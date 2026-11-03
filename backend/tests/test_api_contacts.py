@@ -62,7 +62,7 @@ def test_keyword_hits_remark(client):
 
     data = client.get("/api/contacts?type=friends&keyword=月结").get_json()["data"]
 
-    assert [c["wxid"] for c in data["list"]] == ["wxid_r"]
+    assert [c["name"] for c in data["list"]] == ["王老板"]
 
 
 def test_roster_other_device_hidden(client):
@@ -106,14 +106,34 @@ def test_keyword_hits_name(client):
     assert [c["name"] for c in data["list"]] == ["张师傅"]
 
 
-def test_keyword_hits_wxid(client):
-    """keyword 命中 wxid（资料未解析也能搜到）。"""
+def test_keyword_ignores_wxid(client):
+    """脱敏契约：wxid 不参与搜索（前端已不可见，搜 wxid 片段不应命中）。"""
     make_contact(wxid="wxid_customer", name=None)
     make_contact(wxid="wxid_other", name="王五")
 
     data = client.get("/api/contacts?type=friends&keyword=customer").get_json()["data"]
 
-    assert [c["wxid"] for c in data["list"]] == ["wxid_customer"]
+    assert data["list"] == []
+
+
+def test_contacts_mask_wxid(client):
+    """脱敏契约：通讯录条目不含 wxid；未解析名称 → name=None + alias，头像一并匿名。"""
+    named = make_roster("wxid_named", name="客户乙")
+    unnamed = make_roster("wxid_anon_88")
+
+    items = client.get("/api/contacts?type=friends").get_json()["data"]["list"]
+    by_id = {c["id"]: c for c in items}
+    n, u = by_id[named.id], by_id[unnamed.id]
+
+    assert n["name"] == "客户乙"
+    assert n["avatar"] is None  # 有名无图：不下发头像（前端首字兜底）
+    assert "wxid" not in n
+    assert n["alias"]
+
+    assert u["name"] is None
+    assert u["avatar"] is None
+    assert "wxid" not in u
+    assert u["alias"]
 
 
 def test_keyword_no_match(client):
@@ -146,43 +166,47 @@ def test_invalid_type_rejected(client):
 
 
 def test_letter_pinyin_and_fallback(client):
-    """letter：中文名取拼音首字母；数字开头归入 # 排最后。"""
-    make_contact(wxid="wxid_c", name="陈国斌")   # C
-    make_contact(wxid="wxid_b", name="白云")     # B
-    make_contact(wxid="139****9515", name=None)  # 数字开头 → #
+    """letter：中文名取拼音首字母；未解析名称归入 # 排最后。"""
+    make_contact(wxid="wxid_c", name="陈国斌")      # C
+    make_contact(wxid="wxid_b", name="白云")        # B
+    make_contact(wxid="wxid_anon", name=None)       # 未解析 → #
 
     data = client.get("/api/contacts?type=friends").get_json()["data"]
     letters = [(c["letter"], c["name"]) for c in data["list"]]
 
-    assert letters == [("B", "白云"), ("C", "陈国斌"), ("#", "139****9515")]
+    assert letters == [("B", "白云"), ("C", "陈国斌"), ("#", None)]
 
 
-# ---------- 联系人档案（备注/标签） ----------
+# ---------- 联系人档案（备注/标签，按 contact_id 访问——脱敏契约） ----------
 
 
 def test_profile_default_empty(client):
     """无档案记录时返回默认空值。"""
-    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+    c = make_roster("wxid_a")
+
+    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
 
     assert data == {"remark": "", "tags": []}
 
 
 def test_profile_put_then_get(client):
     """PUT 创建档案后 GET 可读回。"""
-    r = client.put("/api/contacts/wxid_a/profile", json={"remark": "月结客户", "tags": ["奔驰超豪", "月结"]})
+    c = make_roster("wxid_a")
+    r = client.put(f"/api/contacts/{c.id}/profile", json={"remark": "月结客户", "tags": ["奔驰超豪", "月结"]})
 
     assert r.get_json()["code"] == 0
-    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
 
     assert data == {"remark": "月结客户", "tags": ["奔驰超豪", "月结"]}
 
 
 def test_profile_put_updates_existing(client):
     """重复 PUT 走更新而非新建。"""
-    client.put("/api/contacts/wxid_a/profile", json={"remark": "旧备注", "tags": ["a"]})
-    client.put("/api/contacts/wxid_a/profile", json={"remark": "新备注", "tags": ["a", "b"]})
+    c = make_roster("wxid_a")
+    client.put(f"/api/contacts/{c.id}/profile", json={"remark": "旧备注", "tags": ["a"]})
+    client.put(f"/api/contacts/{c.id}/profile", json={"remark": "新备注", "tags": ["a", "b"]})
 
-    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
 
     assert data["remark"] == "新备注"
     assert data["tags"] == ["a", "b"]
@@ -190,9 +214,10 @@ def test_profile_put_updates_existing(client):
 
 def test_profile_rejects_over_limits(client):
     """备注超 100 字 / 标签超 10 个 / 单标签超 12 字均拒绝。"""
-    r1 = client.put("/api/contacts/wxid_a/profile", json={"remark": "x" * 101, "tags": []})
-    r2 = client.put("/api/contacts/wxid_b/profile", json={"remark": "", "tags": [f"t{i}" for i in range(11)]})
-    r3 = client.put("/api/contacts/wxid_c/profile", json={"remark": "", "tags": ["x" * 13]})
+    ca, cb, cc = make_roster("wxid_a"), make_roster("wxid_b"), make_roster("wxid_c")
+    r1 = client.put(f"/api/contacts/{ca.id}/profile", json={"remark": "x" * 101, "tags": []})
+    r2 = client.put(f"/api/contacts/{cb.id}/profile", json={"remark": "", "tags": [f"t{i}" for i in range(11)]})
+    r3 = client.put(f"/api/contacts/{cc.id}/profile", json={"remark": "", "tags": ["x" * 13]})
 
     assert r1.get_json()["code"] == 400
     assert r2.get_json()["code"] == 400
@@ -201,8 +226,16 @@ def test_profile_rejects_over_limits(client):
 
 def test_profile_tags_dedupe_and_trim(client):
     """标签自动去空白、去重、去空项。"""
-    client.put("/api/contacts/wxid_a/profile", json={"remark": "", "tags": [" 月结 ", "月结", "", "奔驰"]})
+    c = make_roster("wxid_a")
+    client.put(f"/api/contacts/{c.id}/profile", json={"remark": "", "tags": [" 月结 ", "月结", "", "奔驰"]})
 
-    data = client.get("/api/contacts/wxid_a/profile").get_json()["data"]
+    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
 
     assert data["tags"] == ["月结", "奔驰"]
+
+
+def test_profile_contact_not_found(client):
+    """contact_id 不存在（或跨设备）：404，档案接口不按 wxid 裸查。"""
+    resp = client.get("/api/contacts/99999/profile")
+
+    assert resp.status_code == 404

@@ -8,6 +8,7 @@ from flask import Blueprint, g, jsonify, request
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
+from backend.services import anonymize
 from backend.services.auth import require_role
 from backend.services.devices import user_devices
 
@@ -54,14 +55,15 @@ def list_send_logs():
 
 
 def _log_json(msg, conv):
-    """一条发送记录：操作人/设备/会话/内容摘要/发送结果。"""
+    """一条发送记录：操作人/设备/会话/内容摘要/发送结果（脱敏契约：不含 wxid）。"""
+    name = anonymize.resolved_name(conv.name, conv.wxid)
     return {
         "id": msg.id,
         "time": msg.create_time.strftime("%Y-%m-%d %H:%M:%S") if msg.create_time else None,
         "operator_name": msg.operator_name or "",
         "openid": conv.openid,
-        "conv_name": conv.name or conv.wxid,
-        "wxid": conv.wxid,
+        "conv_name": name or anonymize.anon_label(conv.wxid),
+        "alias": anonymize.alias_of(conv.wxid),
         "msg_type": msg.msg_type,
         "content": msg.content or "",
         "status": msg.status,

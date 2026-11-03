@@ -1,7 +1,7 @@
 /** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项、联系人档案（备注/标签）。 */
 import { defineStore } from 'pinia'
 import { fetchContacts, fetchContactProfile, saveContactProfile } from '../api'
-import { matchKeyword } from '../utils/format'
+import { matchKeyword, displayNameOf } from '../utils/format'
 import { useChatStore } from './chat'
 
 export const useContactsStore = defineStore('contacts', {
@@ -19,7 +19,8 @@ export const useContactsStore = defineStore('contacts', {
     currentList: (s) => (s.tab === 'friends' ? s.friends : s.groups),
 
     filteredList(s) {
-      return s.currentList.filter((c) => matchKeyword([c.name, c.wxid], s.keyword))
+      // 搜索只匹配展示名（含「匿名 编码」）与备注；wxid 已不在前端数据里
+      return s.currentList.filter((c) => matchKeyword([displayNameOf(c)], s.keyword))
     },
 
     selectedContact(s) {
@@ -32,7 +33,7 @@ export const useContactsStore = defineStore('contacts', {
     crossHintCount(s) {
       if (!s.keyword.trim()) return 0
       const other = s.tab === 'friends' ? s.groups : s.friends
-      return other.filter((c) => matchKeyword([c.name, c.wxid], s.keyword)).length
+      return other.filter((c) => matchKeyword([displayNameOf(c)], s.keyword)).length
     },
   },
 
@@ -67,14 +68,14 @@ export const useContactsStore = defineStore('contacts', {
       this.profile = null
     },
 
-    /** 拉取选中联系人的档案（备注/标签）。 */
-    async loadProfile(wxid) {
-      this.profile = await fetchContactProfile(wxid)
+    /** 拉取选中联系人的档案（备注/标签；按通讯录行 id，不传 wxid）。 */
+    async loadProfile(contactId) {
+      this.profile = await fetchContactProfile(contactId)
     },
 
-    /** 保存备注/标签（upsert），成功后本地同步。 */
-    async saveProfile(wxid, payload) {
-      this.profile = await saveContactProfile(wxid, payload)
+    /** 保存备注/标签（upsert，按通讯录行 id），成功后本地同步。 */
+    async saveProfile(contactId, payload) {
+      this.profile = await saveContactProfile(contactId, payload)
     },
   },
 })

@@ -8,7 +8,7 @@ message_revoked，前端把气泡换成微信样式灰条"你撤回了一条消�
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
-from backend.services import conversations as conversation_service
+from backend.services import anonymize, conversations as conversation_service
 
 
 def _revoke_text(fields):
@@ -16,7 +16,8 @@ def _revoke_text(fields):
 
     中间方的 replacemsg 按微信设备主人视角生成（实测 2026-10-31：客户撤回
     也写"你撤回了"），单聊不能照抄，按方向重新生成；群聊通知自带发言人
-    昵称（"xxx 撤回了一条消息"），直接引用，缺失时用发言人 wxid 兜底。
+    昵称（"xxx 撤回了一条消息"），直接引用，缺失时用匿名编码兜底（脱敏契约，
+    不把 wxid 原文写进展示文案）。
     """
     if fields["direction"] == Message.DIR_OUT:
         return "你撤回了一条消息"
@@ -24,7 +25,9 @@ def _revoke_text(fields):
         repl = (fields["revoke"].get("replacemsg") or "").strip()
         if repl and not repl.startswith("你"):
             return repl
-        return f"「{fields['sender_name'] or '成员'}」撤回了一条消息"
+        who = anonymize.resolved_name(fields.get("sender_name"), fields.get("sender_wxid"))
+        who = who or anonymize.anon_label(fields.get("sender_wxid"))
+        return f"「{who}」撤回了一条消息"
     return "对方撤回了一条消息"
 
 

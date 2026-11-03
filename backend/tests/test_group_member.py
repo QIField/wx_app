@@ -266,8 +266,9 @@ def test_group_messages_api_resolves_sender(client, app, group_conv):
     assert known["sender_name"] == "成员甲"      # 名册里的成员 → 昵称
     assert known["sender_avatar"] == "http://a/a.jpg"
     ghost = by_content["不在名册"]
-    assert ghost["sender_name"] == "wxid_ghost"  # 不在名册 → wxid 兜底
+    assert ghost["sender_name"].startswith("匿名 ")  # 不在名册 → 匿名编码兜底（脱敏契约）
     assert ghost["sender_avatar"] is None
+    assert ghost["sender_alias"]
 
 
 def test_single_messages_api_unaffected(client, app):
@@ -285,7 +286,7 @@ def test_single_messages_api_unaffected(client, app):
     resp = client.get(f"/api/conversations/{conv.id}/messages")
 
     msg = resp.get_json()["data"]["messages"][0]
-    assert msg["sender_name"] == "wxid_customer"
+    assert msg["sender_name"].startswith("匿名 ")  # 快照是 wxid 原文 → 匿名编码（脱敏契约）
     assert msg["sender_avatar"] is None
 
 

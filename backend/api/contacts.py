@@ -9,6 +9,7 @@ from backend.extensions import db
 from backend.models.contact import Contact
 from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
+from backend.services import anonymize
 from backend.services.auth import require_role
 from backend.services.devices import active_openid_for, user_openids
 
@@ -27,7 +28,7 @@ def list_contacts():
     """通讯录列表：?type=friends|groups&keyword=，按拼音首字母分组排序。
 
     主源是 contact 表（全量联系人，聊没聊过都在）；历史会话里有、
-    通讯录还没同步到的作为补集拼上；关键词同时匹配昵称/wxid/备注。
+    通讯录还没同步到的作为补集拼上；关键词只匹配 昵称/备注（wxid 不参与——脱敏契约）。
     """
     mapped = _TYPE_MAP.get(request.args.get("type", "friends"))
     if mapped is None:
@@ -51,7 +52,6 @@ def list_contacts():
             .filter(
                 db.or_(
                     Contact.name.ilike(like),
-                    Contact.wxid.ilike(like),
                     ContactProfile.remark.ilike(like),
                 )
             )
@@ -68,13 +68,13 @@ def list_contacts():
 
     items = [_contact_json(c, conv_by_wxid.get(c.wxid)) for c in contacts]
 
-    # 补集：会话里有、通讯录还没同步到的老会话（关键词按 昵称/wxid 过滤）
+    # 补集：会话里有、通讯录还没同步到的老会话（关键词只按昵称过滤）
     known = {c.wxid for c in contacts}
     kw = keyword.lower()
     extras = [
         c for c in convs
         if c.wxid not in known
-        and (not kw or kw in (c.name or "").lower() or kw in c.wxid.lower())
+        and (not kw or kw in (c.name or "").lower())
     ]
     items.extend(_conv_contact_json(c) for c in extras)
 
@@ -85,7 +85,7 @@ def list_contacts():
 
 def _contact_json(c, conv):
     """contact 行 → 通讯录条目；contact 缺资料时回退用会话里已解析的昵称/头像。"""
-    name = _display_name(c.name, c.wxid) or _display_name(
+    name = anonymize.resolved_name(c.name, c.wxid) or anonymize.resolved_name(
         conv.name if conv else None, c.wxid)
     chat_type = conv.chat_type if conv else _roster_chat_type(c)
     return _item_json(
@@ -98,31 +98,26 @@ def _conv_contact_json(c):
     """历史会话行 → 通讯录条目（通讯录未同步到时的补集形态）。"""
     return _item_json(
         row_id=c.id, wxid=c.wxid, chat_type=c.chat_type,
-        name=_display_name(c.name, c.wxid), avatar=c.avatar, conv=c,
+        name=anonymize.resolved_name(c.name, c.wxid), avatar=c.avatar, conv=c,
     )
 
 
 def _item_json(row_id, wxid, chat_type, name, avatar, conv):
-    """通讯录条目公共组装：会话信息（未读/摘要/置顶）有则挂上；名字用 wxid 兜底。"""
-    name = name or wxid
+    """通讯录条目公共组装（脱敏契约）：出参不含 wxid；未解析名称保持 None + alias，
+    头像随之匿名；未读/摘要等会话信息有则挂上。"""
     return {
         "id": row_id,
         "conversation_id": conv.id if conv else None,
-        "wxid": wxid,
         "chat_type": chat_type,
         "name": name,
-        "avatar": avatar,
-        "letter": _letter(name),
+        "avatar": anonymize.avatar_or_none(name, avatar),
+        "alias": anonymize.alias_of(wxid),
+        "letter": _letter(name) if name else "#",
         "unread_count": conv.unread_count if conv else 0,
         "pinned": conv.pinned if conv else 0,
         "last_msg": conv.last_msg if conv else None,
         "last_msg_at": conv.last_msg_at.strftime("%Y-%m-%d %H:%M:%S") if conv and conv.last_msg_at else None,
     }
-
-
-def _display_name(name, wxid):
-    """昵称展示：为空或还是 wxid 原始编号时视为未解析。"""
-    return name if name and name != wxid else None
 
 
 def _roster_chat_type(c):
@@ -142,18 +137,41 @@ def _letter(text):
 # ---------- 联系人档案（备注/标签，业务自建，不写回微信） ----------
 
 
-@bp.get("/api/contacts/<wxid>/profile")
+def _profile_wxid(contact_id):
+    """contact_id → wxid（限当前登录人绑定设备）；Contact 行优先，补集回退会话行。"""
+    openids = user_openids(g.current_user.id)
+    if not openids:
+        return None
+    c = Contact.query.filter(Contact.id == contact_id, Contact.openid.in_(openids)).first()
+    if c:
+        return c.wxid
+    conv = Conversation.query.filter(
+        Conversation.id == contact_id,
+        Conversation.openid.in_(openids),
+        Conversation.deleted_at.is_(None),
+    ).first()
+    return conv.wxid if conv else None
+
+
+@bp.get("/api/contacts/<int:contact_id>/profile")
 @require_role()
-def get_profile(wxid):
-    """联系人档案；无记录返回默认空值。"""
+def get_profile(contact_id):
+    """联系人档案（前端只传 contact_id，不传 wxid）；无记录返回默认空值。"""
+    wxid = _profile_wxid(contact_id)
+    if not wxid:
+        return jsonify(code=404, msg="联系人不存在"), 404
     p = ContactProfile.query.filter_by(wxid=wxid).first()
     return jsonify(code=0, msg="success", data=p.to_json() if p else {"remark": "", "tags": []})
 
 
-@bp.put("/api/contacts/<wxid>/profile")
+@bp.put("/api/contacts/<int:contact_id>/profile")
 @require_role()
-def put_profile(wxid):
+def put_profile(contact_id):
     """保存备注/标签（upsert）。校验超限，标签去重去空。"""
+    wxid = _profile_wxid(contact_id)
+    if not wxid:
+        return jsonify(code=404, msg="联系人不存在"), 404
+
     body = request.get_json(silent=True) or {}
     remark = str(body.get("remark") or "").strip()
 

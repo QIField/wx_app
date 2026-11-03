@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>效果演示 · wxid 全链路脱敏</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="mode-after">
+  <!-- App Shell：顶栏导航（两页逐字一致） -->
+  <header class="topbar">
+    <span class="logo"><span class="dot">匿</span>WX 工作台 · 原型</span>
+    <span class="divider"></span>
+    <span class="scheme">wxid 全链路脱敏方案</span>
+    <nav>
+      <a href="index.html">方案说明</a>
+      <a class="on" href="demo.html">效果演示</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+
+    <div class="demo-toolbar">
+      <span style="font-weight:700">脱敏模式：</span>
+      <div class="mode-switch" id="modeSwitch">
+        <button data-mode="before" class="bad">Before · 现状（wxid 明文可见）</button>
+        <button data-mode="after" class="on good">After · 改造后（本方案）</button>
+      </div>
+      <span class="tip" id="modeTip">wxid 已从出参移除；未命名用户以「匿名 + 编码」代称（如 匿名 U7F3K2）；搜索不再命中 wxid。</span>
+    </div>
+
+    <div class="workbench">
+
+      <!-- 顶栏设备卡片（泄漏点 5） -->
+      <div class="col devices">
+        <div class="col-head">聊天账号</div>
+        <div class="col-body" id="deviceList"></div>
+      </div>
+
+      <!-- 会话 / 通讯录（泄漏点 1、3、6） -->
+      <div class="col conv">
+        <div class="col-head"><span id="listColTitle">会话</span>
+          <span class="chip gray num" id="listCount"></span>
+        </div>
+        <div class="tab-pair" id="listTabs">
+          <button data-tab="conv" class="on">会话</button>
+          <button data-tab="contacts">通讯录</button>
+        </div>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="searchInput" placeholder="搜索（试试粘贴 wxid）">
+        </div>
+        <div class="col-body" id="listBody"></div>
+      </div>
+
+      <!-- 聊天窗（泄漏点 2、4） -->
+      <div class="col chat">
+        <div class="chat-head" id="chatHead"><span style="color:var(--c-text-sub);font-size:13px">← 选择左侧会话</span></div>
+        <div class="chat-msgs" id="chatMsgs"><div class="detail-empty">选择会话查看聊天记录</div></div>
+        <div class="chat-editor">
+          <textarea placeholder="输入消息…（演示用）"></textarea>
+          <button class="btn-send">发送</button>
+        </div>
+      </div>
+
+      <!-- 联系人详情（泄漏点 6） -->
+      <div class="col detail">
+        <div class="col-head">资料卡</div>
+        <div class="col-body" id="detailBody"><div class="detail-empty">选择会话或联系人查看资料</div></div>
+      </div>
+
+    </div>
+
+    <p class="sec-desc" style="margin-top:12px">
+      演示要点：① 切到 <b>Before</b>，通讯录第二行、资料卡「微信号」、未命名用户名称均为 wxid 明文（红框标出）；
+      ② 切到 <b>After</b> 全部消失，未命名用户以「匿名 + 编码」代称（如 匿名 U7F3K2，同码同人、群聊中不同成员编码互异）+ 匿名头像（同一人颜色恒定）；
+      ③ 搜索框粘贴 wxid：Before 能命中，After 无法命中（wxid 已不在前端数据里）。
+    </p>
+  </main>
+
+  <!-- Network 出参抽屉 -->
+  <button class="json-fab" id="jsonFab">查看接口出参 JSON</button>
+  <div class="json-drawer" id="jsonDrawer">
+    <div class="jd-head"><b>接口出参对比（模拟 Network → Response）</b><button id="jsonClose" title="关闭">✕</button></div>
+    <div class="jd-body" id="jsonBody"></div>
+  </div>
+
+<script>
+/* =========================================================
+   mock 数据（结构对齐后端出参；wxid 仅 Before 演示用）
+   ========================================================= */
+const DEVICES = [
+  { openid: 'wxid_zh9d8e2k11', remark: '', online: 1,  unread: 5 },
+  { openid: 'wxid_qq77aa22bb', remark: '售前小号', online: 0, unread: 0 },
+]
+
+const CONTACTS = [
+  { id: 77,  convId: 1024, wxid: 'wxid_l2k9f8a733', name: null,             avatar: false, alias: 'U7F3K2', chatType: 1, unread: 2, pinned: 0, lastMsg: '在吗，上次那个报价还有效吗', lastAt: '14:22', letter: '#' },
+  { id: 81,  convId: 1025, wxid: 'wxid_ka83md101x', name: '李婷（佛山鑫铃）', avatar: true,  alias: 'R2X8P4', chatType: 1, unread: 0, pinned: 1, lastMsg: '好的，明天发你', lastAt: '13:05', letter: 'L' },
+  { id: 85,  convId: 1026, wxid: '88888888@chatroom', name: '鑫铃自动报价群', avatar: true, alias: 'G1C4V8', chatType: 2, unread: 3, pinned: 0, lastMsg: '[链接] 福特蒙迪欧报价单', lastAt: '12:48', letter: 'X' },
+  { id: 88,  convId: 1027, wxid: 'wxid_p0m4nv77zq', name: '陈总',             avatar: false, alias: 'T9W5H1', chatType: 1, unread: 0, pinned: 0, lastMsg: '收到', lastAt: '昨天', letter: 'C' },
+  { id: 90,  convId: 1028, wxid: '66666666@chatroom', name: null,            avatar: false, alias: 'G6B2N9', chatType: 2, unread: 0, pinned: 0, lastMsg: '（暂无消息）', lastAt: '', letter: '#' },
+  { id: 93,  convId: 0,    wxid: 'wxid_z3x7cv55kd', name: null,             avatar: false, alias: 'M4J7D3', chatType: 1, unread: 0, pinned: 0, lastMsg: '', lastAt: '', letter: '#' },
+]
+
+/* 群成员名册（memberList）：昵称缺失的成员 → After 模式显示「匿名 + 编码」 */
+const GROUP_MEMBERS = {
+  '88888888@chatroom': [
+    { wxid: 'wxid_wq11aa22bb', nickname: '佛山鑫铃-王强', avatar: true },
+    { wxid: 'wxid_l2k9f8a733', nickname: null, avatar: false, alias: 'U7F3K2' },
+    { wxid: 'wxid_hh55cc66dd', nickname: null, avatar: false, alias: 'Y8T3S6' },
+  ],
+}
+
+const MESSAGES = {
+  1024: [
+    { dir: 1, name: null, avatar: false, alias: 'U7F3K2', text: '在吗，上次那个报价还有效吗', time: '14:20' },
+    { dir: 2, name: '客服·小周', text: '在的，给您看下最新价格', time: '14:21' },
+    { dir: 1, name: null, avatar: false, alias: 'U7F3K2', text: '货期大概多久？', time: '14:22' },
+  ],
+  1025: [
+    { dir: 1, name: '李婷（佛山鑫铃）', avatar: true, text: '合同我这边走完流程了', time: '13:04' },
+    { dir: 2, name: '客服·小周', text: '好的，明天发你', time: '13:05' },
+  ],
+  1026: [
+    { dir: 1, sender: 'wxid_wq11aa22bb', text: '今天的报价都整理好了，看群公告', time: '12:40' },
+    { dir: 1, sender: 'wxid_l2k9f8a733', text: '收到，我核对下库存', time: '12:46' },
+    { dir: 1, sender: 'wxid_hh55cc66dd', text: '[链接] 福特蒙迪欧报价单', time: '12:48' },
+  ],
+  1027: [
+    { dir: 1, name: '陈总', avatar: false, text: '按这个方案推进', time: '昨天 18:30' },
+    { dir: 2, name: '客服·小周', text: '收到', time: '昨天 18:32' },
+  ],
+  1028: [],
+}
+
+/* =========================================================
+   状态与工具
+   ========================================================= */
+let mode = 'after'      // before | after
+let listTab = 'conv'    // conv | contacts
+let keyword = ''
+let currentConvId = 1024
+let currentContactId = null   // 通讯录 tab 下选中的联系人 id
+
+const DEVICE_FALLBACK = ['设备1', '设备2', '设备3']
+const ANON_LABEL = (alias) => `匿名 ${alias || '??????'}`
+
+const $ = (sel) => document.querySelector(sel)
+
+/* alias → 稳定色相（演示版哈希；生产由后端下发 avatar 或前端同规则） */
+function hueOf(alias) {
+  let h = 0
+  for (const ch of String(alias)) h = (h * 31 + ch.charCodeAt(0)) % 360
+  return h
+}
+
+/* 头像 HTML：匿名/首字/真实 三态，Before 模式回退 wxid 首字母 */
+function avatarHtml(c, extra) {
+  const cls = ['ava', extra || '']
+  let inner = ''
+  if (mode === 'after') {
+    if (!c.name) {                                   // 未获取名称 → 匿名人形
+      cls.push('anon')
+      inner = `<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg>`
+      return `<span class="${cls.join(' ')}" style="--anon-bg:hsl(${hueOf(c.alias)},42%,56%)" title="匿名标识 ${c.alias}">${inner}</span>`
+    }
+    if (c.avatar) { cls.push('img-true'); return `<span class="${cls.join(' ')}"></span>` }
+    cls.push(c.chatType === 2 ? 'initial group' : 'initial')
+    return `<span class="${cls.join(' ')}">${c.name.slice(0, 1)}</span>`
+  }
+  /* Before：现状回退 wxid 首字母 */
+  if (c.avatar) { cls.push('img-true'); return `<span class="${cls.join(' ')}"></span>` }
+  cls.push('wxid-leak')
+  return `<span class="${cls.join(' ')} leaked">${c.name ? c.name.slice(0, 1) : c.wxid.slice(5, 6).toUpperCase()}</span>`
+}
+
+/* 名称显示：After 未命名 → 匿名+编码（同码同人，跨屏可分辨）；Before 回退 wxid */
+function nameOf(c) {
+  if (mode === 'after') return c.name ? c.name : ANON_LABEL(c.alias)
+  return c.name || c.wxid
+}
+
+/* 设备显示名 */
+function deviceName(d, i) {
+  if (mode === 'after') return d.remark || DEVICE_FALLBACK[i] || '设备N'
+  return d.remark || d.openid
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
+}
+
+/* =========================================================
+   渲染：设备卡片
+   ========================================================= */
+function renderDevices() {
+  $('#deviceList').innerHTML = DEVICES.map((d, i) => `
+    <div class="dev-card ${i === 0 ? 'on' : ''}">
+      <span class="st ${d.online ? 'on-line' : 'off-line'}"></span>
+      <div class="dn ${!d.remark && mode === 'before' ? 'leaked' : ''}">${escapeHtml(deviceName(d, i))}</div>
+      <div class="ds">${d.online ? '在线' : '离线'} · 未读 ${d.unread}</div>
+    </div>`).join('')
+}
+
+/* =========================================================
+   渲染：会话 / 通讯录列表
+   ========================================================= */
+function listData() {
+  if (listTab === 'conv') return CONTACTS.filter((c) => c.convId)
+  /* 通讯录：字母升序、# 排最后（与后端 contacts 排序口径一致） */
+  return [...CONTACTS].sort((a, b) => {
+    if ((a.letter === '#') !== (b.letter === '#')) return a.letter === '#' ? 1 : -1
+    if (a.letter !== b.letter) return a.letter < b.letter ? -1 : 1
+    return (a.name || a.alias).localeCompare(b.name || b.alias)
+  })
+}
+function matchItem(c) {
+  const kw = keyword.trim().toLowerCase()
+  if (!kw) return true
+  const fields = mode === 'after'
+    ? [c.name]                                   /* After：只匹配名称 */
+    : [c.name, c.wxid]                           /* Before：wxid 也命中（泄漏） */
+  return fields.some((f) => f && String(f).toLowerCase().includes(kw))
+}
+
+function renderList() {
+  const rows = listData().filter(matchItem)
+  $('#listCount').textContent = rows.length
+  $('#listColTitle').textContent = listTab === 'conv' ? '会话' : '通讯录'
+
+  if (!rows.length) {
+    $('#listBody').innerHTML = `<div class="empty-mini">${
+      keyword
+        ? (mode === 'after'
+            ? `没有匹配结果<br><span style="font-size:11px">（改造后 wxid 不在前端，搜索仅匹配名称）</span>`
+            : '没有匹配结果')
+        : '暂无数据'
+    }</div>`
+    return
+  }
+
+  if (listTab === 'conv') {
+    let lastLetter = null
+    $('#listBody').innerHTML = rows.map((c) => {
+      const active = c.convId === currentConvId ? 'active' : ''
+      return `
+      <div class="conv-item ${active}" data-conv="${c.convId}">
+        ${avatarHtml(c)}
+        <div class="mid">
+          <div class="r1">
+            <span class="nm ${!c.name && mode === 'before' ? 'leaked' : ''}">${escapeHtml(nameOf(c))}</span>
+            <span class="tm">${c.lastAt || ''}</span>
+          </div>
+          <div class="r2">
+            <span class="pv">${escapeHtml(c.lastMsg || '（暂无消息）')}</span>
+            <span class="flags" style="display:flex;gap:4px;align-items:center">
+              ${c.pinned ? '<span class="pin-tag">置顶</span>' : ''}
+              ${c.unread ? `<span class="bdg">${c.unread}</span>` : ''}
+            </span>
+          </div>
+        </div>
+      </div>`
+    }).join('')
+  } else {
+    /* 通讯录：字母分组（mock 已按 letter 排好，只有 # 组演示未命名） */
+    $('#listBody').innerHTML = rows.map((c) => {
+      const letter = c.letter || '#'
+      const head = letter !== lastLetter ? `<div class="letter-head num">${letter}</div>` : ''
+      lastLetter = letter
+      const active = currentContactId === c.id ? 'active' : ''
+      /* 第二行预览：After 已命名显示匿名标识，未命名提示资料未同步；Before 显示 wxid（泄漏点） */
+      const preview = mode === 'after'
+        ? (c.name
+            ? `<span class="chip blue">匿名标识 ${c.alias}</span>`
+            : '<span style="font-size:11px;color:var(--c-text-sub)">资料未同步</span>')
+        : `<span class="num leaked">${c.wxid}</span>`
+      return head + `
+      <div class="conv-item ${active}" data-contact="${c.id}">
+        ${avatarHtml(c)}
+        <div class="mid">
+          <div class="r1"><span class="nm ${!c.name && mode === 'before' ? 'leaked' : ''}">${escapeHtml(nameOf(c))}</span></div>
+          <div class="r2">${preview}</div>
+        </div>
+      </div>`
+    }).join('')
+  }
+}
+
+/* =========================================================
+   渲染：聊天窗（群消息发言人脱敏 = 泄漏点 2/4）
+   ========================================================= */
+function senderOf(m) {
+  if (m.dir === 2) return { name: m.name, avatar: null, alias: '' }
+  if (m.sender) {
+    const mem = (GROUP_MEMBERS['88888888@chatroom'] || []).find((x) => x.wxid === m.sender) || {}
+    const c = { name: mem.nickname || null, avatar: !!mem.avatar, alias: mem.alias || 'X0X0X0', chatType: 2 }
+    return { name: nameOf(c), avatar: c.avatar, c }
+  }
+  const c = { name: m.name, avatar: m.avatar, alias: m.alias || '', chatType: 1 }
+  return { name: nameOf(c), avatar: c.avatar, c }
+}
+
+function renderChat() {
+  const conv = CONTACTS.find((c) => c.convId === currentConvId)
+  if (!conv) { $('#chatHead').innerHTML = '<span style="color:var(--c-text-sub);font-size:13px">← 选择左侧会话</span>'; return }
+
+  $('#chatHead').innerHTML = `
+    <span class="peer ${!conv.name && mode === 'before' ? 'leaked' : ''}">${escapeHtml(nameOf(conv))}</span>
+    <span class="chip gray">${conv.chatType === 2 ? '群聊' : '单聊'}</span>`
+
+  const msgs = MESSAGES[currentConvId] || []
+  if (!msgs.length) {
+    $('#chatMsgs').innerHTML = '<div class="detail-empty">暂无消息</div>'
+    return
+  }
+  $('#chatMsgs').innerHTML = `<div class="time-pill"><span class="num">${conv.lastAt || '今天'}</span></div>` +
+    msgs.map((m) => {
+      const s = senderOf(m)
+      const ava = m.dir === 2
+        ? `<span class="ava agent" style="background:var(--c-primary)">${(m.name || '客').slice(0, 2)}</span>`
+        : (s.c ? avatarHtml({ ...s.c, name: s.c.name }, '') : `<span class="ava anon" style="--anon-bg:#8ea3bf"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg></span>`)
+      const who = m.dir === 2 ? '' : `<div class="who ${!s.c?.name && mode === 'before' ? 'leaked' : ''}">${escapeHtml(s.name)}</div>`
+      return `
+      <div class="msg-row ${m.dir === 2 ? 'out' : 'in'}">
+        ${ava}
+        <div class="msg-body">
+          ${who}
+          <div class="bubble">${escapeHtml(m.text)}</div>
+        </div>
+      </div>`
+    }).join('')
+  $('#chatMsgs').scrollTop = 99999
+}
+
+/* =========================================================
+   渲染：资料卡（微信号行 → 匿名标识）
+   ========================================================= */
+function renderDetail() {
+  const conv = CONTACTS.find((c) => c.convId === currentConvId)
+  const contact = listTab === 'contacts' && currentContactId
+    ? CONTACTS.find((c) => c.id === currentContactId)
+    : conv
+  if (!contact) { $('#detailBody').innerHTML = '<div class="detail-empty">选择会话或联系人查看资料</div>'; return }
+
+  const subLine = mode === 'after'
+    ? (contact.name
+        ? `<span class="chip blue">匿名标识 ${contact.alias}</span>`
+        : '<span style="font-size:11px;color:var(--c-text-sub)">资料未同步 · 以匿名编码代称</span>')
+    : `<span class="num leaked">微信号：${contact.wxid}</span>`
+
+  $('#detailBody').innerHTML = `
+    <div class="dt-head">
+      ${avatarHtml(contact)}
+      <div>
+        <div class="dn ${!contact.name && mode === 'before' ? 'leaked' : ''}">${escapeHtml(nameOf(contact))}</div>
+        <div class="ds">${subLine}</div>
+      </div>
+    </div>
+    <div class="dt-sec">账号信息</div>
+    <div class="dt-kv">
+      <div class="row"><span class="k">类型</span><span>${contact.chatType === 2 ? '群聊' : '好友'}</span></div>
+      <div class="row"><span class="k">最近活跃</span><span class="num">${contact.lastAt || '—'}</span></div>
+      ${mode === 'after' ? `
+      <div class="row"><span class="k">备注</span><span style="color:var(--c-text-sub)">暂无备注</span></div>
+      <div class="row"><span class="k">标签</span><span style="color:var(--c-text-sub)">暂无标签</span></div>` : ''}
+    </div>
+    <div class="dt-actions"><button class="btn-ghost">发消息</button></div>`
+}
+
+/* =========================================================
+   渲染：接口出参对比抽屉
+   ========================================================= */
+function apiJsonOf() {
+  const conv = CONTACTS.find((c) => c.convId === currentConvId) || CONTACTS[0]
+  if (mode === 'before') {
+    return {
+      'GET /api/conversations（现状）': {
+        id: conv.convId, wxid: conv.wxid, chat_type: conv.chatType, name: conv.name,
+        avatar: conv.avatar ? 'https://wx.qlogo.cn/132' : null,
+        unread_count: conv.unread, last_msg: conv.lastMsg,
+      },
+      'GET /api/…/messages（现状·消息对象）': {
+        id: 88421, msg_type: 1, direction: 1,
+        sender_wxid: conv.chatType === 2 ? 'wxid_l2k9f8a733' : conv.wxid,
+        sender_name: conv.chatType === 2 ? 'wxid_l2k9f8a733' : (conv.name || 'wxid_l2k9f8a733'),
+        content: '在吗，上次那个报价还有效吗',
+      },
+      'GET /api/contacts（现状）': {
+        id: conv.id, wxid: conv.wxid, chat_type: conv.chatType,
+        name: conv.name || conv.wxid, avatar: null, letter: conv.letter,
+      },
+    }
+  }
+  return {
+    'GET /api/conversations（改造后）': {
+      id: conv.convId, chat_type: conv.chatType, name: conv.name,
+      avatar: conv.name && conv.avatar ? 'https://wx.qlogo.cn/132' : null,
+      alias: conv.alias, unread_count: conv.unread, last_msg: conv.lastMsg,
+    },
+    'GET /api/…/messages（改造后·消息对象）': {
+      id: 88421, msg_type: 1, direction: 1,
+      sender_name: '匿名 U7F3K2', sender_avatar: null,
+      content: '在吗，上次那个报价还有效吗',
+    },
+    'GET /api/contacts（改造后）': {
+      id: conv.id, conversation_id: conv.convId, chat_type: conv.chatType,
+      name: conv.name, avatar: null, alias: conv.alias, letter: conv.letter,
+    },
+  }
+}
+
+function renderJsonDrawer() {
+  const data = apiJsonOf()
+  $('#jsonBody').innerHTML = Object.entries(data).map(([k, v]) => `
+    <div class="jd-label num">${k}</div>
+    <pre>${escapeHtml(JSON.stringify(v, null, 2))}</pre>`).join('')
+}
+
+/* =========================================================
+   全量重渲染 + 事件绑定
+   ========================================================= */
+function renderAll() {
+  renderDevices()
+  renderList()
+  renderChat()
+  renderDetail()
+  renderJsonDrawer()
+  $('#modeTip').textContent = mode === 'after'
+    ? 'wxid 已从出参移除；未命名用户以「匿名 + 编码」代称（如 匿名 U7F3K2），同码同人、跨屏可分辨；搜索不再命中 wxid。'
+    : '现状对照：wxid 以明文出现在名称兜底、第二行预览、资料卡、未命名群成员与设备名上（红框标注）。'
+}
+
+/* 模式切换 */
+$('#modeSwitch').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-mode]')
+  if (!btn) return
+  mode = btn.dataset.mode
+  document.body.classList.toggle('mode-before', mode === 'before')
+  document.body.classList.toggle('mode-after', mode === 'after')
+  $('#modeSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn))
+  renderAll()
+})
+
+/* 会话 / 通讯录 Tab */
+$('#listTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-tab]')
+  if (!btn) return
+  listTab = btn.dataset.tab
+  currentContactId = null
+  $('#listTabs').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn))
+  renderList()
+  renderDetail()
+})
+
+/* 搜索 */
+$('#searchInput').addEventListener('input', (e) => {
+  keyword = e.target.value
+  renderList()
+})
+
+/* 列表点击（事件委托） */
+$('#listBody').addEventListener('click', (e) => {
+  const convEl = e.target.closest('[data-conv]')
+  const ctEl = e.target.closest('[data-contact]')
+  if (convEl) {
+    currentConvId = Number(convEl.dataset.conv)
+    renderList(); renderChat(); renderDetail(); renderJsonDrawer()
+  } else if (ctEl) {
+    currentContactId = Number(ctEl.dataset.contact)
+    const c = CONTACTS.find((x) => x.id === currentContactId)
+    if (c && c.convId) { currentConvId = c.convId; renderChat(); renderJsonDrawer() }
+    renderList(); renderDetail()
+  }
+})
+
+/* JSON 抽屉开关 */
+$('#jsonFab').addEventListener('click', () => $('#jsonDrawer').classList.toggle('open'))
+$('#jsonClose').addEventListener('click', () => $('#jsonDrawer').classList.remove('open'))
+
+renderAll()
+</script>
+</body>
+</html>

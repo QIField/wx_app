@@ -7,6 +7,8 @@
 import { computed, ref } from 'vue'
 import { getToken } from '../api'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml } from '../utils/message'
+import { displayNameOf } from '../utils/format'
+import AnonAvatar from './AnonAvatar.vue'
 
 const props = defineProps({
   msg: { type: Object, required: true }, // timeline 展开后的单条消息
@@ -21,14 +23,27 @@ function mediaUrl(m) {
   return `/api/messages/${m.id}/media?token=${encodeURIComponent(getToken())}`
 }
 
-/* 行头像：in=客户（群消息取发言人首字，单聊取会话名首字）；out=操作人姓名首字 */
+/* ---------- 头像三态：真实图 / 匿名图标（脱敏契约）/ 首字 ---------- */
+
+/* 入方向是否走匿名图标：单聊会话名未解析，或群发言人无头像（后端已随昵称一并置空） */
+function isAnon(m) {
+  if (m.direction === 2) return false
+  if (props.conv?.chat_type === 2) return !m.sender_avatar
+  return !props.conv?.name
+}
+/* 匿名头像编码：群消息用发言人 alias，单聊用会话 alias */
+function anonAlias(m) {
+  return props.conv?.chat_type === 2 ? (m.sender_alias || '') : (props.conv?.alias || '')
+}
+
+/* 首字兜底：in=客户（群消息取发言人名首字，单聊取会话名首字）；out=操作人姓名首字 */
 function avatarOf(m) {
   if (m.direction === 2) return (m.operator_name || '客').slice(0, 1)
-  const s = props.conv?.chat_type === 2 ? (m.sender_name || '客') : (props.conv?.name || props.conv?.wxid || '?')
+  const s = props.conv?.chat_type === 2 ? (m.sender_name || '客') : displayNameOf(props.conv) || '?'
   return s.slice(0, 1).toUpperCase()
 }
 
-/* 入方向消息的微信头像：单聊取会话头像，群聊取发言人头像（无则首字兜底） */
+/* 入方向消息的微信头像：单聊取会话头像，群聊取发言人头像（后端按名称解析与否控制下发） */
 function picOf(m) {
   if (m.direction === 2) return null
   if (props.conv?.chat_type === 2) return m.sender_avatar || null
@@ -37,7 +52,7 @@ function picOf(m) {
 function nameOf(m) {
   // 出方向显示操作人快照（谁发的这条消息），历史数据回退"客服"
   if (m.direction === 2) return m.operator_name || m.sender_name || '客服'
-  return props.conv?.chat_type === 2 ? (m.sender_name || '成员') : (props.conv?.name || props.conv?.wxid)
+  return props.conv?.chat_type === 2 ? (m.sender_name || '成员') : displayNameOf(props.conv)
 }
 
 /* 系统灰条判断：撤回标记 / 兜底系统行 / 残留系统 XML */
@@ -91,6 +106,7 @@ function onReEdit() {
 
   <div v-else class="msg" :class="msg.direction === 2 ? 'out' : 'in'">
     <img v-if="picOf(msg)" class="avatar img" :src="picOf(msg)" alt="" referrerpolicy="no-referrer" />
+    <AnonAvatar v-else-if="isAnon(msg)" :alias="anonAlias(msg)" class="avatar" />
     <span v-else class="avatar" :class="msg.direction === 2 ? 'agent' : 'client'">{{ avatarOf(msg) }}</span>
     <div class="body">
       <div class="name">{{ nameOf(msg) }}</div>

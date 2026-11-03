@@ -13,7 +13,10 @@ bp = Blueprint("devices", __name__)
 @bp.get("/api/devices")
 @require_role()
 def list_devices():
-    """当前账号的绑定设备：openid/备注/在线状态/未读数（绑定顺序）。"""
+    """当前账号的绑定设备：openid（路由键）/备注/在线状态/未读数（绑定顺序）。
+
+    脱敏契约：display_name 无备注时按绑定顺序回退「设备N」，不出现 openid 字样。
+    """
     devices = user_devices(g.current_user.id)
     if not devices:
         return jsonify(code=0, msg="success", data=[])
@@ -29,9 +32,13 @@ def list_devices():
         .all()
     )
     unread = {openid: int(total) for openid, total in rows}
-    return jsonify(code=0, msg="success", data=[
-        {**d.to_json(), "unread": unread.get(d.openid, 0)} for d in devices
-    ])
+    data = []
+    for i, d in enumerate(devices, start=1):
+        item = {**d.to_json(), "unread": unread.get(d.openid, 0)}
+        if not item["display_name"]:
+            item["display_name"] = f"设备{i}"
+        data.append(item)
+    return jsonify(code=0, msg="success", data=data)
 
 
 @bp.post("/api/devices/<openid>/online-check")

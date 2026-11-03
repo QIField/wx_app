@@ -2,11 +2,17 @@
 /** 通讯录面板：好友/群聊双 Tab + 实时搜索（本地过滤高亮）+ 字母分组列表。 */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useContactsStore } from '../stores/contacts'
-import { fmtTime, highlight } from '../utils/format'
+import { displayNameOf, fmtTime, highlight } from '../utils/format'
 import UnreadBadge from './UnreadBadge.vue'
+import AnonAvatar from './AnonAvatar.vue'
 
 const contacts = useContactsStore()
 const qInput = ref(null)
+
+/** 第二行预览（脱敏契约替代 wxid）：已命名 → 匿名标识；未命名 → 资料未同步提示。 */
+function previewOf(c) {
+  return c.name ? `匿名标识 ${c.alias}` : '资料未同步'
+}
 
 onMounted(() => contacts.load())
 
@@ -116,17 +122,18 @@ function isSelected(type, id) {
             @click="contacts.select('friend', c.id)"
           >
             <img v-if="c.avatar" class="avatar img" :src="c.avatar" alt="" referrerpolicy="no-referrer">
-            <span v-else class="avatar">{{ c.name.slice(0, 1) }}</span>
+            <AnonAvatar v-else-if="!c.name" :alias="c.alias" class="avatar" />
+            <span v-else class="avatar">{{ displayNameOf(c).slice(0, 1) }}</span>
             <div class="body">
               <div class="row1">
-                <span class="name" v-html="highlight(c.name, contacts.keyword)"></span>
+                <span class="name" v-html="highlight(displayNameOf(c), contacts.keyword)"></span>
                 <span class="flags">
                   <span v-if="c.pinned" class="pin">置顶</span>
                   <span class="time num">{{ fmtTime(c.last_msg_at) }}</span>
                 </span>
               </div>
               <div class="row2">
-                <span class="preview num" v-html="highlight(c.wxid, contacts.keyword)"></span>
+                <span class="preview num" v-html="highlight(previewOf(c), contacts.keyword)"></span>
                 <UnreadBadge :count="c.unread_count" />
               </div>
             </div>
@@ -145,17 +152,18 @@ function isSelected(type, id) {
           @click="contacts.select('group', c.id)"
         >
           <img v-if="c.avatar" class="avatar img" :src="c.avatar" alt="" referrerpolicy="no-referrer">
-          <span v-else class="avatar group">{{ c.name.slice(0, 1) }}</span>
+          <AnonAvatar v-else-if="!c.name" :alias="c.alias" class="avatar" />
+          <span v-else class="avatar group">{{ displayNameOf(c).slice(0, 1) }}</span>
           <div class="body">
             <div class="row1">
-              <span class="name" v-html="highlight(c.name, contacts.keyword)"></span>
+              <span class="name" v-html="highlight(displayNameOf(c), contacts.keyword)"></span>
               <span class="flags">
                 <span v-if="c.pinned" class="pin">置顶</span>
                 <span class="time num">{{ fmtTime(c.last_msg_at) }}</span>
               </span>
             </div>
             <div class="row2">
-              <span class="preview num" v-html="highlight(c.wxid, contacts.keyword)"></span>
+              <span class="preview num" v-html="highlight(previewOf(c), contacts.keyword)"></span>
               <UnreadBadge :count="c.unread_count" />
             </div>
           </div>

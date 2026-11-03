@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案说明 · wxid 全链路脱敏</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- App Shell：顶栏导航（两页逐字一致） -->
+  <header class="topbar">
+    <span class="logo"><span class="dot">匿</span>WX 工作台 · 原型</span>
+    <span class="divider"></span>
+    <span class="scheme">wxid 全链路脱敏方案</span>
+    <nav>
+      <a class="on" href="index.html">方案说明</a>
+      <a href="demo.html">效果演示</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+
+    <!-- 0. 方案一句话 -->
+    <section class="card">
+      <h2 class="sec-title" style="font-size:20px">wxid 不出后端：出参脱敏 + ID 通信 + 匿名展示</h2>
+      <p class="sec-desc" style="margin-bottom:10px">
+        核心思路：<b>前端看不到的东西才是真的看不到</b>。只靠前端替换显示藏不住 wxid
+        （F12 的 Network 面板一览无余），所以脱敏必须做在<b>后端出参层</b>：
+        所有 API / WebSocket 响应不再携带 wxid，前端与后端的通信改用业务 ID（会话号 / 联系人行号）；
+        未获取到名称的用户以「匿名 + 编码」代称（如 <b>匿名 U7F3K2</b>，同码同人、跨屏可分辨）+ 匿名头像。
+      </p>
+      <div class="legend">
+        <span><i style="background:var(--c-danger-soft)"></i>泄漏点（现状）</span>
+        <span><i style="background:var(--c-primary-soft)"></i>改造点（新增/修改）</span>
+        <span><i style="background:var(--c-ok-soft)"></i>保持不变</span>
+      </div>
+    </section>
+
+    <!-- 1. 现状泄漏点 -->
+    <section class="card">
+      <h3 class="sec-title"><span class="idx">1</span>现状：wxid 到达前端的 6 条路径</h3>
+      <p class="sec-desc">逐文件核对后端出参与前端渲染，全部需要在本次改造中封死。</p>
+      <table class="tbl">
+        <thead><tr><th style="width:40px">#</th><th>路径</th><th>位置</th><th>泄漏形态</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>会话列表 / 消息接口的 conversation 对象</td><td class="file">backend/api/conversations.py · _conv_json</td><td>响应字段 <code class="inline">wxid</code>；前端 <code class="inline">name || wxid</code> 兜底</td></tr>
+          <tr><td class="num">2</td><td>消息对象</td><td class="file">backend/api/conversations.py · _msg_json</td><td>响应字段 <code class="inline">sender_wxid</code>；群成员无昵称时 <code class="inline">sender_name</code> 回退为 wxid 原文（库内存的就是 wxid）</td></tr>
+          <tr><td class="num">3</td><td>通讯录列表</td><td class="file">backend/api/contacts.py · _item_json</td><td>响应字段 <code class="inline">wxid</code>；名字兜底 <code class="inline">name or wxid</code></td></tr>
+          <tr><td class="num">4</td><td>WebSocket 实时推送</td><td class="file">backend/sync/message_sync.py · broadcast_messages</td><td><code class="inline">sender_name</code> 无昵称时回退 wxid 原文</td></tr>
+          <tr><td class="num">5</td><td>设备卡片 / 顶栏账号切换</td><td class="file">backend/models/user_device.py · to_json</td><td>无备注时 <code class="inline">display_name</code> 回退 openid（即设备微信号）</td></tr>
+          <tr><td class="num">6</td><td>前端直接渲染</td><td class="file">frontend: ContactsPanel / ContactDetail / ConvList / ChatPanel / MessageRow / stores</td><td>「微信号：wxid_…」、通讯录第二行直接显示 wxid、搜索框按 wxid 命中、头像取 wxid 首字母</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 2. 数据流图 -->
+    <section class="card">
+      <h3 class="sec-title"><span class="idx">2</span>脱敏数据流（改造后）</h3>
+      <p class="sec-desc">wxid 只存在于数据库与后端内部逻辑；出参层是唯一出口，输出的是 ID + 匿名别名 + 已解析名称。</p>
+      <div class="flow-wrap">
+        <svg viewBox="0 0 960 330" width="960" height="330" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9fb2cc"/></marker>
+            <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#e0483e"/></marker>
+          </defs>
+
+          <!-- 第一层：DB -->
+          <rect class="fb-green" x="20" y="40" width="150" height="86" rx="10"/>
+          <text class="ft" x="95" y="66" text-anchor="middle" font-weight="bold">数据库（不变）</text>
+          <text class="fts" x="95" y="88" text-anchor="middle">contact / conversation</text>
+          <text class="fts" x="95" y="104" text-anchor="middle">message / group_member</text>
+          <text class="fts" x="95" y="120" text-anchor="middle">继续存 wxid 原文</text>
+
+          <!-- 第二层：脱敏序列化层 -->
+          <rect class="fb-blue" x="230" y="26" width="240" height="114" rx="10"/>
+          <text class="ft" x="350" y="52" text-anchor="middle" font-weight="bold">出参脱敏序列化层（新增）</text>
+          <text class="fts" x="350" y="76" text-anchor="middle">shared/serialize.py · mask_contact()</text>
+          <text class="fts" x="350" y="94" text-anchor="middle">① 丢弃 wxid / sender_wxid 字段</text>
+          <text class="fts" x="350" y="110" text-anchor="middle">② 名称未解析 → name=None</text>
+          <text class="fts" x="350" y="126" text-anchor="middle">③ avatar 仅名称已解析才下发</text>
+
+          <!-- 第三层：JSON -->
+          <rect class="fb-blue" x="530" y="40" width="180" height="86" rx="10"/>
+          <text class="ft" x="620" y="66" text-anchor="middle" font-weight="bold">API / WS 响应</text>
+          <text class="fts" x="620" y="88" text-anchor="middle">{ id, alias, name, avatar }</text>
+          <text class="fts" x="620" y="106" text-anchor="middle">无任何 wxid 字段</text>
+
+          <!-- 第四层：前端 -->
+          <rect class="fb-blue" x="770" y="26" width="170" height="114" rx="10"/>
+          <text class="ft" x="855" y="52" text-anchor="middle" font-weight="bold">前端渲染</text>
+          <text class="fts" x="855" y="76" text-anchor="middle">name → 名称 / 「匿名+编码」</text>
+          <text class="fts" x="855" y="94" text-anchor="middle">avatar=null → 匿名人形头像</text>
+          <text class="fts" x="855" y="112" text-anchor="middle">（色相由 alias 决定）</text>
+
+          <path class="ln" d="M170 83 L226 83"/>
+          <path class="ln" d="M470 83 L526 83"/>
+          <path class="ln" d="M710 83 L766 83"/>
+
+          <!-- 上行：泄漏封堵示意 -->
+          <rect class="fb-red" x="230" y="220" width="240" height="66" rx="10"/>
+          <text class="ft" x="350" y="246" text-anchor="middle" fill="var(--c-danger)" font-weight="bold">封堵前（现状）</text>
+          <text class="fts" x="350" y="266" text-anchor="middle">_conv_json 直接带 wxid 字段</text>
+          <text class="fts" x="350" y="280" text-anchor="middle">sender_name 回退 wxid 原文 → F12 可见</text>
+          <path class="ln-red" d="M350 143 L350 216"/>
+          <text class="lt" x="360" y="186">出参明文泄漏 ✕</text>
+
+          <!-- 下行：请求方向 -->
+          <rect class="fb" x="530" y="220" width="180" height="66" rx="10"/>
+          <text class="ft" x="620" y="246" text-anchor="middle" font-weight="bold">请求方向（改造）</text>
+          <text class="fts" x="620" y="266" text-anchor="middle">发消息 / 查档案只带 id、contact_id</text>
+          <text class="fts" x="620" y="280" text-anchor="middle">wxid 不再出现在请求参数</text>
+          <path class="ln" d="M770 120 C 720 180, 660 190, 620 216"/>
+          <path class="ln" d="M530 253 L 474 253"/>
+          <text class="lts" x="452" y="272">后端内部按 id 反查 wxid</text>
+
+          <!-- 管理端例外 -->
+          <rect class="fb" x="20" y="220" width="150" height="66" rx="10"/>
+          <text class="ft" x="95" y="246" text-anchor="middle" font-weight="bold">管理端（决策点）</text>
+          <text class="fts" x="95" y="266" text-anchor="middle">账号管理·设备绑定页</text>
+          <text class="fts" x="95" y="280" text-anchor="middle">建议保留 openid 输入</text>
+        </svg>
+      </div>
+    </section>
+
+    <!-- 3. 出参契约对照 -->
+    <section class="card">
+      <h3 class="sec-title"><span class="idx">3</span>出参契约对照（Before → After）</h3>
+      <p class="sec-desc">以会话/消息/通讯录三类核心响应为例；红行为删除字段，绿行为新增/变更。</p>
+<pre><span class="cm">// GET /api/conversations · 单个会话对象</span>
+{
+  "id": 1024,                      <span class="cm">// 会话号（前端主键，不变）</span>
+<span class="del">- "wxid": "wxid_l2k9f8a733",     // ✕ 删除</span>
+  "chat_type": 1,
+  "name": null,                    <span class="add">// 未解析 → null（前端拼显示名「匿名 U7F3K2」）</span>
+  "avatar": null,                  <span class="add">// 名称未解析 → 一律 null（匿名头像）</span>
+<span class="add">+ "alias": "U7F3K2",              // 新增：wxid 派生的不可逆短码（展示/区分用）</span>
+  "unread_count": 2, "pinned": 0,
+  "last_msg": "…", "last_msg_at": "2026-11-03 14:22:10"
+}
+
+<span class="cm">// GET /api/conversations/{id}/messages · 单条消息对象</span>
+{
+  "id": 88421, "msg_type": 1, "direction": 1,
+<span class="del">- "sender_wxid": "wxid_l2k9f8a733",  // ✕ 删除</span>
+  "sender_name": "匿名 U7F3K2",       <span class="add">// 昵称缺失时不再回退 wxid 原文，改回匿名编码</span>
+  "sender_avatar": null,              <span class="add">// 该成员无昵称 → 头像一并匿名</span>
+  "content": "…", "create_time": "…", "status": 1
+}
+
+<span class="cm">// GET /api/contacts?type=friends · 单个联系人</span>
+{
+  "id": 77,                        <span class="add">// 通讯录行号（代替 wxid 参与后续接口）</span>
+  "conversation_id": 1024,
+<span class="del">- "wxid": "wxid_l2k9f8a733",     // ✕ 删除</span>
+  "chat_type": 1,
+  "name": null,                    <span class="add">// 未解析 → null</span>
+  "avatar": null,
+<span class="add">+ "alias": "U7F3K2",</span>
+  "letter": "#", "unread_count": 0, "last_msg": "…", …
+}</pre>
+      <div class="note info">
+        <span class="ic">规则</span>
+        <span>
+          <b>名称</b>：contact.name / 群成员 nickname 缺失、或仍是 wxid 原文时 → 出参 name=null，前端统一拼显示名「匿名 + alias 编码」（如 匿名 U7F3K2）——同码同人、不同人编码互异，多未命名成员一眼可分。
+          <b>头像</b>：仅名称已解析的用户下发真实 avatar；未解析用户 avatar=null，前端画「人形图标 + 稳定色相」匿名头像（同一人颜色恒定，不同人不同色，群聊可区分）。
+          <b>alias</b>：HMAC-SHA256(wxid, 服务端密钥) 截断 6 位，不可逆、跨会话稳定；既是未命名用户的显示名，也是所有联系人的展示标识，不参与任何写接口。
+        </span>
+      </div>
+    </section>
+
+    <!-- 4. 接口签名变更 -->
+    <section class="card">
+      <h3 class="sec-title"><span class="idx">4</span>接口签名变更（通信不再用 wxid）</h3>
+      <table class="tbl">
+        <thead><tr><th>接口</th><th>现状</th><th>改造后</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>发起会话</b><br><span class="num">POST /api/conversations</span></td>
+            <td>body 带 <code class="inline">wxid</code></td>
+            <td>body 改为 <code class="inline">{ contact_id, chat_type }</code>；后端按 contact 行反查 wxid 再建会话</td>
+          </tr>
+          <tr>
+            <td><b>联系人档案</b><br><span class="num">GET/PUT /api/contacts/&lt;wxid&gt;/profile</span></td>
+            <td>路径参数是 wxid</td>
+            <td>改为 <code class="inline">/api/contacts/&lt;contact_id&gt;/profile</code>；ContactProfile 内部仍按 wxid 存取（不动表结构）</td>
+          </tr>
+          <tr>
+            <td><b>WebSocket new_message</b><br><span class="num">backend/sync/message_sync.py</span></td>
+            <td>sender_name 回退 wxid 原文</td>
+            <td>复用同一脱敏函数：昵称缺失 → 「匿名 + 编码」，sender_wxid 不下发</td>
+          </tr>
+          <tr>
+            <td><b>设备卡片</b><br><span class="num">GET /api/devices</span></td>
+            <td>display_name 无备注回退 openid</td>
+            <td>回退改为「设备1 / 设备2 …」（按绑定顺序）；工作台不再出现 openid 字样</td>
+          </tr>
+          <tr>
+            <td><b>搜索匹配</b><br><span class="num">前端 stores/contacts.js、ConvList.vue</span></td>
+            <td>关键词命中 wxid</td>
+            <td>仅匹配 名称 / 备注（wxid 已不可见，自然不再参与匹配）</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 5. 匿名展示规则 -->
+    <section class="card">
+      <h3 class="sec-title"><span class="idx">5</span>匿名展示规则（前端三件套）</h3>
+      <table class="tbl">
+        <thead><tr><th style="width:110px">要素</th><th>规则</th><th>实现</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>名称</b></td>
+            <td>name 为 null / 空 → 显示「匿名 + 编码」（匿名 U7F3K2）；群消息发言人同理，不同成员编码互异、天然可分辨</td>
+            <td>统一收敛到 <code class="inline">displayNameOf(item)</code> 工具函数，替换现有 5 处 <code class="inline">name || wxid</code> 兜底</td>
+          </tr>
+          <tr>
+            <td><b>头像</b></td>
+            <td>未解析用户：灰色系人形图标，色相 = hash(alias) 决定，同人恒定；已解析但无图：沿用名字首字色块</td>
+            <td>新增 <code class="inline">AnonAvatar.vue</code>（或 utils 内 hsl 计算）；群聊中多个未命名成员颜色互异、可区分</td>
+          </tr>
+          <tr>
+            <td><b>匿名标识</b></td>
+            <td>联系人详情「微信号：wxid」一行改为「匿名标识：U7F3K2」；通讯录第二行 wxid 预览改显示 匿名标识（已命名）/「资料未同步」提示（未命名）</td>
+            <td>alias 由后端下发，前端零计算（避免前端拿到 wxid 才能算哈希）</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note warn">
+        <span class="ic">边界</span>
+        <span>消息正文 / last_msg 里若被人贴了 wxid 文本，属于聊天内容本身，不做正则脱敏（会破坏业务语义），方案不覆盖；管理端「账号管理-设备绑定」仍需输入 openid 才能绑定设备，见决策点。</span>
+      </div>
+    </section>
+
+    <!-- 6. 决策点 -->
+    <section class="card">
+      <h3 class="sec-title"><span class="idx">6</span>需要拍板的决策点</h3>
+      <table class="tbl">
+        <thead><tr><th style="width:60px">编号</th><th>问题</th><th style="width:340px">方案建议</th></tr></thead>
+        <tbody>
+          <tr><td class="num">D1</td><td>管理端（developer/admin 角色）的账号管理页是否也隐藏 openid？</td><td>建议保留：绑定设备必须录入 openid，且仅管理角色可见；工作台普通用户全量脱敏</td></tr>
+          <tr><td class="num">D2</td><td>未命名用户是否允许看真实头像？</td><td>本方案按「名称未解析 → 头像一并匿名」处理（名称和头像来源于同一批资料收割，未解析通常意味着头像同样缺失）</td></tr>
+          <tr><td class="num">D3</td><td>alias 是否需要参与搜索？</td><td>默认不参与（alias 是展示辅助，不是身份）；如运营需要按匿名标识找人，可后补后端参数</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 7. 实施清单 -->
+    <section class="card">
+      <h3 class="sec-title"><span class="idx">7</span>实施清单（确认方案后执行）</h3>
+      <table class="tbl">
+        <thead><tr><th style="width:230px">文件</th><th>改动</th></tr></thead>
+        <tbody>
+          <tr><td class="file">backend/shared/serialize.py（新增）</td><td>mask_contact / mask_message 统一脱敏出参；alias 生成（HMAC + 密钥来自 env）</td></tr>
+          <tr><td class="file">backend/api/conversations.py</td><td>_conv_json / _msg_json 换用脱敏层；open_conversation 改收 contact_id；消息 sender_name 兜底改「匿名 + 编码」</td></tr>
+          <tr><td class="file">backend/api/contacts.py</td><td>_item_json 换用脱敏层；profile 接口路径 wxid → contact_id</td></tr>
+          <tr><td class="file">backend/sync/message_sync.py</td><td>WS 广播 sender_name 兜底同规则</td></tr>
+          <tr><td class="file">backend/models/user_device.py</td><td>display_name 无备注回退「设备N」</td></tr>
+          <tr><td class="file">frontend/src/utils/format.js（或新 anon.js）</td><td>displayNameOf / 匿名头像色相计算</td></tr>
+          <tr><td class="file">frontend/src/api/index.js</td><td>openConversation / fetchContactProfile / saveContactProfile 改传 id</td></tr>
+          <tr><td class="file">frontend/src/components/*（5 个）</td><td>ConvList / ContactsPanel / ContactDetail / ChatPanel / MessageRow：去 wxid 兜底、匿名头像组件、微信号行改匿名标识、搜索去 wxid</td></tr>
+          <tr><td class="file">backend/tests/*</td><td>更新 test_api_conversations / test_api_contacts / test_message_sync；新增「出参不含 wxid」断言</td></tr>
+        </tbody>
+      </table>
+      <p class="sec-desc" style="margin-top:12px">
+        兼容性：contact / conversation / message 表结构不动，纯出参与接口签名变更；
+        前后端需同一批次上线（接口入参 wxid → contact_id 不做双兼容，避免残留明文通道）。
+      </p>
+    </section>
+
+  </main>
+</body>
+</html>
