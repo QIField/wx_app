@@ -5,6 +5,7 @@ import { ref } from 'vue'
 import { apiLogin, setToken } from '../api'
 import BrandConstellation from '../components/BrandConstellation.vue'
 import BrandLogo from '../components/BrandLogo.vue'
+import SlideCaptcha from '../components/SlideCaptcha.vue'
 
 const emit = defineEmits(['logged-in'])
 
@@ -14,6 +15,8 @@ const showPwd = ref(false)
 const errMsg = ref('')
 const shake = ref(false)
 const loading = ref(false)
+const captchaOk = ref(false)
+const captchaRef = ref(null)
 
 function setErr(msg) {
   errMsg.value = msg
@@ -25,6 +28,7 @@ async function submit() {
   const u = username.value.trim()
   const p = password.value
   if (!u || !p) { setErr('请输入账号和密码'); return }
+  if (!captchaOk.value) { setErr('请先完成拖动验证'); return }
 
   errMsg.value = ''
   loading.value = true
@@ -33,7 +37,11 @@ async function submit() {
     setToken(data.token)
     emit('logged-in', data.user)
   } catch (ex) {
-    setErr(ex.message || '登录失败，请重试')
+    const msg = ex.message || ''
+    setErr(msg === '账号或密码错误' ? '账号或密码错误，请重新尝试' : (msg || '登录失败，请重试'))
+    // 登录失败即作废本次验证，重开一局拼图
+    captchaOk.value = false
+    captchaRef.value?.reset()
   } finally {
     loading.value = false
   }
@@ -87,6 +95,11 @@ async function submit() {
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
               </button>
             </div>
+          </div>
+
+          <div class="field">
+            <label>安全验证</label>
+            <SlideCaptcha ref="captchaRef" @verified="captchaOk = true" />
           </div>
 
           <div class="form-err" :class="{ show: errMsg }">
