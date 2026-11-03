@@ -1,6 +1,6 @@
 <script setup>
 /** 三栏工作台：深色顶栏 + 微信式图标侧栏（会话/通讯录）+ 列表 / 聊天窗 / 报价处理台。 */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { useContactsStore } from '../stores/contacts'
@@ -53,7 +53,9 @@ onMounted(async () => {
   await chat.loadDevices(true)      // 默认进第一个绑定的聊天账号
   await chat.loadConversations()
   chat.connect()
+  chat.startDevicePolling()         // 顶栏卡片轮询重拉：展示后端在线状态回写结果
 })
+onUnmounted(() => chat.stopDevicePolling())
 
 /* 切换聊天账号 → 通讯录跟着换设备重拉 */
 watch(() => chat.activeOpenid, () => { contacts.load() })
@@ -164,6 +166,7 @@ watch(() => chat.crossMsg, (m) => {
   background: linear-gradient(92deg, #0e1c3d 0%, var(--c-navy) 34%, var(--c-navy-2) 72%, #234a92 100%);
   color: #fff;
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12); /* 底缘一道高光线 */
+  overflow: hidden; /* 光晕层刻意超出发光（inset 为负），必须裁回顶栏内，否则盖住下方会话列表 */
 }
 /* 光晕层 A：品牌蓝 + 青（向右漂） */
 .topbar::before,

@@ -15,7 +15,7 @@ const chat = useChatStore()
       :title="`${d.display_name}（${d.online === 1 ? '在线' : d.online === 0 ? '离线' : '检测中'}）`"
       @click="chat.clickDevice(d.openid)"
     >
-      <span class="dev-dot" :class="{ on: d.online === 1 }"></span>
+      <span class="dev-dot" :class="{ on: d.online === 1, off: d.online === 0 }"></span>
       <span class="dev-name">{{ d.display_name }}</span>
       <span v-if="d.unread" class="dev-unread num">{{ d.unread > 99 ? '99+' : d.unread }}</span>
     </button>
@@ -28,6 +28,10 @@ const chat = useChatStore()
 .device-cards {
   display: flex; align-items: center; gap: 7px;
   min-width: 0; overflow-x: auto; scrollbar-width: none;
+  /* 滚动容器会连同纵向一起裁剪：内边距留出悬停上浮(1px)与未读角标(-7px)的溢出空间，
+     负外边距抵消内边距，内容位置不变 */
+  padding: 9px 10px;
+  margin: -9px -10px;
 }
 .device-cards::-webkit-scrollbar { display: none; }
 .dev-card {
@@ -42,6 +46,7 @@ const chat = useChatStore()
   color: rgba(255, 255, 255, 0.88);
   font-size: 12px; line-height: 1;
   cursor: pointer;
+  user-select: none;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s, background 0.18s;
@@ -62,9 +67,10 @@ const chat = useChatStore()
     0 4px 14px rgba(29, 93, 228, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
+/* 圆点只反映设备在线状态（-1未知灰 1在线绿 0离线红），选中态由卡片渐变底色表达 */
 .dev-dot { width: 6px; height: 6px; border-radius: 50%; background: #8b93a3; flex-shrink: 0; transition: background 0.18s, box-shadow 0.18s; }
-.dev-card.on .dev-dot { background: #a9f0cd; box-shadow: 0 0 6px rgba(83, 240, 165, 0.8); }
 .dev-dot.on { background: #35d07f; box-shadow: 0 0 5px #35d07f; }
+.dev-dot.off { background: #ff7d84; box-shadow: 0 0 5px rgba(229, 72, 77, 0.7); }
 .dev-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 未读徽标：红渐变 + 顶栏底色描边（像嵌在卡上）+ 呼吸脉冲 */
 .dev-unread {

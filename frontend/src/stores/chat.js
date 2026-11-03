@@ -21,6 +21,9 @@ function summaryOf(d) {
   return d.content || ''
 }
 
+/** 设备卡片在线状态轮询定时器（模块级：Pinia store 单例共享）。 */
+let devPollTimer = null
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     conversations: [],   // 当前设备下的左栏列表
@@ -47,6 +50,16 @@ export const useChatStore = defineStore('chat', {
       if ((selectFirst || !this.activeOpenid) && this.devices.length) {
         this.activeOpenid = this.devices[0].openid
       }
+    },
+
+    /** 设备卡片轮询：后端定时任务回写 online（默认 10 分钟一轮），前端定时重拉展示最新结果。 */
+    startDevicePolling(intervalMs = 60000) {
+      if (devPollTimer) return
+      devPollTimer = setInterval(() => { this.loadDevices() }, intervalMs)
+    },
+
+    stopDevicePolling() {
+      if (devPollTimer) { clearInterval(devPollTimer); devPollTimer = null }
     },
 
     /** 点击账号卡片：先即时查一次在线状态刷新圆点；非当前卡片则切换会话视图。 */
