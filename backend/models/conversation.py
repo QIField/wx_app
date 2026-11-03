@@ -19,6 +19,7 @@ class Conversation(db.Model, SoftDeleteMixin):
     avatar = db.Column(db.String(512), comment="微信头像URL（群头像/好友头像）")
     unread_count = db.Column(db.Integer, nullable=False, default=0, comment="未读数")
     pinned = db.Column(db.SmallInteger, nullable=False, default=0, comment="是否置顶 0否 1是")
+    muted = db.Column(db.SmallInteger, nullable=False, default=0, comment="是否消息免打扰 0否 1是")
     last_msg = db.Column(db.Text, comment="最后一条消息摘要（冗余）")
     last_msg_at = db.Column(db.DateTime, comment="最后一条消息时间")
     created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.now())

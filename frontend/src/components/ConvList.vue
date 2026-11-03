@@ -1,22 +1,75 @@
 <script setup>
-/** 左栏：会话列表（微信风格搜索框 + 紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。 */
-import { computed, ref } from 'vue'
+/** 左栏：会话列表（微信风格搜索框 + 紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。
+ *  右键菜单：置顶⇄取消置顶 / 标为未读⇄已读 / 消息免打扰；置顶仅背景加深不显示文字。 */
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
-import { fmtTime, highlight, matchKeyword } from '../utils/format'
+import { displayNameOf, fmtTime, highlight, matchKeyword } from '../utils/format'
 import UnreadBadge from './UnreadBadge.vue'
+import AnonAvatar from './AnonAvatar.vue'
 
 const chat = useChatStore()
 
 const keyword = ref('')
 
-/** 本地过滤：命中会话名或 wxid 才显示（微信同款即时搜索）。 */
+/** 本地过滤：命中展示名（含「匿名 编码」）才显示（wxid 已不在前端数据里）。 */
 const filtered = computed(() =>
-  chat.conversations.filter((c) => matchKeyword([c.name, c.wxid], keyword.value)))
+  chat.conversations.filter((c) => matchKeyword([displayNameOf(c)], keyword.value)))
 
-function first(c) {
-  const s = c.name || c.wxid || '?'
-  return s.slice(0, 1).toUpperCase()
+/* ---------- 右键菜单 ---------- */
+const menu = ref(null) // { conv, x, y }；null 即收起
+const menuEl = ref(null)
+
+function onMenu(e, conv) {
+  menu.value = { conv, x: e.clientX, y: e.clientY }
 }
+function closeMenu() {
+  menu.value = null
+}
+
+/** 打开后按实际尺寸贴边翻转（右侧/底部放不下时往回收）。 */
+watch(menu, async (m) => {
+  if (!m) return
+  await nextTick()
+  const el = menuEl.value
+  if (!el) return
+  const w = el.offsetWidth
+  const h = el.offsetHeight
+  el.style.left = Math.max(8, m.x + w > window.innerWidth - 8 ? window.innerWidth - w - 8 : m.x) + 'px'
+  el.style.top = Math.max(8, m.y + h > window.innerHeight - 8 ? window.innerHeight - h - 8 : m.y) + 'px'
+})
+
+/** 菜单动作统一执行：乐观更新 → 落库（store 内失败自动回滚），这里只管提示。 */
+async function apply(patch) {
+  const conv = menu.value?.conv
+  closeMenu()
+  if (!conv) return
+  try {
+    await chat.patchConversation(conv, patch)
+  } catch (e) {
+    ElMessage.error(e.message || '操作失败')
+  }
+}
+
+/* 收起时机：点击菜单外任意处 / Esc / 列表滚动 / 窗口尺寸变化 / 失焦 */
+const onDocClick = (e) => {
+  if (menuEl.value && !menuEl.value.contains(e.target)) closeMenu()
+}
+const onKeydown = (e) => {
+  if (e.key === 'Escape') closeMenu()
+}
+window.addEventListener('click', onDocClick)
+window.addEventListener('keydown', onKeydown)
+window.addEventListener('scroll', closeMenu, true)
+window.addEventListener('resize', closeMenu)
+window.addEventListener('blur', closeMenu)
+onBeforeUnmount(() => {
+  window.removeEventListener('click', onDocClick)
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('scroll', closeMenu, true)
+  window.removeEventListener('resize', closeMenu)
+  window.removeEventListener('blur', closeMenu)
+})
 </script>
 
 <template>
@@ -36,23 +89,28 @@ function first(c) {
         v-for="(c, i) in filtered"
         :key="c.id"
         class="item"
-        :class="{ active: c.id === chat.currentId }"
+        :class="{ active: c.id === chat.currentId, pinned: c.pinned }"
         :style="{ animationDelay: i * 35 + 'ms' }"
         @click="chat.selectConversation(c.id)"
+        @contextmenu.prevent="onMenu($event, c)"
       >
         <img v-if="c.avatar" class="avatar img" :src="c.avatar" alt="" referrerpolicy="no-referrer" />
-        <span v-else class="avatar" :class="{ group: c.chat_type === 2 }">{{ first(c) }}</span>
+        <AnonAvatar v-else-if="!c.name" :alias="c.alias" class="avatar" />
+        <span v-else class="avatar" :class="{ group: c.chat_type === 2 }">{{ displayNameOf(c).slice(0, 1).toUpperCase() }}</span>
         <div class="body">
           <div class="row1">
             <!-- 命中关键词高亮（v-html 内容来自本地数据 + highlight 已转义） -->
-            <span class="name" v-html="highlight(c.name || c.wxid || '', keyword)"></span>
+            <span class="name" v-html="highlight(displayNameOf(c), keyword)"></span>
             <span class="time num">{{ fmtTime(c.last_msg_at) }}</span>
           </div>
           <div class="row2">
             <span class="preview">{{ c.last_msg || '（暂无消息）' }}</span>
             <span class="flags">
-              <span v-if="c.pinned" class="pin">置顶</span>
-              <UnreadBadge :count="c.unread_count" />
+              <!-- 免打扰：摘要旁铃铛斜杠；未读数字退化为纯红点（微信同款） -->
+              <span v-if="c.muted" class="mute" title="消息免打扰">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              </span>
+              <UnreadBadge :count="c.unread_count" :dot="!!c.muted" />
             </span>
           </div>
         </div>
@@ -64,6 +122,28 @@ function first(c) {
         :image-size="60"
       />
     </el-scrollbar>
+
+    <!-- 会话右键菜单：文字随状态切换，免打扰为勾选态（微信 PC 同构） -->
+    <Teleport to="body">
+      <div v-if="menu" ref="menuEl" class="ctx-menu" role="menu" aria-label="会话操作">
+        <button class="ctx-item" role="menuitem" @click="apply({ pinned: menu.conv.pinned ? 0 : 1 })">
+          {{ menu.conv.pinned ? '取消置顶' : '置顶' }}
+        </button>
+        <button class="ctx-item" role="menuitem" @click="apply({ read: menu.conv.unread_count > 0 })">
+          {{ menu.conv.unread_count > 0 ? '标为已读' : '标为未读' }}
+        </button>
+        <div class="ctx-sep"></div>
+        <button
+          class="ctx-item"
+          role="menuitemradio"
+          :aria-checked="!!menu.conv.muted"
+          @click="apply({ muted: menu.conv.muted ? 0 : 1 })"
+        >
+          <span>消息免打扰</span>
+          <svg v-if="menu.conv.muted" class="check" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -126,7 +206,12 @@ function first(c) {
   transition: transform 0.18s;
 }
 .item:hover { background: #f6f8fb; }
-.item.active { background: var(--c-primary-soft); }
+/* 置顶会话：背景加深即可（不显示"置顶"文字），选中态优先 */
+.item.pinned { background: #e9edf4; }
+.item.pinned:hover { background: #e2e8f2; }
+.item.active,
+.item.active:hover,
+.item.active.pinned { background: var(--c-primary-soft); }
 .item.active::before { transform: scaleY(1); }
 
 .avatar {
@@ -137,7 +222,7 @@ function first(c) {
   display: flex; align-items: center; justify-content: center;
 }
 .avatar.group { background: var(--c-ok); }
-.avatar.img { object-fit: cover; background: var(--c-surface); }
+.avatar.img { object-fit: cover; background: var(--c-panel); }
 
 .body { flex: 1; min-width: 0; }
 .row1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -152,9 +237,34 @@ function first(c) {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .flags { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
-.pin {
-  font-size: 10px; color: var(--c-primary);
-  border: 1px solid var(--c-primary);
-  border-radius: 3px; padding: 0 3px; line-height: 14px;
+.mute { display: inline-flex; color: var(--c-text-sub); }
+
+/* 右键菜单：白底细边框 + 浮起阴影，贴微信 PC 观感 */
+.ctx-menu {
+  position: fixed;
+  min-width: 148px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 6px 24px rgba(20, 38, 77, 0.16);
+  z-index: 2100;
+  animation: ctx-pop 0.12s ease both;
 }
+@keyframes ctx-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.ctx-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; padding: 7px 10px;
+  border: none; border-radius: var(--r-sm);
+  background: none; color: var(--c-text);
+  font-size: 13px; text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ctx-item:hover { background: var(--c-primary-soft); color: var(--c-primary-deep); }
+.ctx-item .check { color: var(--c-ok); flex-shrink: 0; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--c-border); }
 </style>

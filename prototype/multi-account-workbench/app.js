@@ -2,7 +2,7 @@
 (() => {
   const S = window.Store, V = window.V, API = window.API, MOCK = window.MOCK;
   const $ = (sel, root = document) => root.querySelector(sel);
-  const viewEl = $('#view'), barEl = $('#topbar-right'), toastEl = $('#toast-zone'), drawerEl = $('#drawer-root');
+  const viewEl = $('#view'), barEl = $('#topbar-right'), toastEl = $('#toast-zone'), drawerEl = $('#drawer-root'), ctxEl = $('#ctx-root');
 
   let currentView = 'login'; // login | workbench | logs
 
@@ -152,6 +152,34 @@
     if (zone) zone.innerHTML = kw ? V.searchResults(S, kw) : V.convResults(S);
   });
 
+  /* ---------- v6 会话右键菜单：置顶 / 标为未读·已读 / 消息免打扰 ---------- */
+  function openConvMenu(c, x, y) {
+    ctxEl.innerHTML = V.convMenu(c, x, y);
+    const menu = ctxEl.firstElementChild; if (!menu) return;
+    /* 贴边翻转：右侧/底部放不下时往回收 */
+    const W = menu.offsetWidth, H = menu.offsetHeight;
+    const px = x + W > window.innerWidth - 8 ? window.innerWidth - W - 8 : x;
+    const py = y + H > window.innerHeight - 8 ? window.innerHeight - H - 8 : y;
+    menu.style.left = Math.max(8, px) + 'px';
+    menu.style.top = Math.max(8, py) + 'px';
+  }
+  function closeConvMenu() { if (ctxEl.innerHTML) ctxEl.innerHTML = ''; }
+
+  /* 右键：命中会话条目弹菜单（阻止系统菜单）；右键空白处收起菜单且不拦默认 */
+  document.addEventListener('contextmenu', (e) => {
+    const item = e.target.closest('.conv-item');
+    if (!item || currentView !== 'workbench') { closeConvMenu(); return; }
+    e.preventDefault();
+    const conv = S.conv(Number(item.dataset.id));
+    if (conv) openConvMenu(conv, e.clientX, e.clientY);
+  });
+
+  /* 菜单收起时机：点击任意处（ctx-* 动作先于本监听执行）/ 滚动 / 失焦 / 改变窗口 */
+  document.addEventListener('click', closeConvMenu);
+  document.addEventListener('scroll', closeConvMenu, true);
+  window.addEventListener('resize', closeConvMenu);
+  window.addEventListener('blur', closeConvMenu);
+
   /* ---------- 抽屉 ---------- */
   async function openLogsDrawer() {
     S.state.logs = await API.listSendLogs();
@@ -184,6 +212,19 @@
     else if (act === 'search-clear') { S.state.searchQuery = ''; refreshChatParts(); }
     else if (act === 'search-open-conv') { S.state.searchQuery = ''; openConv(Number(t.dataset.id)); }
     else if (act === 'search-open-contact') { hintToast(`「${t.dataset.name}」暂无会话（演示环境）`); }
+    /* v6 右键菜单动作：本地乐观更新 → stub 落库 → 刷新列表（置顶优先重排） */
+    else if (act === 'ctx-pin') {
+      const c = S.conv(Number(t.dataset.id));
+      if (c) { c.pinned = c.pinned ? 0 : 1; API.updateConversation(c.id, { pinned: c.pinned }); refreshChatParts(); }
+    }
+    else if (act === 'ctx-unread') {
+      const c = S.conv(Number(t.dataset.id));
+      if (c) { const read = c.unread_count > 0; c.unread_count = read ? 0 : 1; API.updateConversation(c.id, { read }); refreshChatParts(); }
+    }
+    else if (act === 'ctx-mute') {
+      const c = S.conv(Number(t.dataset.id));
+      if (c) { c.muted = c.muted ? 0 : 1; API.updateConversation(c.id, { muted: c.muted }); refreshChatParts(); }
+    }
     else if (act === 'send') { send(); }
     else if (act === 'open-logs') { openLogsDrawer(); }
     else if (act === 'close-logs') { S.state.logsOpen = false; renderDrawer(); }
@@ -203,7 +244,10 @@
       const ta = e.target.closest('textarea[data-enter="send"]');
       if (ta) { e.preventDefault(); send(); }
     }
-    if (e.key === 'Escape' && S.state.logsOpen) { S.state.logsOpen = false; renderDrawer(); }
+    if (e.key === 'Escape') {
+      if (S.state.logsOpen) { S.state.logsOpen = false; renderDrawer(); }
+      closeConvMenu();
+    }
   });
 
   document.addEventListener('change', (e) => {

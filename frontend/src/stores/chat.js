@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import {
   checkDeviceOnline, connectWs, fetchConversations, fetchDevices, fetchMessages,
-  markConversationRead, openConversation, sendTextMessage,
+  markConversationRead, openConversation, sendTextMessage, updateConversation,
 } from '../api'
 
 /** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
@@ -93,17 +93,15 @@ export const useChatStore = defineStore('chat', {
       this.conversations = await fetchConversations(this.activeOpenid)
     },
 
-    /** 从通讯录发起会话：已有会话直接进，没有就建一个再进。 */
-    async openWithContact(wxid, chatType) {
-      const local = this.conversations.find(
-        (c) => c.wxid === wxid && c.chat_type === chatType)
-      let convId = local?.id
-      if (!convId) {
-        const conv = await openConversation(wxid, chatType, this.activeOpenid)
-        convId = conv.id
+    /** 从通讯录发起会话：按 contact_id 建/取（contact 行自带 conversation_id 时本地直进；不传 wxid——脱敏契约）。 */
+    async openWithContact(contactId, chatType, convId) {
+      let id = convId || null
+      if (!id) {
+        const conv = await openConversation(contactId, chatType, this.activeOpenid)
+        id = conv.id
         await this.loadConversations()
       }
-      await this.selectConversation(convId)
+      await this.selectConversation(id)
     },
 
     async selectConversation(id) {
@@ -131,6 +129,26 @@ export const useChatStore = defineStore('chat', {
       if (!conv || !conv.unread_count) return
       conv.unread_count = 0
       markConversationRead(conv.id).catch(() => {})
+    },
+
+    /** 右键菜单会话操作：乐观更新本地 → PATCH 落库（{pinned|read|muted}）→ 按后端返回校正并重排；失败回滚并抛错由调用方提示。 */
+    async patchConversation(conv, patch) {
+      const snap = { pinned: conv.pinned, muted: conv.muted, unread_count: conv.unread_count }
+      if ('pinned' in patch) conv.pinned = patch.pinned
+      if ('muted' in patch) conv.muted = patch.muted
+      if ('read' in patch) conv.unread_count = patch.read ? 0 : 1 // true清未读 / false标为未读(记1)
+      this.sortConversations()
+      try {
+        const data = await updateConversation(conv.id, patch)
+        conv.pinned = data.pinned
+        conv.muted = data.muted
+        conv.unread_count = data.unread_count
+        this.sortConversations()
+      } catch (e) {
+        Object.assign(conv, snap)
+        this.sortConversations()
+        throw e
+      }
     },
 
     /** 往前翻更早的记录（滚动到顶时调）。 */
@@ -214,7 +232,7 @@ export const useChatStore = defineStore('chat', {
       if (d.direction === 1) dev.unread = (dev.unread || 0) + 1
       this.crossMsg = {
         openid: d.openid,
-        name: dev.display_name || d.openid,
+        name: dev.display_name || '设备',  // display_name 后端已保证非空（无备注回退设备N）
         content: summaryOf(d),
       }
     },

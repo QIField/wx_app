@@ -53,7 +53,7 @@ active 规则：账号卡片当前账号加 .on；rail 无导航项（视图由�
 ```
 users: [{id,username,name,role,devices:[openid,...按绑定顺序]}]
 devices 全局表: [{openid,nickname,online,unread}]
-conversations: [{id,openid,wxid,chat_type,name,avatar_seed,unread_count,pinned,last_msg,last_msg_at}]
+conversations: [{id,openid,wxid,chat_type,name,avatar_seed,unread_count,pinned,muted,last_msg,last_msg_at}]
 messages: [{id,conv_id,dir(1收/2发),msg_type,sender_name,content,time,status(0/1/2),operator:{username,name}}]
   → dir=2 时 operator 必填（溯源核心）
 send_logs: [{id,time,operator_username,operator_name,device_nickname,conv_name,action,content,result}]
@@ -67,3 +67,4 @@ send_logs: [{id,time,operator_username,operator_name,device_nickname,conv_name,a
 - 发送：回车发送→气泡即时上屏（operator 徽章=当前登录人）+ send_log 记录
 - 气泡 hover 显示「发送人 · 时间」；日志抽屉从右侧滑出
 - **会话搜索（v5，微信风格）**：「会话」标题删除，列表头部为搜索框（放大镜+占位符「搜索」）；输入即搜，结果分「联系人」（通讯录命中昵称/微信号/备注）与「会话」（命中会话名/最后一条消息）两组，命中词高亮；联系人点击→有会话则打开、无会话提示「无会话」标签；范围仅当前账号（数据隔离），切换账号自动清空搜索
+- **会话右键菜单（v6，微信 PC 同构）**：右键会话条目弹出菜单（贴边自动翻转；点击任意处/Esc/滚动/失焦/再次右键收起），三项操作均为本地乐观更新→stub 落库→重排：①置顶⇄取消置顶（文字切换）②标为未读⇄标为已读（按未读状态切换）③消息免打扰（勾选态）。置顶会话仅背景加深（#e9edf4），不显示「置顶」文字，选中态优先；免打扰会话摘要旁显示铃铛斜杠图标，未读徽标退化为小红点（不显数字）

@@ -1,11 +1,13 @@
 <script setup>
 /** 未读红点：统一"出现规则 + 视觉"（会话列表 / 通讯录 / 侧栏总未读共用）。
- *  count<=0 不渲染；>99 显示 99+；variant 区分浅色面板（row）与深色导航（rail）。 */
+ *  count<=0 不渲染；>99 显示 99+；variant 区分浅色面板（row）与深色导航（rail）；
+ *  dot=true 退化为纯红点不显示数字（免打扰会话的微信同款弱化提示）。 */
 import { computed } from 'vue'
 
 const props = defineProps({
   count: { type: Number, default: 0 },
   variant: { type: String, default: 'row' }, // row | rail
+  dot: { type: Boolean, default: false },
 })
 
 const label = computed(() => (props.count > 99 ? '99+' : String(props.count)))
@@ -17,7 +19,7 @@ const wide = computed(() => props.count > 9)
     <span
       v-if="count > 0"
       class="unread"
-      :class="[`is-${variant}`, { wide }]"
+      :class="[`is-${variant}`, { wide, dot }]"
       role="status"
       :aria-label="`${count} 条未读消息`"
     >{{ label }}</span>
@@ -43,6 +45,16 @@ const wide = computed(() => props.count > 9)
   line-height: 1;
 }
 .unread.wide { padding: 0 6px; }
+
+/* 免打扰会话：数字退化为纯红点（有消息但不催促，微信同款） */
+.unread.dot {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0;
+}
 
 /* 深色侧栏：悬浮在导航按钮右上角，同样纯色，不加描边与光晕。
    类名用 is-rail 前缀，避免与页面 .rail（导航栏）选择器撞车导致样式被覆盖 */

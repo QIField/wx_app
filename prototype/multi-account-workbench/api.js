@@ -38,6 +38,16 @@ window.API = (() => {
       return delay(msg);
     },
 
+    /* v6 会话操作：置顶/标未读/免打扰（patch: {pinned:0|1} / {read:true|false} / {muted:0|1}），字段与后端 PATCH 对齐 */
+    updateConversation(convId, patch) {
+      const conv = D.conversations.find((c) => c.id === convId);
+      if (!conv) return Promise.reject(new Error('会话不存在'));
+      if ('pinned' in patch) conv.pinned = patch.pinned;
+      if ('muted' in patch) conv.muted = patch.muted;
+      if ('read' in patch) conv.unread_count = patch.read ? 0 : 1;
+      return delay(conv);
+    },
+
     /* 发送日志（含操作人快照，可按操作人/设备/结果筛选） */
     listSendLogs() { return delay(D.send_logs.slice()); },
 

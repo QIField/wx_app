@@ -58,7 +58,9 @@
   cursor: pointer; position: relative; transition: background .1s;
 }
 .conv-item:hover { background: #f0f4fa; }
-.conv-item.on { background: var(--c-primary-soft); }
+/* v6 置顶会话：背景加深即可，不显示「置顶」文字；选中态优先级更高（on 声明在后） */
+.conv-item.pinned, .conv-item.pinned:hover { background: #e9edf4; }
+.conv-item.on, .conv-item.on:hover, .conv-item.on.pinned { background: var(--c-primary-soft); }
 .conv-item .c-main { flex: 1; min-width: 0; }
 .conv-item .c-top { display: flex; align-items: center; gap: 6px; }
 .conv-item .c-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -78,6 +80,29 @@
 /* scope 外（其他账号）会话的弱化态 */
 .conv-item.out-scope { opacity: .68; }
 .conv-item.out-scope:hover { opacity: 1; }
+/* v6 消息免打扰：摘要旁铃铛斜杠；未读徽标退化为小红点（不显示数字，微信同款） */
+.c-mute { color: var(--c-text-sub); display: inline-flex; flex: none; }
+.badge.dot { min-width: 9px; width: 9px; height: 9px; padding: 0; border-radius: 50%; font-size: 0; }
+
+/* ===== v6 会话右键菜单（微信 PC 同构：白底细边框 + 浮起阴影 + 紧凑行高） ===== */
+#ctx-root { position: fixed; inset: 0; pointer-events: none; z-index: 98; }
+.ctx-menu {
+  position: absolute; min-width: 150px; padding: 4px; pointer-events: auto;
+  background: var(--c-panel); border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop); animation: ctx-pop .12s ease both;
+}
+@keyframes ctx-pop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+.ctx-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent;
+  padding: 7px 10px; border-radius: var(--r-sm); font-size: 13px; color: var(--c-text);
+  cursor: pointer; text-align: left; transition: background .1s;
+}
+.ctx-item:hover { background: var(--c-primary-soft); color: var(--c-primary-deep); }
+.ctx-item svg { color: var(--c-text-sub); flex: none; }
+.ctx-item:hover svg { color: var(--c-primary); }
+.ctx-item span:first-of-type { flex: 1; }
+.ctx-item .ctx-check { display: inline-flex; color: var(--c-ok); flex: none; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--c-border); }
 
 /* ===== 聊天窗 ===== */
 .chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }

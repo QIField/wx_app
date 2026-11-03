@@ -14,6 +14,9 @@ window.V = (() => {
     close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     alert: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
     inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/>',
+    'bell-off': '<path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/>',
+    check: '<polyline points="20 6 9 17 4 12"/>',
   };
   const icon = (name, s = 16, sw = 1.8) =>
     `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${I[name]}</svg>`;
@@ -142,7 +145,7 @@ window.V = (() => {
       ${(!ctRows && !cvRows) ? `<div class="empty">${icon('search', 26)}无搜索结果</div>` : ''}`;
   }
 
-  /* 默认会话列表（无关键词） */
+  /* 默认会话列表（无关键词）。v6：pinned 只做背景加深不显示文字；muted 显示铃铛斜杠 + 未读变红点 */
   function convResults(S) {
     const openids = S.scopeOpenids();
     const rows = S.state.conversations
@@ -151,13 +154,15 @@ window.V = (() => {
     const items = rows.map((c) => {
       const on = S.state.activeConvId === c.id;
       return `
-      <div class="conv-item ${on ? 'on' : ''} ${c.unread_count ? 'unread' : ''}" data-action="open-conv" data-id="${c.id}" role="button" tabindex="0">
+      <div class="conv-item ${on ? 'on' : ''} ${c.pinned ? 'pinned' : ''} ${c.unread_count ? 'unread' : ''}"
+        data-action="open-conv" data-id="${c.id}" role="button" tabindex="0">
         ${avatar(c.name)}
         <div class="c-main">
           <div class="c-top"><span class="c-name">${esc(c.name)}</span><span class="c-time num">${hm(c.last_msg_at)}</span></div>
           <div class="c-sub">
             <span class="c-last">${esc(c.last_msg || '')}</span>
-            ${c.unread_count ? `<span class="badge num">${c.unread_count}</span>` : ''}
+            ${c.muted ? `<span class="c-mute" title="消息免打扰">${icon('bell-off', 12)}</span>` : ''}
+            ${c.unread_count ? `<span class="badge num ${c.muted ? 'dot' : ''}" title="未读 ${c.unread_count} 条">${c.unread_count}</span>` : ''}
           </div>
         </div>
       </div>`;
@@ -176,6 +181,23 @@ window.V = (() => {
       </div>`;
     const kw = S.state.searchQuery.trim().toLowerCase();
     return head + `<div class="conv-list" id="search-results">${kw ? searchResults(S, kw) : convResults(S)}</div>`;
+  }
+
+  /* v6 右键菜单（微信 PC 同构）：置顶文字切换 / 未读状态切换 / 免打扰勾选 */
+  function convMenu(c, x, y) {
+    return `
+    <div class="ctx-menu" style="left:${x}px;top:${y}px" role="menu" aria-label="会话操作">
+      <button class="ctx-item" data-action="ctx-pin" data-id="${c.id}" role="menuitem">
+        ${icon('pin', 14)}<span>${c.pinned ? '取消置顶' : '置顶'}</span>
+      </button>
+      <button class="ctx-item" data-action="ctx-unread" data-id="${c.id}" role="menuitem">
+        ${icon('check', 14)}<span>${c.unread_count ? '标为已读' : '标为未读'}</span>
+      </button>
+      <div class="ctx-sep"></div>
+      <button class="ctx-item" data-action="ctx-mute" data-id="${c.id}" role="menuitemradio" aria-checked="${!!c.muted}">
+        ${icon('bell-off', 14)}<span>消息免打扰</span>${c.muted ? `<span class="ctx-check">${icon('check', 13)}</span>` : ''}
+      </button>
+    </div>`;
   }
 
   /* ---------- 聊天窗 ---------- */
@@ -318,5 +340,5 @@ window.V = (() => {
     </div></div>`;
   }
 
-  return { icon, esc, hm, ini, hashColor, dev, avatar, topbarRight, accountCards, login, workbench, convList, convResults, searchResults, chat, drawer, logsPage };
+  return { icon, esc, hm, ini, hashColor, dev, avatar, topbarRight, accountCards, login, workbench, convList, convResults, searchResults, convMenu, chat, drawer, logsPage };
 })();

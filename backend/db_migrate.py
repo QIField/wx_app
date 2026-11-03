@@ -16,6 +16,8 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE audit_log ADD COLUMN org_name VARCHAR(64)")
     _try_alter("ALTER TABLE middle_call_log ADD COLUMN user_name VARCHAR(64)")
     _try_alter("ALTER TABLE middle_call_log ADD COLUMN org_name VARCHAR(64)")
+    # 2026-11-03 会话右键菜单：消息免打扰标记
+    _try_alter("ALTER TABLE conversation ADD COLUMN muted SMALLINT NOT NULL DEFAULT 0")
     _backfill_user_devices()
     _try_drop_user_openid()
 

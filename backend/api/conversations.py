@@ -10,7 +10,7 @@ from backend.extensions import db
 from backend.models.contact import Contact
 from backend.models.conversation import Conversation
 from backend.models.message import Message
-from backend.services import conversations as conversation_service
+from backend.services import anonymize, conversations as conversation_service
 from backend.services.auth import require_role
 from backend.services.devices import active_openid_for, user_openids
 
@@ -76,10 +76,11 @@ def list_conversations():
 @bp.post("/api/conversations")
 @require_role()
 def open_conversation():
-    """主动发起会话：按 wxid 建/取会话（联系人须在该设备的通讯录里）。
+    """主动发起会话：按 contact_id 建/取会话（前端不传 wxid——脱敏契约）。
 
-    body: {"wxid": "...", "chat_type": 1|2}；?openid= 选设备，默认第一个绑定。
-    已存在直接返回，没有则新建。
+    body: {"contact_id": 123, "chat_type": 1|2}；?openid= 选设备，默认第一个绑定。
+    contact_id 是通讯录条目的 id（Contact 行号）；通讯录未同步到的老会话补集，
+    该 id 是会话行号，回退按会话反查。已存在直接返回，没有则新建。
     """
     if not _my_openids():
         return jsonify(code=400, msg="当前账号未绑定微信设备"), 400
@@ -88,19 +89,16 @@ def open_conversation():
         return err
 
     body = request.get_json(silent=True) or {}
-    wxid = (body.get("wxid") or "").strip()
+    contact_id = body.get("contact_id")
     try:
         chat_type = int(body.get("chat_type"))
     except (TypeError, ValueError):
         chat_type = 0
-    if not wxid or chat_type not in (Conversation.CHAT_SINGLE, Conversation.CHAT_GROUP):
-        return jsonify(code=400, msg="wxid 与 chat_type（1单聊/2群聊）必填且合法"), 400
+    if not contact_id or chat_type not in (Conversation.CHAT_SINGLE, Conversation.CHAT_GROUP):
+        return jsonify(code=400, msg="contact_id 与 chat_type（1单聊/2群聊）必填且合法"), 400
 
-    contact_type = (
-        Contact.TYPE_FRIEND if chat_type == Conversation.CHAT_SINGLE else Contact.TYPE_GROUP
-    )
-    exists = Contact.query.filter_by(openid=openid, wxid=wxid, type=contact_type).first()
-    if exists is None:
+    wxid = _resolve_contact_wxid(contact_id, openid, chat_type)
+    if not wxid:
         return jsonify(code=404, msg="通讯录中没有该联系人"), 404
 
     conv = conversation_service.get_or_create(openid, wxid, chat_type)
@@ -108,12 +106,30 @@ def open_conversation():
     return jsonify(code=0, msg="success", data=_conv_json(conv))
 
 
+def _resolve_contact_wxid(contact_id, openid, chat_type):
+    """contact_id → wxid：Contact 行优先，补集回退按会话行反查（均限当前设备）。"""
+    contact_type = (
+        Contact.TYPE_FRIEND if chat_type == Conversation.CHAT_SINGLE else Contact.TYPE_GROUP
+    )
+    contact = Contact.query.filter_by(id=contact_id, openid=openid, type=contact_type).first()
+    if contact:
+        return contact.wxid
+    conv = Conversation.query.filter(
+        Conversation.id == contact_id,
+        Conversation.openid == openid,
+        Conversation.chat_type == chat_type,
+        Conversation.deleted_at.is_(None),
+    ).first()
+    return conv.wxid if conv else None
+
+
 @bp.patch("/api/conversations/<int:conversation_id>")
 @require_role()
 def update_conversation(conversation_id):
-    """会话操作：置顶 / 清未读。
+    """会话操作：置顶 / 标为已读·未读 / 消息免打扰。
 
-    body: {"pinned": 0|1} 和/或 {"read": true}；read=true 清零未读数。
+    body: {"pinned": 0|1} 和/或 {"read": true|false} 和/或 {"muted": 0|1}。
+    read=true 清零未读数；read=false 标为未读（未读数记 1，微信同款）。
     未读必须落库，否则重拉列表会把旧的未读数盖回来（前端红点反复出现）。
     """
     conv = _my_conversation(conversation_id)
@@ -123,22 +139,27 @@ def update_conversation(conversation_id):
     body = request.get_json(silent=True) or {}
     changed = False
 
-    if "pinned" in body:
+    def _flag(key):
+        """0/1 小整型标记（pinned/muted）解析：合法返回值，非法返回 None。"""
         try:
-            pinned = int(body["pinned"])
+            v = int(body[key])
         except (TypeError, ValueError):
-            pinned = -1
-        if pinned not in (0, 1):
-            return jsonify(code=400, msg="pinned 仅支持 0/1"), 400
-        conv.pinned = pinned
-        changed = True
+            return None
+        return v if v in (0, 1) else None
+
+    for key in ("pinned", "muted"):
+        if key in body:
+            value = _flag(key)
+            if value is None:
+                return jsonify(code=400, msg=f"{key} 仅支持 0/1"), 400
+            setattr(conv, key, value)
+            changed = True
 
     if "read" in body:
         if not isinstance(body["read"], bool):
             return jsonify(code=400, msg="read 仅支持 true/false"), 400
-        if body["read"]:
-            conv.unread_count = 0
-            changed = True
+        conv.unread_count = 0 if body["read"] else 1
+        changed = True
 
     if not changed:
         return jsonify(code=400, msg="没有可更新的字段"), 400
@@ -187,28 +208,35 @@ def list_messages(conversation_id):
 
 
 def _conv_json(c):
+    """会话出参（脱敏契约）：不含 wxid；名称未解析 → name=None + alias，头像一并匿名。"""
+    name = anonymize.resolved_name(c.name, c.wxid)
     return {
         "id": c.id,
-        "wxid": c.wxid,
         "chat_type": c.chat_type,
-        "name": c.name,
-        "avatar": c.avatar,
+        "name": name,
+        "avatar": anonymize.avatar_or_none(name, c.avatar),
+        "alias": anonymize.alias_of(c.wxid),
         "unread_count": c.unread_count,
         "pinned": c.pinned,
+        "muted": c.muted,
         "last_msg": c.last_msg,
         "last_msg_at": c.last_msg_at.strftime("%Y-%m-%d %H:%M:%S") if c.last_msg_at else None,
     }
 
 
 def _msg_json(m, sender_map=None):
-    info = (sender_map or {}).get(m.sender_wxid or "")
+    """消息出参（脱敏契约）：不含 sender_wxid；发言人无可用名称 → 匿名编码，头像随之匿名。"""
+    info = (sender_map or {}).get(m.sender_wxid or "") or {}
+    nickname = anonymize.resolved_name(info.get("nickname"), m.sender_wxid)
+    snapshot = anonymize.resolved_name(m.sender_name, m.sender_wxid)  # 出方向操作人/客服快照
+    sender_name = nickname or snapshot or anonymize.anon_label(m.sender_wxid)
     return {
         "id": m.id,
         "msg_type": m.msg_type,
         "direction": m.direction,
-        "sender_wxid": m.sender_wxid,
-        "sender_name": (info or {}).get("nickname") or m.sender_name,
-        "sender_avatar": (info or {}).get("avatar"),
+        "sender_name": sender_name,
+        "sender_avatar": info.get("avatar") if nickname else None,
+        "sender_alias": anonymize.alias_of(m.sender_wxid),  # 匿名头像色相/标识用
         "content": m.content,
         "payload": m.payload,
         "operator_name": m.operator_name or "",  # 发出消息的操作人快照（气泡徽章）

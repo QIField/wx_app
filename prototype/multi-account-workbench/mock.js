@@ -19,15 +19,16 @@ window.MOCK = (() => {
 
   const T = (h, m) => `2026-11-02 ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 
+  /* v6：会话增加 muted（消息免打扰 0/1），与后端 conversation.muted 对齐 */
   const conversations = [
-    { id: 101, openid: 'dev_a01', wxid: 'zhang_wei',   chat_type: 1, name: '张伟',            unread_count: 2, pinned: 1, last_msg: '你们这款的交期最快多久？', last_msg_at: T(14, 32) },
-    { id: 102, openid: 'dev_a01', wxid: 'dealer_south', chat_type: 2, name: '华南经销商交流群', unread_count: 5, pinned: 0, last_msg: '孙经理: 报价单收到了，我核对下', last_msg_at: T(14, 21) },
-    { id: 103, openid: 'dev_a01', wxid: 'li_na',        chat_type: 1, name: '李娜',            unread_count: 0, pinned: 0, last_msg: '好的，那就按这个方案来', last_msg_at: T(11, 47) },
-    { id: 104, openid: 'dev_b02', wxid: 'chen_jl',      chat_type: 1, name: '华丰物流-陈经理',  unread_count: 1, pinned: 0, last_msg: '这批货有 3 件外箱破损', last_msg_at: T(14, 05) },
-    { id: 105, openid: 'dev_b02', wxid: 'meiju_liu',    chat_type: 1, name: '美居装饰-刘工',    unread_count: 0, pinned: 0, last_msg: '安装视频我看完了，没问题', last_msg_at: T(10, 18) },
-    { id: 106, openid: 'dev_b02', wxid: 'proj_group_a', chat_type: 2, name: 'A项目对接群',      unread_count: 3, pinned: 1, last_msg: '赵总: 周三上午10点现场对一下', last_msg_at: T(13, 44) },
-    { id: 107, openid: 'dev_c03', wxid: 'zhao_zt',      chat_type: 1, name: '恒泰地产-赵总',    unread_count: 0, pinned: 0, last_msg: '合同盖章件明天寄出', last_msg_at: T(9, 52) },
-    { id: 108, openid: 'dev_c03', wxid: 'sun_star',     chat_type: 1, name: '星辰电子-孙经理',  unread_count: 4, pinned: 0, last_msg: '上一批的良率报告发我一份', last_msg_at: T(14, 40) },
+    { id: 101, openid: 'dev_a01', wxid: 'zhang_wei',   chat_type: 1, name: '张伟',            unread_count: 2, pinned: 1, muted: 0, last_msg: '你们这款的交期最快多久？', last_msg_at: T(14, 32) },
+    { id: 102, openid: 'dev_a01', wxid: 'dealer_south', chat_type: 2, name: '华南经销商交流群', unread_count: 5, pinned: 0, muted: 1, last_msg: '孙经理: 报价单收到了，我核对下', last_msg_at: T(14, 21) },
+    { id: 103, openid: 'dev_a01', wxid: 'li_na',        chat_type: 1, name: '李娜',            unread_count: 0, pinned: 0, muted: 0, last_msg: '好的，那就按这个方案来', last_msg_at: T(11, 47) },
+    { id: 104, openid: 'dev_b02', wxid: 'chen_jl',      chat_type: 1, name: '华丰物流-陈经理',  unread_count: 1, pinned: 0, muted: 0, last_msg: '这批货有 3 件外箱破损', last_msg_at: T(14, 05) },
+    { id: 105, openid: 'dev_b02', wxid: 'meiju_liu',    chat_type: 1, name: '美居装饰-刘工',    unread_count: 0, pinned: 0, muted: 0, last_msg: '安装视频我看完了，没问题', last_msg_at: T(10, 18) },
+    { id: 106, openid: 'dev_b02', wxid: 'proj_group_a', chat_type: 2, name: 'A项目对接群',      unread_count: 3, pinned: 1, muted: 0, last_msg: '赵总: 周三上午10点现场对一下', last_msg_at: T(13, 44) },
+    { id: 107, openid: 'dev_c03', wxid: 'zhao_zt',      chat_type: 1, name: '恒泰地产-赵总',    unread_count: 0, pinned: 0, muted: 0, last_msg: '合同盖章件明天寄出', last_msg_at: T(9, 52) },
+    { id: 108, openid: 'dev_c03', wxid: 'sun_star',     chat_type: 1, name: '星辰电子-孙经理',  unread_count: 4, pinned: 0, muted: 1, last_msg: '上一批的良率报告发我一份', last_msg_at: T(14, 40) },
   ];
 
   let mid = 0;
