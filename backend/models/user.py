@@ -6,6 +6,9 @@ ROLE_DEVELOPER = "developer"  # 开发者：最高权限，含设备绑定与操
 ROLE_ADMIN = "admin"          # 管理员：账号管理（不可操作开发者行）
 ROLE_AGENT = "agent"          # 客服：消息工作台
 
+# 可进入管理后台执行管理操作（账号 / 组织）的角色
+MANAGE_ROLES = (ROLE_DEVELOPER, ROLE_ADMIN)
+
 STATUS_ON = 1   # 启用
 STATUS_OFF = 0  # 停用
 

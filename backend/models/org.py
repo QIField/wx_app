@@ -33,7 +33,8 @@ class Org(db.Model):
     def ensure_seed(cls):
         """幂等种子：缺哪个补哪个；返回本次补充条数。"""
         existing = {o.name for o in cls.query.all()}
-        for name in ORG_NAMES:
-            if name not in existing:
-                db.session.add(cls(name=name))
+        missing = [name for name in ORG_NAMES if name not in existing]
+        for name in missing:
+            db.session.add(cls(name=name))
         db.session.commit()
+        return len(missing)

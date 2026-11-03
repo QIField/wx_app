@@ -8,13 +8,12 @@ from flask import Blueprint, jsonify, request
 
 from backend.extensions import db
 from backend.models.org import Org
-from backend.models.user import ROLE_ADMIN, ROLE_DEVELOPER, STATUS_OFF, STATUS_ON
+from backend.models.user import MANAGE_ROLES, STATUS_OFF, STATUS_ON
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.auth import require_role
 
 bp = Blueprint("orgs", __name__)
 
-_MANAGE_ROLES = (ROLE_DEVELOPER, ROLE_ADMIN)
 _MAX_NAME = 64  # 与 org.name 列宽一致
 
 
@@ -25,7 +24,7 @@ def _clean_name(body):
 
 
 @bp.get("/api/orgs")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def list_orgs():
     """启用中的组织列表：账号表单等使用处的下拉数据源（每次实时查询）。"""
     rows = Org.query.filter_by(status=STATUS_ON).order_by(Org.id).all()
@@ -33,7 +32,7 @@ def list_orgs():
 
 
 @bp.get("/api/orgs/all")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def list_all_orgs():
     """全量组织列表（含停用）：组织管理表格数据源。"""
     rows = Org.query.order_by(Org.id).all()
@@ -41,7 +40,7 @@ def list_all_orgs():
 
 
 @bp.post("/api/orgs")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def create_org():
     """新增组织：重名（含已停用）拒绝，避免恢复语义混淆。"""
     name = _clean_name(request.get_json(silent=True) or {})
@@ -61,7 +60,7 @@ def create_org():
 
 
 @bp.put("/api/orgs/<int:org_id>/status")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def toggle_org_status(org_id):
     """启用 / 停用（软删除）：只改 status，行保留。"""
     org = db.session.get(Org, org_id)

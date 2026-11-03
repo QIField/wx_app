@@ -10,6 +10,7 @@ from werkzeug.security import generate_password_hash
 
 from backend.extensions import db
 from backend.models.user import (
+    MANAGE_ROLES,
     ROLE_ADMIN,
     ROLE_AGENT,
     ROLE_DEVELOPER,
@@ -25,7 +26,6 @@ from backend.services.devices import user_devices, user_openids
 bp = Blueprint("accounts", __name__)
 
 INITIAL_PASSWORD = "123456"  # 新增/重置的初始密码
-_MANAGE_ROLES = (ROLE_DEVELOPER, ROLE_ADMIN)
 _MAX_DEVICES = 20  # 单账号绑定设备上限，防误传超大列表
 
 
@@ -60,14 +60,14 @@ def _resolve_org(org_id, target_role):
 
 
 @bp.get("/api/accounts")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def list_accounts():
     rows = User.query.order_by(User.role.desc(), User.id).all()
     return jsonify(code=0, msg="success", data=[u.to_json(with_devices=True) for u in rows])
 
 
 @bp.post("/api/accounts")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def create_account():
     from flask import request
 
@@ -112,7 +112,7 @@ def create_account():
 
 
 @bp.put("/api/accounts/<int:user_id>")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def update_account(user_id):
     """编辑：姓名（developer/admin 都可以）；设备绑定仅 developer。"""
     from flask import request
@@ -158,7 +158,7 @@ def update_account(user_id):
 
 
 @bp.put("/api/accounts/<int:user_id>/status")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def toggle_status(user_id):
     """启用 / 停用。不能停用自己；admin 不能操作 developer 行。"""
     from flask import request
@@ -189,7 +189,7 @@ def toggle_status(user_id):
 
 
 @bp.put("/api/accounts/<int:user_id>/password")
-@require_role(*_MANAGE_ROLES)
+@require_role(*MANAGE_ROLES)
 def reset_password(user_id):
     """重置为初始密码。"""
     from flask import request
