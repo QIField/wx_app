@@ -213,17 +213,14 @@
     else if (act === 'search-open-conv') { S.state.searchQuery = ''; openConv(Number(t.dataset.id)); }
     else if (act === 'search-open-contact') { hintToast(`「${t.dataset.name}」暂无会话（演示环境）`); }
     /* v6 右键菜单动作：本地乐观更新 → stub 落库 → 刷新列表（置顶优先重排） */
-    else if (act === 'ctx-pin') {
+    else if (act === 'ctx-pin' || act === 'ctx-unread' || act === 'ctx-mute') {
       const c = S.conv(Number(t.dataset.id));
-      if (c) { c.pinned = c.pinned ? 0 : 1; API.updateConversation(c.id, { pinned: c.pinned }); refreshChatParts(); }
-    }
-    else if (act === 'ctx-unread') {
-      const c = S.conv(Number(t.dataset.id));
-      if (c) { const read = c.unread_count > 0; c.unread_count = read ? 0 : 1; API.updateConversation(c.id, { read }); refreshChatParts(); }
-    }
-    else if (act === 'ctx-mute') {
-      const c = S.conv(Number(t.dataset.id));
-      if (c) { c.muted = c.muted ? 0 : 1; API.updateConversation(c.id, { muted: c.muted }); refreshChatParts(); }
+      if (c) {
+        if (act === 'ctx-pin') { c.pinned = c.pinned ? 0 : 1; API.updateConversation(c.id, { pinned: c.pinned }); }
+        else if (act === 'ctx-unread') { const read = c.unread_count > 0; c.unread_count = read ? 0 : 1; API.updateConversation(c.id, { read }); }
+        else { c.muted = c.muted ? 0 : 1; API.updateConversation(c.id, { muted: c.muted }); }
+        refreshChatParts();
+      }
     }
     else if (act === 'send') { send(); }
     else if (act === 'open-logs') { openLogsDrawer(); }

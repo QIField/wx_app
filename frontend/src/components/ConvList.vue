@@ -1,10 +1,11 @@
 <script setup>
 /** 左栏：会话列表（微信风格搜索框 + 紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。
  *  右键菜单：置顶⇄取消置顶 / 标为未读⇄已读 / 消息免打扰；置顶仅背景加深不显示文字。 */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf, fmtTime, highlight, matchKeyword } from '../utils/format'
+import ContextMenu from './ContextMenu.vue'
 import UnreadBadge from './UnreadBadge.vue'
 import AnonAvatar from './AnonAvatar.vue'
 
@@ -18,58 +19,37 @@ const filtered = computed(() =>
 
 /* ---------- 右键菜单 ---------- */
 const menu = ref(null) // { conv, x, y }；null 即收起
-const menuEl = ref(null)
 
 function onMenu(e, conv) {
   menu.value = { conv, x: e.clientX, y: e.clientY }
 }
-function closeMenu() {
-  menu.value = null
-}
 
-/** 打开后按实际尺寸贴边翻转（右侧/底部放不下时往回收）。 */
-watch(menu, async (m) => {
-  if (!m) return
-  await nextTick()
-  const el = menuEl.value
-  if (!el) return
-  const w = el.offsetWidth
-  const h = el.offsetHeight
-  el.style.left = Math.max(8, m.x + w > window.innerWidth - 8 ? window.innerWidth - w - 8 : m.x) + 'px'
-  el.style.top = Math.max(8, m.y + h > window.innerHeight - 8 ? window.innerHeight - h - 8 : m.y) + 'px'
+/** 菜单项随目标会话状态切换；免打扰为勾选开关项。 */
+const menuItems = computed(() => {
+  const c = menu.value?.conv
+  if (!c) return []
+  return [
+    { key: 'pin', label: c.pinned ? '取消置顶' : '置顶' },
+    { key: 'unread', label: c.unread_count > 0 ? '标为已读' : '标为未读' },
+    { key: 'mute', label: '消息免打扰', checked: !!c.muted, sepBefore: true },
+  ]
 })
 
-/** 菜单动作统一执行：乐观更新 → 落库（store 内失败自动回滚），这里只管提示。 */
-async function apply(patch) {
+/** 菜单动作：乐观更新 → 落库（store 内失败自动回滚），这里只管提示。 */
+async function onMenuSelect(key) {
   const conv = menu.value?.conv
-  closeMenu()
+  menu.value = null
   if (!conv) return
+  let patch
+  if (key === 'pin') patch = { pinned: conv.pinned ? 0 : 1 }
+  else if (key === 'unread') patch = { read: conv.unread_count > 0 }
+  else patch = { muted: conv.muted ? 0 : 1 }
   try {
     await chat.patchConversation(conv, patch)
   } catch (e) {
     ElMessage.error(e.message || '操作失败')
   }
 }
-
-/* 收起时机：点击菜单外任意处 / Esc / 列表滚动 / 窗口尺寸变化 / 失焦 */
-const onDocClick = (e) => {
-  if (menuEl.value && !menuEl.value.contains(e.target)) closeMenu()
-}
-const onKeydown = (e) => {
-  if (e.key === 'Escape') closeMenu()
-}
-window.addEventListener('click', onDocClick)
-window.addEventListener('keydown', onKeydown)
-window.addEventListener('scroll', closeMenu, true)
-window.addEventListener('resize', closeMenu)
-window.addEventListener('blur', closeMenu)
-onBeforeUnmount(() => {
-  window.removeEventListener('click', onDocClick)
-  window.removeEventListener('keydown', onKeydown)
-  window.removeEventListener('scroll', closeMenu, true)
-  window.removeEventListener('resize', closeMenu)
-  window.removeEventListener('blur', closeMenu)
-})
 </script>
 
 <template>
@@ -123,27 +103,8 @@ onBeforeUnmount(() => {
       />
     </el-scrollbar>
 
-    <!-- 会话右键菜单：文字随状态切换，免打扰为勾选态（微信 PC 同构） -->
-    <Teleport to="body">
-      <div v-if="menu" ref="menuEl" class="ctx-menu" role="menu" aria-label="会话操作">
-        <button class="ctx-item" role="menuitem" @click="apply({ pinned: menu.conv.pinned ? 0 : 1 })">
-          {{ menu.conv.pinned ? '取消置顶' : '置顶' }}
-        </button>
-        <button class="ctx-item" role="menuitem" @click="apply({ read: menu.conv.unread_count > 0 })">
-          {{ menu.conv.unread_count > 0 ? '标为已读' : '标为未读' }}
-        </button>
-        <div class="ctx-sep"></div>
-        <button
-          class="ctx-item"
-          role="menuitemradio"
-          :aria-checked="!!menu.conv.muted"
-          @click="apply({ muted: menu.conv.muted ? 0 : 1 })"
-        >
-          <span>消息免打扰</span>
-          <svg v-if="menu.conv.muted" class="check" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </button>
-      </div>
-    </Teleport>
+    <!-- 会话右键菜单：弹层职责在 ContextMenu（定位翻转/收起生命周期） -->
+    <ContextMenu :pos="menu" :items="menuItems" @select="onMenuSelect" @close="menu = null" />
   </div>
 </template>
 
@@ -238,33 +199,4 @@ onBeforeUnmount(() => {
 }
 .flags { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
 .mute { display: inline-flex; color: var(--c-text-sub); }
-
-/* 右键菜单：白底细边框 + 浮起阴影，贴微信 PC 观感 */
-.ctx-menu {
-  position: fixed;
-  min-width: 148px;
-  padding: 4px;
-  background: #fff;
-  border: 1px solid var(--c-border-strong);
-  border-radius: var(--r-md);
-  box-shadow: 0 6px 24px rgba(20, 38, 77, 0.16);
-  z-index: 2100;
-  animation: ctx-pop 0.12s ease both;
-}
-@keyframes ctx-pop {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: none; }
-}
-.ctx-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  width: 100%; padding: 7px 10px;
-  border: none; border-radius: var(--r-sm);
-  background: none; color: var(--c-text);
-  font-size: 13px; text-align: left;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.ctx-item:hover { background: var(--c-primary-soft); color: var(--c-primary-deep); }
-.ctx-item .check { color: var(--c-ok); flex-shrink: 0; }
-.ctx-sep { height: 1px; margin: 4px 6px; background: var(--c-border); }
 </style>

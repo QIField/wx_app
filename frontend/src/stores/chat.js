@@ -137,17 +137,16 @@ export const useChatStore = defineStore('chat', {
       if ('pinned' in patch) conv.pinned = patch.pinned
       if ('muted' in patch) conv.muted = patch.muted
       if ('read' in patch) conv.unread_count = patch.read ? 0 : 1 // true清未读 / false标为未读(记1)
-      this.sortConversations()
       try {
         const data = await updateConversation(conv.id, patch)
         conv.pinned = data.pinned
         conv.muted = data.muted
         conv.unread_count = data.unread_count
-        this.sortConversations()
       } catch (e) {
         Object.assign(conv, snap)
-        this.sortConversations()
         throw e
+      } finally {
+        this.sortConversations() // 乐观/校正/回滚三种结局统一重排
       }
     },
 
