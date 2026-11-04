@@ -150,23 +150,33 @@ def test_send_message_requires_bound_device(app, monkeypatch):
 
 
 def test_check_device_online_parses_result(app, monkeypatch):
-    """在线解析：processing_result.data true→1 / false→0；异常→离线。"""
+    """在线解析：两步式（先 check_online 下发，同 uuid 查结果）。
+    processing_result.data true→1 / false→0；下发或查询异常→离线。
+    """
     from backend.adapter import client as middle
 
+    calls = []
+
     def fake_call(module, action, params=None, uuid=None, openid=""):
-        if openid == "ok":
-            return {"code": 0, "data": [
-                {"uuid": uuid, "processing_result": '{"ret":200,"data":true}'}]}
-        if openid == "off":
-            return {"code": 0, "data": [
-                {"uuid": uuid, "processing_result": '{"ret":200,"data":false}'}]}
-        raise RuntimeError("boom")
+        calls.append((openid, action, uuid))
+        if openid == "err":
+            raise RuntimeError("boom")
+        if action == "check_online":  # 下发：只回 code/msg
+            return {"code": 0, "msg": "success"}
+        payload = "true" if openid == "ok" else "false"
+        return {"code": 0, "data": [
+            {"uuid": uuid, "processing_result": f'{{"ret":200,"data":{payload}}}'}]}
 
     monkeypatch.setattr(middle, "call", fake_call)
+    monkeypatch.setattr("backend.services.devices.time.sleep", lambda s: None)
 
     assert check_device_online("ok") == 1
     assert check_device_online("off") == 0
     assert check_device_online("err") == 0
+    # 同一次检测内下发和查询用同一 uuid；查询先于下发后发生
+    ok_calls = [(a, u) for o, a, u in calls if o == "ok"]
+    assert ok_calls[0][0] == "check_online" and ok_calls[1][0] == "get_check_online"
+    assert ok_calls[0][1] == ok_calls[1][1]
 
 
 def test_online_check_endpoint(app, client, monkeypatch):

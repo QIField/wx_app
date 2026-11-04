@@ -1,6 +1,6 @@
 """资料同步任务队列：30 分钟兜底轮与登录触发统一入队，单线程串行执行。
 
-设计目标（见 prototype/profile-sync-queue/index.html）：
+设计目标（见 prototypes/profile-sync-queue/index.html）：
 - 互斥：唯一的 worker 线程消费队列，定时轮与登录触发不会并发；
 - 排队：多账号按 FIFO 逐台执行，不叠加中间方请求；
 - 去重：同一设备 / 同一兜底轮已在队列或执行中时不重复投递；

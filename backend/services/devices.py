@@ -3,9 +3,10 @@
 三个职责：
 - 账号维度：user_devices / user_openids（绑定顺序 = id 升序）
 - 全局维度：active_bound_devices（在线检测用，含离线）/ pollable_devices（轮询用，剔除离线）
-- 状态维度：check_device_online（中间方 get_check_online，定时轮询回写）
+- 状态维度：check_device_online（中间方 check_online→get_check_online 两步，定时轮询回写）
 """
 from uuid import uuid4
+import time
 
 from backend.extensions import db
 
@@ -88,8 +89,10 @@ def active_openid_for(user, requested=""):
 def check_device_online(openid):
     """查单台设备在线状态：1在线 0离线。
 
-    中间方套路：get_check_online 返回任务记录数组，processing_result.data=true/false。
-    任何异常（网络错误/结果未生成）都视为离线，下一轮纠正。
+    中间方套路（2026-11-04 实测）：两步式——先 check_online 下发任务（只回 code/msg），
+    再用同一 uuid 调 get_check_online 查任务记录，processing_result.data=true/false。
+    不下发直接查恒为 data:[]（此前一直误判离线的根因）。任务未完成时记录是
+    "处理中"文案，补查一次。任何异常（网络错误等）视为离线，下一轮纠正。
     """
     from backend.adapter import client as middle
     from backend.models.user_device import UserDevice
@@ -97,11 +100,19 @@ def check_device_online(openid):
 
     if middle.DEMO_MODE:
         return UserDevice.ONLINE_ON
+    uuid = str(uuid4())
     try:
-        body = middle.call("login_api", "get_check_online", {}, uuid=str(uuid4()), openid=openid)
+        middle.call("login_api", "check_online", {}, uuid=uuid, openid=openid)
+        rows = None
+        for delay in (0.5, 2):  # 第二次为兜底补查：首轮记录还在处理中时再等一等
+            time.sleep(delay)
+            body = middle.call("login_api", "get_check_online", {}, uuid=uuid, openid=openid)
+            rows = body.get("data") if isinstance(body, dict) else None
+            if any(as_dict(r.get("processing_result")).get("ret") == 200
+                   for r in rows or [] if isinstance(r, dict)):
+                break
     except Exception:  # noqa: BLE001 中间方不可达 = 离线
         return UserDevice.ONLINE_OFF
-    rows = body.get("data") if isinstance(body, dict) else None
     for row in rows or []:
         result = as_dict(row.get("processing_result") if isinstance(row, dict) else None)
         if result.get("ret") == 200:

@@ -1,7 +1,7 @@
 # 审计日志规范（audit_log）
 
 > 目标：谁、在什么时候、对什么、做了什么、结果如何。只服务「追责与排查」，不是业务数据。
-> 对应界面：`prototype/auth-admin/logs.html`（仅开发者可见）。
+> 对应界面：`prototypes/auth-admin/logs.html`（仅开发者可见）。
 
 ## 一、记录原则
 

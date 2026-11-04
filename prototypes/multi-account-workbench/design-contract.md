@@ -10,7 +10,7 @@
 ## 技术栈与交付
 - vanilla HTML + CSS + vanilla JS，pure-static，离线可开（零外部依赖）
 - 图标：内联 Lucide SVG；字体：系统栈（Microsoft YaHei / PingFang SC）+ Bahnschrift（数字，Windows 自带）
-- 交付：`prototype/multi-account-workbench/`，index.html 单页 3 视图（login / workbench / logs，v4 账号卡片入顶栏）
+- 交付：`prototypes/multi-account-workbench/`，index.html 单页 3 视图（login / workbench / logs，v4 账号卡片入顶栏）
 
 ## Style Tier & Aesthetic
 - brand-themed：与现有 Vue 应用「工业配价风」一致——浅灰底、藏青深色顶栏、信号蓝强调、紧凑高密度、锐利小圆角
