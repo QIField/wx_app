@@ -2,6 +2,7 @@
 /** 跨组织设备选择器：从设备字典勾选关联设备（多账号可共用同一台，不做互斥）。
  * v-model 为设备 id 数组，整体替换语义由调用方提交 device_ids 承接。 */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { matchKeyword } from '../utils/format'
 
 const props = defineProps({
   devices: { type: Array, default: () => [] }, // 设备字典（含 bound_users）
@@ -20,14 +21,11 @@ const selected = computed(() => model.value)
 const boxText = computed(() =>
   selected.value.length ? `已选 ${selected.value.length} 台设备 · 点击调整` : '从设备库选择（可跨组织）')
 
-const filtered = computed(() => {
-  const k = kw.value.trim().toLowerCase()
-  return props.devices.filter((d) => {
+const filtered = computed(() =>
+  props.devices.filter((d) => {
     if (org.value && d.org_id !== Number(org.value)) return false
-    if (k && !`${d.name} ${d.openid} ${d.org_name}`.toLowerCase().includes(k)) return false
-    return true
-  })
-})
+    return matchKeyword([d.name, d.openid, d.org_name], kw.value)
+  }))
 
 const usedCount = (d) => (d.bound_users || []).length
 const nameOf = (id) => {

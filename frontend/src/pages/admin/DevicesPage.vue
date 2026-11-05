@@ -29,19 +29,15 @@ const orgFilter = ref('')
 const onlineFilter = ref('')
 const keyword = ref('')
 
-const filtered = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  return list.value.filter((d) => {
+const filtered = computed(() =>
+  list.value.filter((d) => {
     if (orgFilter.value && d.org_id !== Number(orgFilter.value)) return false
     if (onlineFilter.value && String(d.online) !== onlineFilter.value) return false
-    if (kw) {
-      const hay = [d.openid, d.name, d.org_name,
-        ...(d.bound_users || []).map((u) => `${u.name} ${u.username}`)].join(' ').toLowerCase()
-      if (!hay.includes(kw)) return false
-    }
-    return true
-  })
-})
+    return matchKeyword(
+      [d.openid, d.name, d.org_name, ...(d.bound_users || []).flatMap((u) => [u.name, u.username])],
+      keyword.value,
+    )
+  }))
 
 const stats = computed(() => ({
   total: list.value.length,

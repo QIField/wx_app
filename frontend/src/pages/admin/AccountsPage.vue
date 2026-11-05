@@ -78,11 +78,13 @@ async function onReset(u) {
   }
 }
 
-/* ===== 新增弹窗（设备关联：从设备库勾选，device_ids 整体替换） ===== */
-const addOpen = ref(false)
-const addForm = ref({ username: '', name: '', role: 'agent', org_id: null, device_ids: [] })
-const addErr = ref('')
-const addSaving = ref(false)
+/* ===== 新增 / 编辑弹窗（同一弹窗：editingId 为空即新增；设备关联从设备库勾选，device_ids 整体替换） ===== */
+const modalOpen = ref(false)
+const editingId = ref(null)
+const editingUser = ref(null)  // 编辑行快照：admin 不可改关联，只读展示现有绑定用
+const form = ref({ username: '', name: '', role: 'agent', org_id: null, device_ids: [] })
+const formErr = ref('')
+const saving = ref(false)
 const roleOptions = computed(() =>
   props.me.role === 'developer'
     ? [['developer', '开发者'], ['admin', '管理员'], ['agent', '客服']]
@@ -90,68 +92,48 @@ const roleOptions = computed(() =>
 )
 const needOrg = (role) => role !== 'developer'  // 开发者跨组织，其余必选
 
-function openAdd() {
-  addForm.value = { username: '', name: '', role: 'agent', org_id: null, device_ids: [] }
-  addErr.value = ''
-  addOpen.value = true
+function openModal(u) {
+  editingId.value = u ? u.id : null
+  editingUser.value = u || null
+  form.value = u
+    ? { username: u.username, name: u.name, role: u.role, org_id: u.org_id ?? null,
+        device_ids: [...(u.device_ids || (u.devices || []).map((d) => d.id))] }
+    : { username: '', name: '', role: 'agent', org_id: null, device_ids: [] }
+  formErr.value = ''
+  modalOpen.value = true
 }
 
-async function saveAdd() {
-  const f = addForm.value
-  if (!f.username.trim() || !f.name.trim()) { addErr.value = '请填写登录账号与姓名'; return }
-  if (needOrg(f.role) && !f.org_id) { addErr.value = '请选择所属组织'; return }
-  addSaving.value = true
+async function save() {
+  const f = form.value
+  if (!f.name.trim() || (!editingId.value && !f.username.trim())) {
+    formErr.value = editingId.value ? '请填写姓名' : '请填写登录账号与姓名'
+    return
+  }
+  if (needOrg(f.role) && !f.org_id) { formErr.value = '请选择所属组织'; return }
+  saving.value = true
   try {
-    const payload = {
-      username: f.username.trim(),
-      name: f.name.trim(),
-      role: f.role,
-      org_id: f.org_id,
+    if (editingId.value) {
+      const payload = { name: f.name.trim(), org_id: f.org_id }
+      if (canBind) payload.device_ids = [...f.device_ids] // 空数组=解绑全部；admin 不带字段=不动关联
+      await updateAccount(editingId.value, payload)
+      toast('toast', { msg: '已保存账号修改' })
+    } else {
+      const payload = {
+        username: f.username.trim(),
+        name: f.name.trim(),
+        role: f.role,
+        org_id: f.org_id,
+      }
+      if (canBind) payload.device_ids = [...f.device_ids]
+      await createAccount(payload)
+      toast('toast', { msg: `已新增账号 ${f.username.trim()}，初始密码 123456` })
     }
-    if (canBind) payload.device_ids = [...f.device_ids]
-    await createAccount(payload)
-    toast('toast', { msg: `已新增账号 ${f.username.trim()}，初始密码 123456` })
-    addOpen.value = false
+    modalOpen.value = false
     await load()
   } catch (ex) {
-    addErr.value = ex.message || '保存失败，请重试'
+    formErr.value = ex.message || '保存失败，请重试'
   }
-  addSaving.value = false
-}
-
-/* ===== 编辑弹窗 ===== */
-const editOpen = ref(false)
-const editForm = ref({ id: null, username: '', name: '', role: '', org_id: null, device_ids: [], devices: [] })
-const editErr = ref('')
-const editSaving = ref(false)
-
-function openEdit(u) {
-  editForm.value = {
-    id: u.id, username: u.username, name: u.name, role: u.role,
-    org_id: u.org_id ?? null,
-    device_ids: [...(u.device_ids || (u.devices || []).map((d) => d.id))],
-    devices: [...(u.devices || [])], // admin 不可改关联，只读展示用
-  }
-  editErr.value = ''
-  editOpen.value = true
-}
-
-async function saveEdit() {
-  const f = editForm.value
-  if (!f.name.trim()) { editErr.value = '请填写姓名'; return }
-  if (needOrg(f.role) && !f.org_id) { editErr.value = '请选择所属组织'; return }
-  editSaving.value = true
-  try {
-    const payload = { name: f.name.trim(), org_id: f.org_id }
-    if (canBind) payload.device_ids = [...f.device_ids] // 空数组=解绑全部；admin 不带字段=不动关联
-    await updateAccount(f.id, payload)
-    toast('toast', { msg: '已保存账号修改' })
-    editOpen.value = false
-    await load()
-  } catch (ex) {
-    editErr.value = ex.message || '保存失败，请重试'
-  }
-  editSaving.value = false
+  saving.value = false
 }
 </script>
 
@@ -168,7 +150,7 @@ async function saveEdit() {
         </div>
       </div>
       <div class="page-actions">
-        <button class="btn btn-primary" @click="openAdd">
+        <button class="btn btn-primary" @click="openModal(null)">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><path d="M19 16v6"/><path d="M22 19h-6"/></svg>
           新增账号
         </button>
@@ -244,7 +226,7 @@ async function saveEdit() {
               <td>
                 <div class="ops">
                   <button type="button" class="icon-btn" :disabled="devLocked(u)"
-                          :title="devLocked(u) ? '管理员无权操作开发者账号' : '编辑姓名与微信设备绑定'" @click="openEdit(u)">
+                          :title="devLocked(u) ? '管理员无权操作开发者账号' : '编辑姓名与微信设备绑定'" @click="openModal(u)">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7 21l-4 1 1-4L17 3z"/></svg>
                   </button>
                   <button type="button" class="icon-btn" :disabled="devLocked(u)"
@@ -259,98 +241,57 @@ async function saveEdit() {
       </div>
     </div>
 
-    <!-- 新增账号弹窗 -->
-    <div class="modal-mask" :class="{ show: addOpen }" @click.self="addOpen = false">
+    <!-- 新增 / 编辑账号弹窗（editingId 为空即新增） -->
+    <div class="modal-mask" :class="{ show: modalOpen }" @click.self="modalOpen = false">
       <div class="modal">
         <div class="modal-head">
-          <h3>新增账号</h3>
-          <button type="button" class="icon-btn" aria-label="关闭" @click="addOpen = false">
+          <h3>{{ editingId ? '编辑账号' : '新增账号' }}</h3>
+          <button type="button" class="icon-btn" aria-label="关闭" @click="modalOpen = false">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
         <div class="modal-body">
           <div class="field">
             <label>登录账号</label>
-            <input v-model="addForm.username" class="input" type="text" placeholder="如：cs10">
+            <input v-model="form.username" class="input" type="text" :disabled="!!editingId" placeholder="如：cs10">
           </div>
           <div class="field">
             <label>姓名</label>
-            <input v-model="addForm.name" class="input" type="text" placeholder="成员真实姓名">
+            <input v-model="form.name" class="input" type="text" placeholder="成员真实姓名">
           </div>
-          <div class="field">
+          <div v-if="!editingId" class="field">
             <label>角色</label>
-            <select v-model="addForm.role" class="select">
+            <select v-model="form.role" class="select">
               <option v-for="[v, t] in roleOptions" :key="v" :value="v">{{ t }}</option>
             </select>
           </div>
           <div class="field">
-            <label>所属组织{{ needOrg(addForm.role) ? '' : '（可选）' }}</label>
-            <select v-model="addForm.org_id" class="select">
-              <option :value="null" disabled>{{ needOrg(addForm.role) ? '请选择组织' : '不绑组织（跨组织）' }}</option>
+            <label>所属组织{{ needOrg(form.role) ? '' : '（可选）' }}</label>
+            <select v-model="form.org_id" class="select">
+              <option :value="null" :disabled="!editingId">{{ needOrg(form.role) ? '请选择组织' : '不绑组织（跨组织）' }}</option>
               <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
             </select>
           </div>
           <div class="field">
-            <label>关联设备（可选，可多台）</label>
-            <DevicePicker v-if="canBind" v-model="addForm.device_ids" :devices="devices" :orgs="orgs" />
-            <span v-else class="tag tag-gray">微信设备绑定仅开发者可配置</span>
-          </div>
-          <span class="tag tag-gray">初始密码统一为 123456，请通知成员尽快修改</span>
-          <div class="form-err" :class="{ show: addErr }">
-            <span>{{ addErr }}</span>
-          </div>
-        </div>
-        <div class="modal-foot">
-          <button type="button" class="btn btn-ghost" @click="addOpen = false">取消</button>
-          <button type="button" class="btn btn-primary" :class="{ loading: addSaving }" :disabled="addSaving" @click="saveAdd">保存</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 编辑账号弹窗 -->
-    <div class="modal-mask" :class="{ show: editOpen }" @click.self="editOpen = false">
-      <div class="modal">
-        <div class="modal-head">
-          <h3>编辑账号</h3>
-          <button type="button" class="icon-btn" aria-label="关闭" @click="editOpen = false">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="field">
-            <label>登录账号</label>
-            <input class="input" type="text" :value="editForm.username" disabled>
-          </div>
-          <div class="field">
-            <label>姓名</label>
-            <input v-model="editForm.name" class="input" type="text" placeholder="成员真实姓名">
-          </div>
-          <div class="field">
-            <label>所属组织{{ needOrg(editForm.role) ? '' : '（可选）' }}</label>
-            <select v-model="editForm.org_id" class="select">
-              <option :value="null">{{ needOrg(editForm.role) ? '请选择组织' : '不绑组织（跨组织）' }}</option>
-              <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>关联设备（可多台，全部移除=解绑）</label>
-            <DevicePicker v-if="canBind" v-model="editForm.device_ids" :devices="devices" :orgs="orgs" />
+            <label>关联设备{{ editingId ? '（可多台，全部移除=解绑）' : '（可选，可多台）' }}</label>
+            <DevicePicker v-if="canBind" v-model="form.device_ids" :devices="devices" :orgs="orgs" />
             <template v-else>
-              <div v-if="editForm.devices.length" class="bind-chips">
-                <span v-for="d in editForm.devices" :key="d.id" class="bind-chip"
+              <div v-if="editingUser?.devices?.length" class="bind-chips">
+                <span v-for="d in editingUser.devices" :key="d.id" class="bind-chip"
                       :title="`${d.org_name || '未分配'} · ${d.name || d.openid}`">{{ d.name || d.openid }}</span>
               </div>
-              <span class="tag tag-gray" style="margin-top:6px;">微信设备绑定仅开发者可配置，管理员只能修改姓名</span>
+              <span class="tag tag-gray">微信设备绑定仅开发者可配置{{ editingId ? '，管理员只能修改姓名' : '' }}</span>
             </template>
           </div>
-          <span v-if="canBind" class="tag tag-gray">绑定后该账号在工作台只看到这些设备的会话与好友</span>
-          <div class="form-err" :class="{ show: editErr }">
-            <span>{{ editErr }}</span>
+          <span v-if="!editingId" class="tag tag-gray">初始密码统一为 123456，请通知成员尽快修改</span>
+          <span v-else-if="canBind" class="tag tag-gray">绑定后该账号在工作台只看到这些设备的会话与好友</span>
+          <div class="form-err" :class="{ show: formErr }">
+            <span>{{ formErr }}</span>
           </div>
         </div>
         <div class="modal-foot">
-          <button type="button" class="btn btn-ghost" @click="editOpen = false">取消</button>
-          <button type="button" class="btn btn-primary" :class="{ loading: editSaving }" :disabled="editSaving" @click="saveEdit">保存</button>
+          <button type="button" class="btn btn-ghost" @click="modalOpen = false">取消</button>
+          <button type="button" class="btn btn-primary" :class="{ loading: saving }" :disabled="saving" @click="save">保存</button>
         </div>
       </div>
     </div>
