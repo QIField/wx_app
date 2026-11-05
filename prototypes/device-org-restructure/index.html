@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设备 × 组织 × 账号 · 管理结构重构方案</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="frame admin-frame">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">SI</div>
+        <div class="brand-text">
+          <span class="name">SI客服系统</span>
+          <span class="sub">SI ADMIN CONSOLE</span>
+        </div>
+      </div>
+      <div class="right">
+        <span class="proto-chip num">重构方案 · 交互原型</span>
+        <span class="env-chip num">DEV</span>
+        <button type="button" class="ghost" id="btnReset" title="重置演示数据（刷新内存态）">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+          重置演示数据
+        </button>
+        <div class="user-chip">
+          <div class="user-avatar num" id="topbarAvatar">陈</div>
+          <div class="user-meta">
+            <span class="user-name" id="topbarName">陈工</span>
+            <span class="user-role" id="topbarRole">开发者</span>
+          </div>
+          <button type="button" class="icon-btn" id="btnLogout" title="退出登录" aria-label="退出登录">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="app-side">
+        <nav class="app-nav">
+          <div class="nav-label">管理后台</div>
+          <a class="nav-item" href="javascript:void(0)" data-nav="overview">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"/></svg></span>
+            <span class="nav-text">方案总览</span>
+          </a>
+          <a class="nav-item" href="javascript:void(0)" data-nav="devices">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg></span>
+            <span class="nav-text">设备管理</span>
+            <span class="nav-badge num">新增</span>
+          </a>
+          <a class="nav-item" href="javascript:void(0)" data-nav="accounts">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M9 7a4 4 0 1 0 0 .01"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+            <span class="nav-text">账号管理</span>
+            <span class="nav-badge num" style="background:var(--c-warn);">改造</span>
+          </a>
+          <a class="nav-item disabled" href="javascript:void(0)" title="现有页面，本方案不涉及">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01"/><path d="M9 12h.01"/><path d="M9 15h.01"/><path d="M15 9h.01"/><path d="M15 12h.01"/><path d="M15 15h.01"/></svg></span>
+            <span class="nav-text">组织管理</span>
+          </a>
+          <a class="nav-item disabled" href="javascript:void(0)" title="现有页面，本方案不涉及">
+            <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span>
+            <span class="nav-text">操作日志</span>
+          </a>
+        </nav>
+        <div class="nav-foot num">SI-WXCS v2.4.0 · PROTOTYPE</div>
+      </aside>
+
+      <main class="app-content">
+
+        <!-- ===================== 方案总览 ===================== -->
+        <section class="view" data-view="overview" hidden>
+          <div class="page-head rise">
+            <div>
+              <h1>方案总览</h1>
+              <div class="desc">组织 × 设备 × 账号 · 管理结构重构：设备先行入库，账号改为从设备库选择关联（可跨组织）</div>
+            </div>
+          </div>
+
+          <div class="ov-grid">
+            <div class="card hero-card rise rise-1">
+              <div class="hero-head">
+                <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+                结构关系（重构后）
+              </div>
+              <div class="hero-body">
+                <svg class="flow-svg" viewBox="0 0 640 308" role="img" aria-label="组织、设备、账号关系图">
+                  <defs>
+                    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                      <path d="M0 0L10 5L0 10z" fill="#1d5de4"/>
+                    </marker>
+                    <marker id="arwW" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                      <path d="M0 0L10 5L0 10z" fill="#f0821e"/>
+                    </marker>
+                  </defs>
+
+                  <rect x="24" y="76" width="146" height="110" rx="10" class="fb"/>
+                  <text x="42" y="102" class="ft-t">组织 org</text>
+                  <text x="42" y="126" class="ft-s">佛山 · 珠海 · 中山</text>
+                  <text x="42" y="144" class="ft-s">东莞百业 · 东莞合峰</text>
+                  <text x="42" y="172" class="ft-cap">组织管理 · 已上线，不动</text>
+
+                  <rect x="240" y="64" width="188" height="134" rx="10" class="fb-new"/>
+                  <rect x="366" y="78" width="48" height="16" rx="3" class="pill"/>
+                  <text x="390" y="89" text-anchor="middle" class="pill-t">新增</text>
+                  <text x="258" y="92" class="ft-t">设备 device</text>
+                  <text x="258" y="118" class="ft-s">openid（设备 ID · 全局唯一）</text>
+                  <text x="258" y="136" class="ft-s">设备名称</text>
+                  <text x="258" y="154" class="ft-s">所属组织 org_id</text>
+                  <text x="258" y="182" class="ft-cap">设备列表 · 先入库再关联</text>
+
+                  <rect x="498" y="76" width="120" height="110" rx="10" class="fb"/>
+                  <text x="514" y="102" class="ft-t">账号 user</text>
+                  <text x="514" y="126" class="ft-s">developer / admin</text>
+                  <text x="514" y="144" class="ft-s">agent（客服）</text>
+                  <text x="514" y="172" class="ft-cap">账号管理 · 改造绑定方式</text>
+
+                  <path d="M170 130 H 234" class="fa" marker-end="url(#arw)"/>
+                  <text x="202" y="116" text-anchor="middle" class="fl">1 : n</text>
+                  <text x="202" y="150" text-anchor="middle" class="fl-s">归属</text>
+
+                  <path d="M428 130 H 492" class="fa" marker-end="url(#arw)"/>
+                  <text x="460" y="116" text-anchor="middle" class="fl">n : m</text>
+                  <text x="460" y="150" text-anchor="middle" class="fl-s">关联</text>
+
+                  <path d="M558 186 C 558 268, 97 268, 97 192" class="fa-warn" marker-end="url(#arwW)"/>
+                  <text x="326" y="264" text-anchor="middle" class="fl-warn">跨组织 · 多账号可关联同一台设备</text>
+                  <text x="326" y="284" text-anchor="middle" class="ft-cap">user_device 由「手填 openid」改为「引用 device.id」，解除关联不影响他人</text>
+                </svg>
+              </div>
+            </div>
+
+            <div class="card rise rise-2">
+              <div class="hero-head">
+                <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg></span>
+                核心变更
+              </div>
+              <div class="chg-list">
+                <div class="chg-item">
+                  <div class="chg-no num">1</div>
+                  <div>
+                    <h4>新增设备字典 <span class="tag tag-blue">device 表</span></h4>
+                    <p>设备 ID（openid，全局唯一）+ 设备名称 + 所属组织。设备先在「设备管理」入库，组织维度可统计、可筛选，绑定人一眼可见。</p>
+                  </div>
+                </div>
+                <div class="chg-item">
+                  <div class="chg-no num">2</div>
+                  <div>
+                    <h4>账号绑定方式改造 <span class="tag tag-warn">不再手填</span></h4>
+                    <p>账号弹窗里的 open_id 手填行，换成「设备选择器」：搜索 + 按组织筛选，从设备库勾选，可跨组织；同一台设备允许多个账号勾选，列表中会提示已有几个账号关联。</p>
+                  </div>
+                </div>
+                <div class="chg-item">
+                  <div class="chg-no num">3</div>
+                  <div>
+                    <h4>多账号共用设备 <span class="tag tag-warn">新约束</span></h4>
+                    <p>一台设备可被多个账号关联、可跨组织；解除自己的关联不影响他人。查看与操控的并发策略暂不在本期范围，沿用工作台现状。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ov-low">
+            <div class="card rise rise-3">
+              <div class="hero-head">
+                <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>
+                存量数据迁移（三步）
+              </div>
+              <ol class="step-list">
+                <li><b>建设备表：</b>新建 <span class="num">device</span>，把存量 <span class="num">user_device.openid</span> 逐行落库 —— 备注名回填「设备名称」，组织暂空。</li>
+                <li><b>切换引用：</b><span class="num">user_device</span> 增加 <span class="num">device_id</span> 列并回填，之后读写都按 <span class="num">device_id</span>。</li>
+                <li><b>后台补录：</b>设备列表里按组织补选归属（页内留「未分配」筛选），账号页同步换成设备选择器。</li>
+              </ol>
+            </div>
+
+            <div class="card rise rise-4">
+              <div class="hero-head">
+                <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+                边界规则
+              </div>
+              <ul class="rule-list">
+                <li><b>设备 ID 录入后不可修改</b>——它是中间方路由键（openid）。</li>
+                <li><b>一台设备可被多个账号关联</b>，支持跨组织；解除自己的关联不影响他人。</li>
+                <li><b>仍被关联的设备不可删除</b>，先解除关联再删，防悬挂引用。</li>
+                <li><b>关联仅开发者可配置</b>，管理员只能改姓名与组织（沿用现状）。</li>
+                <li><b>查看与操控的并发策略暂不做</b>，沿用工作台现状，后续再迭代。</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card rise rise-5" style="margin-top:10px;">
+            <div class="hero-head">
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
+                后端接口契约（原型桩即此形状）
+            </div>
+            <table class="contract-tbl">
+              <tbody>
+                <tr><td class="m m-get num">GET</td><td class="path">/api/admin/devices</td><td class="d">设备列表：附组织名、关联账号（多个）、在线状态</td></tr>
+                <tr><td class="m m-post num">POST</td><td class="path">/api/admin/devices</td><td class="d">新增设备 {openid, name, org_id}，openid 唯一</td></tr>
+                <tr><td class="m m-put num">PUT</td><td class="path">/api/admin/devices/&lt;id&gt;</td><td class="d">编辑 {name, org_id}；openid 不可改</td></tr>
+                <tr><td class="m m-del num">DEL</td><td class="path">/api/admin/devices/&lt;id&gt;</td><td class="d">删除；仍被账号关联时返回 409</td></tr>
+                <tr><td class="m m-put num">PUT</td><td class="path">/api/admin/accounts/&lt;id&gt;</td><td class="d">关联改为 device_ids 数组整体替换（多对多，不做互斥校验）</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ===================== 设备管理（新增页面） ===================== -->
+        <section class="view" data-view="devices" hidden>
+          <div class="page-head rise">
+            <div>
+              <h1>设备管理</h1>
+              <div class="desc">微信设备字典：先入库、再关联。新增设备填写设备 ID 与设备名称，并归属到组织</div>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-primary" id="btnAddDevice">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+                新增设备
+              </button>
+            </div>
+          </div>
+
+          <div class="stat-grid rise rise-1">
+            <div class="stat-card">
+              <div class="stat-ic blue"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg></div>
+              <div><div class="stat-num" id="statTotal">-</div><div class="stat-label">设备总数</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-ic green"><span class="online on" style="margin:0;"></span></div>
+              <div><div class="stat-num" id="statOn">-</div><div class="stat-label">在线</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-ic orange"><span class="online off" style="margin:0;"></span></div>
+              <div><div class="stat-num" id="statOff">-</div><div class="stat-label">离线</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-ic gray"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
+              <div><div class="stat-num" id="statFree">-</div><div class="stat-label">未绑定（可关联）</div></div>
+            </div>
+          </div>
+
+          <div class="card filter-row rise rise-2">
+            <select class="select" id="devOrgFilter"></select>
+            <select class="select" id="devOnlineFilter">
+              <option value="">全部状态</option>
+              <option value="1">在线</option>
+              <option value="0">离线</option>
+              <option value="-1">未知</option>
+            </select>
+            <div class="search">
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
+              <input type="text" id="devKw" placeholder="搜索设备 ID / 名称 / 绑定人" style="width:200px;">
+            </div>
+            <div class="spacer"></div>
+            <span class="count-chip" id="devCount"></span>
+          </div>
+
+          <div class="card rise rise-3">
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th>设备 ID</th>
+                    <th>设备名称</th>
+                    <th>所属组织</th>
+                    <th>在线</th>
+                    <th>关联账号</th>
+                    <th>添加时间</th>
+                    <th style="text-align:right;">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="devTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== 账号管理（改造） ===================== -->
+        <section class="view" data-view="accounts" hidden>
+          <div class="page-head rise">
+            <div>
+              <h1>账号管理</h1>
+              <div class="desc">微信绑定已改为「设备选择器」：不再手填设备 ID，从设备库勾选，可跨组织、多账号共用同一设备
+                <span class="tag tag-warn" style="margin-left:8px;">微信设备关联仅开发者可配置</span>
+              </div>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-primary" id="btnAddAcc">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><path d="M19 16v6"/><path d="M22 19h-6"/></svg>
+                新增账号
+              </button>
+            </div>
+          </div>
+
+          <div class="card filter-row rise rise-1">
+            <div class="search">
+              <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
+              <input type="text" id="accKw" placeholder="搜索账号 / 姓名 / 组织">
+            </div>
+            <div class="spacer"></div>
+            <span class="count-chip" id="accCount"></span>
+          </div>
+
+          <div class="card rise rise-2">
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th>登录账号</th>
+                    <th>成员</th>
+                    <th>角色</th>
+                    <th>所属组织</th>
+                    <th>微信绑定</th>
+                    <th>状态</th>
+                    <th>最近登录</th>
+                    <th style="text-align:right;">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="accTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ===== 新增/编辑设备弹窗 ===== -->
+  <div class="modal-mask" id="deviceModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="devModalTitle">新增设备</h3>
+        <button type="button" class="icon-btn" id="devModalClose" aria-label="关闭">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>设备 ID（openid，全局唯一，录入后不可修改）</label>
+          <input type="text" class="input num" id="devFOpenid" placeholder="如：wxid_ab12cd34">
+        </div>
+        <div class="field">
+          <label>设备名称</label>
+          <input type="text" class="input" id="devFName" placeholder="如：佛山一部-01">
+        </div>
+        <div class="field">
+          <label>所属组织</label>
+          <select class="select" id="devFOrg"></select>
+        </div>
+        <span class="tag tag-gray">入库后在「账号管理」中即可被任意组织的账号关联</span>
+        <div class="form-err" id="devFErr"><span></span></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" id="devModalCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="devFSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 新增账号弹窗 ===== -->
+  <div class="modal-mask" id="accAddModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>新增账号</h3>
+        <button type="button" class="icon-btn" id="aaModalClose" aria-label="关闭">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>登录账号</label>
+          <input type="text" class="input" id="aaUsername" placeholder="如：fs_cs02">
+        </div>
+        <div class="field">
+          <label>姓名</label>
+          <input type="text" class="input" id="aaName" placeholder="成员真实姓名">
+        </div>
+        <div class="field">
+          <label>角色</label>
+          <select class="select" id="aaRole">
+            <option value="developer">开发者</option>
+            <option value="admin">管理员</option>
+            <option value="agent" selected>客服</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>所属组织</label>
+          <select class="select" id="aaOrg"></select>
+        </div>
+        <div class="field">
+          <label>关联设备（可多选 · 可跨组织）</label>
+          <div id="aaPicker"></div>
+        </div>
+        <span class="tag tag-gray">初始密码统一为 123456，请通知成员尽快修改</span>
+        <div class="form-err" id="aaErr"><span></span></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" id="aaCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="aaSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 编辑账号弹窗 ===== -->
+  <div class="modal-mask" id="accEditModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>编辑账号</h3>
+        <button type="button" class="icon-btn" id="aeModalClose" aria-label="关闭">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>登录账号</label>
+          <input type="text" class="input" id="aeUsername" disabled>
+        </div>
+        <div class="field">
+          <label>姓名</label>
+          <input type="text" class="input" id="aeName" placeholder="成员真实姓名">
+        </div>
+        <div class="field">
+          <label>角色</label>
+          <div><span class="tag role-developer" id="aeRoleTag">客服</span></div>
+        </div>
+        <div class="field">
+          <label>所属组织</label>
+          <select class="select" id="aeOrg"></select>
+        </div>
+        <div class="field">
+          <label>关联设备（可多选 · 可跨组织 · 全部移除即解绑）</label>
+          <div id="aePicker"></div>
+        </div>
+        <div class="form-err" id="aeErr"><span></span></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" id="aeCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="aeSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-box" id="toastBox"></div>
+
+  <script src="mock.js"></script>
+  <script src="devices.js"></script>
+  <script src="accounts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

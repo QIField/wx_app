@@ -673,6 +673,14 @@ input[type="password"]::-ms-clear {
 .mini-log .m-body { font-size: 12px; line-height: 1.45; min-width: 0; }
 .mini-log .m-body b { font-weight: 600; }
 
+/* ===== 设备关联 chips：设备管理/账号管理表格与选择器共用 ===== */
+.bind-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.bind-chip {
+  display: inline-flex; align-items: center; padding: 2px 8px; font-size: 12px;
+  border: 1px solid var(--c-border); border-radius: 999px; background: #f0f3f8; color: var(--c-text);
+}
+.bind-chip.more { background: var(--c-primary-soft); border-color: var(--c-primary); color: var(--c-primary-deep); }
+
 /* ===== 响应式 ===== */
 @media (max-width: 1200px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }

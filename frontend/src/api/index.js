@@ -83,6 +83,20 @@ export const createOrg = (name) => http.post('/orgs', { name })
 /** 组织状态：0=软删除（行保留，可恢复）1=启用。 */
 export const updateOrgStatus = (id, status) => http.put(`/orgs/${id}/status`, { status })
 
+/* ===== 设备字典管理（developer/admin 可读，developer 可写） ===== */
+
+/** 设备列表：附组织名与关联账号 bound_users（可多个，跨组织）。 */
+export const fetchAdminDevices = () => http.get('/admin/devices')
+
+/** 入库新设备 {openid, name, org_id}；openid 全局唯一（重复 409）。 */
+export const createAdminDevice = (payload) => http.post('/admin/devices', payload)
+
+/** 编辑设备 {name, org_id}；openid 录入后不可改（body 里的 openid 被忽略）。 */
+export const updateAdminDevice = (id, payload) => http.put(`/admin/devices/${id}`, payload)
+
+/** 删除设备：仍被账号关联时 409，需先在账号管理解除关联。 */
+export const deleteAdminDevice = (id) => http.delete(`/admin/devices/${id}`)
+
 /* ===== 审计日志 / 总览 ===== */
 
 export const fetchAuditLogs = (keyword) =>
@@ -141,17 +155,23 @@ export const fetchContactProfile = (contactId) => http.get(`/contacts/${contactI
 export const saveContactProfile = (contactId, payload) =>
   http.put(`/contacts/${contactId}/profile`, payload)
 
-/** WebSocket 长连接：收到推送回调 onEvent(event, data)。 */
-export function connectWs(onEvent) {
+/** WebSocket 长连接：收到推送回调 onEvent(event, data)；断线重连成功后触发一次
+ * onReopen（首次连接不触发），供调用方补拉断连期间错过的数据。 */
+export function connectWs(onEvent, onReopen) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const ws = new WebSocket(`${proto}://${location.host}/ws`)
+  let reopened = false
 
+  ws.onopen = () => {
+    if (reopened && onReopen) onReopen()
+    reopened = true
+  }
   ws.onmessage = (e) => {
     try {
       const { event, data } = JSON.parse(e.data)
       if (event && event !== 'ping') onEvent(event, data)
     } catch { /* 心跳/坏包忽略 */ }
   }
-  ws.onclose = () => setTimeout(() => connectWs(onEvent), 2000) // 断线重连
+  ws.onclose = () => setTimeout(() => connectWs(onEvent, onReopen), 2000) // 断线重连
   return ws
 }
