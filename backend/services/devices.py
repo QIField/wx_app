@@ -7,9 +7,6 @@
 
 在线状态唯一事实源在 device 表；同一台设备可被多个账号关联，状态只回写字典行。
 """
-from uuid import uuid4
-import time
-
 from backend.extensions import db
 
 
@@ -86,34 +83,25 @@ def check_device_online(openid):
     """查单台设备在线状态：1在线 0离线。
 
     中间方套路（2026-11-04 实测）：两步式——先 check_online 下发任务（只回 code/msg），
-    再用同一 uuid 调 get_check_online 查任务记录，processing_result.data=true/false。
-    不下发直接查恒为 data:[]（此前一直误判离线的根因）。任务未完成时记录是
-    "处理中"文案，补查一次。任何异常（网络错误等）视为离线，下一轮纠正。
+    再用同一 uuid 查 get_check_online，processing_result.data=true/false。
+    不下发直接查恒为 data:[]（此前一直误判离线的根因）。
+    下发/查询/解包收口到 task_query 共享工具；任何异常（网络错误等）视为离线，下一轮纠正。
     """
     from backend.adapter import client as middle
     from backend.models.device import Device
-    from backend.sync.task_query import as_dict
+    from backend.sync import task_query
 
     if middle.DEMO_MODE:
         return Device.ONLINE_ON
-    uuid = str(uuid4())
     try:
-        middle.call("login_api", "check_online", {}, uuid=uuid, openid=openid)
-        rows = None
-        for delay in (0.5, 2):  # 第二次为兜底补查：首轮记录还在处理中时再等一等
-            time.sleep(delay)
-            body = middle.call("login_api", "get_check_online", {}, uuid=uuid, openid=openid)
-            rows = body.get("data") if isinstance(body, dict) else None
-            if any(as_dict(r.get("processing_result")).get("ret") == 200
-                   for r in rows or [] if isinstance(r, dict)):
-                break
+        task_uuid = task_query.new_task_uuid()
+        middle.call("login_api", "check_online", {}, uuid=task_uuid, openid=openid)
+        record = task_query.query_record(
+            "login_api", "get_check_online", task_uuid, openid=openid, retries=2)
+        online = task_query.unwrap_result(record) is True
+        return Device.ONLINE_ON if online else Device.ONLINE_OFF
     except Exception:  # noqa: BLE001 中间方不可达 = 离线
         return Device.ONLINE_OFF
-    for row in rows or []:
-        result = as_dict(row.get("processing_result") if isinstance(row, dict) else None)
-        if result.get("ret") == 200:
-            return Device.ONLINE_ON if result.get("data") is True else Device.ONLINE_OFF
-    return Device.ONLINE_OFF
 
 
 def refresh_all_device_online(app):

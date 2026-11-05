@@ -171,7 +171,7 @@ def test_check_device_online_parses_result(app, monkeypatch):
             {"uuid": uuid, "processing_result": f'{{"ret":200,"data":{payload}}}'}]}
 
     monkeypatch.setattr(middle, "call", fake_call)
-    monkeypatch.setattr("backend.services.devices.time.sleep", lambda s: None)
+    monkeypatch.setattr("backend.sync.task_query.time.sleep", lambda s: None)
 
     assert check_device_online("ok") == 1
     assert check_device_online("off") == 0
