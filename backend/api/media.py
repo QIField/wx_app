@@ -43,7 +43,9 @@ def get_media(message_id):
 
     cached = media_fetch.cached_path(msg, img_type)
     if cached is not None:
-        return send_file(cached, mimetype=media_fetch.mimetype_of(cached), conditional=True)
+        # max-age 长缓存：媒体按消息 id 不可变，命中后浏览器不再回源（含 304 协商）
+        return send_file(cached, mimetype=media_fetch.mimetype_of(cached),
+                         conditional=True, max_age=86400)
 
     return _download_and_cache(msg, img_type)
 
@@ -76,5 +78,6 @@ def _download_and_cache(msg, img_type):
                    result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
         return jsonify(code=502, msg=f"媒体下载失败：{exc}"), 502
     return send_file(path, mimetype=media_fetch.mimetype_of(path), conditional=True,
+                     max_age=86400,
                      as_attachment=msg.msg_type == Message.MSG_FILE,
                      download_name=media_fetch.file_name(msg, path))

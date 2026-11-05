@@ -35,6 +35,7 @@ def short_summary(msg_type, content):
         Message.MSG_LINK: "[链接]",
         Message.MSG_VOICE: "[语音]",
         Message.MSG_EMOJI: "[表情]",
+        Message.MSG_QUOTE: "[引用]",
     }
     text = labels.get(msg_type)
     if text is None:
@@ -45,4 +46,8 @@ def short_summary(msg_type, content):
         title = msg_xml.app_info(content).get("title")
         if title:
             text = f"{text} {title}"
+    if msg_type == Message.MSG_QUOTE:
+        reply = msg_xml.quote_info(content).get("reply")
+        if reply:
+            text = f"{text} {reply}"
     return text[:50]

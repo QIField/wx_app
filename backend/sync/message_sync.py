@@ -44,6 +44,7 @@ _KIND_TO_TYPE = {
     msg_xml.EMOJI: Message.MSG_EMOJI,
     msg_xml.FILE: Message.MSG_FILE,
     msg_xml.LINK: Message.MSG_LINK,
+    msg_xml.QUOTE: Message.MSG_QUOTE,
 }
 
 
@@ -113,6 +114,7 @@ def broadcast_messages(pushed, openid=""):
         return
     from backend.models.conversation import Conversation
     from backend.services import anonymize
+    from backend.services.quote_media import with_media_id
     from backend.sync import group_member
     from backend.ws import hub
 
@@ -135,7 +137,8 @@ def broadcast_messages(pushed, openid=""):
             "direction": saved["direction"],
             "msg_type": saved["msg_type"],
             "content": saved["content"],
-            "payload": saved.get("payload") or {},  # 系统灰条带 system 标记；卡片信息前端兜底解析
+            "payload": with_media_id(saved.get("payload") or {}, saved.get("content")),  # 引用图片带 media_id
+            "summary": saved.get("summary") or "",  # 会话列表摘要：后端算好的，前端直接用
             "sender_name": nickname or snapshot or anonymize.anon_label(saved["sender_wxid"]),
             "sender_avatar": (info or {}).get("avatar") if nickname else None,
             "sender_alias": anonymize.alias_of(saved["sender_wxid"]),
@@ -231,6 +234,7 @@ def _save_message(openid, item, revokes=None):
         "msg_type": fields["msg_type"],
         "content": fields["content"],
         "payload": fields["payload"],
+        "summary": conv.last_msg,  # 后端算好的会话摘要，前端直接用（勿重复造轮子）
         "sender_wxid": fields["sender_wxid"],
         "sender_name": fields["sender_name"],
         "create_time": fields["create_time"],
@@ -301,6 +305,13 @@ def _normalize(item, openid=""):
             payload["noise"] = True
         if kind in (msg_xml.LINK, msg_xml.FILE):
             payload["app"] = msg_xml.app_info(content)
+        if kind == msg_xml.QUOTE:
+            payload["quote"] = msg_xml.quote_info(content)
+        if kind == msg_xml.IMAGE:
+            # 缩略图宽高随消息下发：前端加载前精确占位，图片不再顶跳聊天窗
+            size = msg_xml.image_size(content)
+            if size:
+                payload["w"], payload["h"] = size
 
         return {
             "direction": (

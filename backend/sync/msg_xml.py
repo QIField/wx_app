@@ -15,8 +15,21 @@ VOICE = "voice"     # <msg><voicemsg …> 语音
 EMOJI = "emoji"     # <msg><emoji …> 表情
 FILE = "file"       # <appmsg><type>6 文件
 LINK = "link"       # <appmsg> 其余（链接/小程序/合并聊天等，按链接卡片渲染）
+QUOTE = "quote"     # <appmsg><type>57 且带 <refermsg>：引用消息
 
-_APPMSG_FILE_TYPE = 6  # appmsg 子类型 6 = 文件
+_APPMSG_FILE_TYPE = 6   # appmsg 子类型 6 = 文件
+_APPMSG_QUOTE_TYPE = 57  # appmsg 子类型 57 = 引用
+
+# 被引用的是图片/文件等 XML 时的展示标签（quote_info 兜底）
+_KIND_LABELS = {
+    IMAGE: "[图片]",
+    VIDEO: "[视频]",
+    VOICE: "[语音]",
+    EMOJI: "[表情]",
+    FILE: "[文件]",
+    LINK: "[链接]",
+    QUOTE: "[引用]",
+}
 
 
 def _parse(content):
@@ -54,6 +67,8 @@ def classify(content):
             sub = int((app.findtext("type") or "").strip() or 0)
         except ValueError:
             sub = 0
+        if sub == _APPMSG_QUOTE_TYPE or app.find("refermsg") is not None:
+            return QUOTE
         return FILE if sub == _APPMSG_FILE_TYPE else LINK
     return None
 
@@ -173,3 +188,70 @@ def app_info(content):
         "desc": (app.findtext("des") or "").strip(),
         "url": (app.findtext("url") or "").strip(),
     }
+
+
+def quote_info(content):
+    """引用消息 → {reply, name, text}；非引用 appmsg 返回空 dict。
+
+    reply=回复正文（appmsg title），name=被引用人昵称（refermsg
+    displayname），text=被引用内容摘要：纯文本原样展示；被引用的是
+    图片/文件等 XML（实测引用也支持引用媒体消息）按类型转 [图片] 等标签。
+    """
+    root = _parse(content)
+    if root is None:
+        return {}
+    app = root.find("appmsg")
+    if app is None:
+        return {}
+    refer = app.find("refermsg")
+    if refer is None:
+        return {}
+    text = (refer.findtext("content") or "").strip()
+    # 部分渠道的引用内容带发送者前缀（实测 "wxid_xxx:\n<msg>..."），
+    # 截取 XML 部分识别类型；识别不出保持原文
+    xml_at = text.find("<")
+    if xml_at >= 0:
+        label = _KIND_LABELS.get(classify(text[xml_at:]))
+        if label:
+            text = label
+    return {
+        "reply": (app.findtext("title") or "").strip(),
+        "name": (refer.findtext("displayname") or "").strip(),
+        "text": text,
+    }
+
+
+def quote_refer_svrid(content):
+    """提取引用块的原消息 new_msg_id（refermsg svrid），无 refermsg 返回 None。
+
+    是否为图片不在这里判断（企微客服引用 content 为空、部分渠道内容带
+    发送者前缀，格式不一），由 quote_media 按库内原消息的 msg_type 判定。
+    """
+    root = _parse(content)
+    if root is None:
+        return None
+    refer = root.find("appmsg/refermsg")
+    if refer is None:
+        return None
+    svrid = (refer.findtext("svrid") or "").strip()
+    return svrid or None
+
+
+def image_size(content):
+    """图片消息的缩略图像素尺寸 (w, h)，取不到或非法返回 None。
+
+    微信图片 XML 自带 cdnthumbwidth/cdnthumbheight（缩略图与原图同比例），
+    随 payload 下发后前端用它做加载前精确占位，消除图片加载的高度突变。
+    """
+    root = _parse(content)
+    if root is None:
+        return None
+    img = root.find(".//img")
+    if img is None:
+        return None
+    try:
+        w = int(img.get("cdnthumbwidth") or 0)
+        h = int(img.get("cdnthumbheight") or 0)
+    except ValueError:
+        return None
+    return (w, h) if w > 0 and h > 0 else None

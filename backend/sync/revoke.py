@@ -87,6 +87,7 @@ def apply_revoke(openid, fields, revokes):
         "msg_type": Message.MSG_TEXT,
         "content": notice.content,
         "payload": {"system": True},  # 广播给前端：按微信样式灰条渲染
+        "summary": notice.content,  # 会话摘要同步带上（与 message_sync 推送契约一致）
         "sender_wxid": "",
         "sender_name": "系统",
         "create_time": fields["create_time"],

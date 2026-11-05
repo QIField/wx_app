@@ -18,6 +18,7 @@ class Message(db.Model, SoftDeleteMixin):
     MSG_LINK = 5
     MSG_VOICE = 6   # 只收不发（无对应发送接口）
     MSG_EMOJI = 7   # 只收不发
+    MSG_QUOTE = 8   # 只收不发（引用消息，appmsg 57）
 
     DIR_IN = 1   # 收到
     DIR_OUT = 2  # 发出
@@ -30,7 +31,7 @@ class Message(db.Model, SoftDeleteMixin):
 
     id = db.Column(BigIntPK, primary_key=True, autoincrement=True)
     conversation_id = db.Column(db.BigInteger, nullable=False, comment="所属会话")
-    msg_type = db.Column(db.SmallInteger, nullable=False, comment="1文本 2图片 3文件 4视频 5链接卡片 6语音 7表情")
+    msg_type = db.Column(db.SmallInteger, nullable=False, comment="1文本 2图片 3文件 4视频 5链接卡片 6语音 7表情 8引用")
     direction = db.Column(db.SmallInteger, nullable=False, comment="1收到 2发出")
     sender_wxid = db.Column(db.String(64), comment="发送者wxid（群聊里是群成员）")
     sender_name = db.Column(db.String(128), comment="发送者昵称")
