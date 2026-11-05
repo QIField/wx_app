@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>图片加载跳动修复 · 方案原型</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></span>
+      <span>SI 客服系统 · 方案原型</span>
+    </div>
+    <span class="chip">图片加载跳动修复</span>
+  </header>
+
+  <div class="wrap">
+    <div class="hero">
+      <h1>去掉气泡包裹后，图片加载会把视口顶跳</h1>
+      <p>占位块高度（min 105px）≠ 图片真实高度（130~260px），加载完成的一瞬间高度突变：正在看的内容被瞬间推走。跳的是「视口位置」，根源是「高度未知」。下面 3 个方案从不同角度解决，可先在演示区直观感受差别。</p>
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <section>
+      <h2>现场演示</h2>
+      <p class="sec-sub">视窗停在底部，上方 3 张历史图依次「加载完成」。红框闪烁 = 高度突变瞬间；右侧指标实时统计跳动。切换策略对比效果。</p>
+      <div class="tabs" id="tabs"></div>
+      <div class="demo">
+        <div class="phone" id="phone"></div>
+        <div class="metrics">
+          <div class="metric"><b id="mJump" class="bad">0</b><p>高度突变次数</p></div>
+          <div class="metric"><b id="mShift" class="bad">0px</b><p>视口内容累计位移</p></div>
+          <div class="metric"><b id="mCrop" class="good">无</b><p>画面裁切</p></div>
+          <div class="verdict" id="verdict"></div>
+          <button class="btn" id="rerun">重新模拟</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>根因两问</h2>
+      <div class="why" id="why"></div>
+    </section>
+
+    <section>
+      <h2>候选方案</h2>
+      <p class="sec-sub">三个方案不互斥：S1 稳视口、S2 消变化、S3 砍需求。</p>
+      <div class="sol" id="sols"></div>
+      <div class="banner">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#4f8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 3 7 7 .6-5.3 4.6 1.6 6.9L12 17.3 5.7 21l1.6-6.9L2 9.6 9 9z"/></svg>
+        <div>
+          <p><b>推荐组合：S1 立即上 + S2 跟进。</b>S1 是纯前端 2 处小改、对历史数据零依赖，当天消除跳动；S2 落地后占位即真实尺寸，连那一帧微跳都没有。S3 裁画面，客服场景不采用。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>落地清单（批准后按此实施）</h2>
+      <p class="sec-sub">点击可勾选，进度条跟踪实施范围。</p>
+      <div class="checklist" id="cks"></div>
+      <div class="progress"><i id="pbar"></i></div>
+    </section>
+
+    <footer>prototypes/img-jump-fix · 仅方案演示，未改动任何业务代码 · 批准后按落地清单实施</footer>
+  </div>
+
+  <script src="mock.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

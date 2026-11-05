@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录超时 · 根因分析与修复方案 · wx_app</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <span class="brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      登录超时 · 根因复盘与修复方案
+    </span>
+    <span class="status-pill" id="liveStatus"><span class="dot"></span>backend.app 已退出 · 5000 拒绝连接</span>
+    <nav>
+      <a href="#timeline">事故时间线</a>
+      <a href="#causes">根因链</a>
+      <a href="#fixes">修复方案</a>
+      <a href="#sim">修复前后对比</a>
+      <a href="#todo">落地清单</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- 01 结论 -->
+  <section class="hero" id="top">
+    <div class="kicker reveal d1">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>
+      2026-11-04 · 诊断报告 · 数据来自 access_log / middle_call_log / 实时探针
+    </div>
+    <h1 class="reveal d2">4 次登录在服务端<em>全部成功</em>（HTTP 200），<br>你看到的“超时”是三条链路先后出问题</h1>
+    <div class="verdict reveal d3" id="verdict"></div>
+  </section>
+
+  <!-- 02 时间线 -->
+  <section id="timeline">
+    <div class="sec-head">
+      <span class="no">01</span><h2>事故时间线</h2>
+      <span class="sub">点击条目展开详情 · 耗时为服务端实测</span>
+    </div>
+    <div class="card">
+      <div class="tl" id="timelineList"></div>
+      <p class="tl-hint">规律：中间方 API 慢（单次 5~11.7s）的窗口里，登录同步变慢；网络恢复后登录 44ms。两条公网依赖同频波动——瓶颈在公网链路，不在登录代码。</p>
+    </div>
+  </section>
+
+  <!-- 03 根因链 -->
+  <section id="causes">
+    <div class="sec-head">
+      <span class="no">02</span><h2>根因链</h2>
+      <span class="sub">1 个根因 + 2 个放大器 + 1 个恶化器</span>
+    </div>
+    <div class="cause-chain" id="causeChain"></div>
+  </section>
+
+  <!-- 04 修复方案 -->
+  <section id="fixes">
+    <div class="sec-head">
+      <span class="no">03</span><h2>修复方案</h2>
+      <span class="sub">点击卡片看改动代码 · P0 当天可落地</span>
+    </div>
+    <div class="fix-list" id="fixList"></div>
+  </section>
+
+  <!-- 05 修复前后对比 -->
+  <section id="sim">
+    <div class="sec-head">
+      <span class="no">04</span><h2>修复前后对比</h2>
+      <span class="sub">按真实链路模拟 · 可叠加“公网抖动”压力</span>
+    </div>
+    <div class="card">
+      <div class="sim">
+        <div class="sim-panel" id="simPanel">
+          <div class="seg" id="segMode">
+            <button class="on bad-mode" data-mode="before">修复前</button>
+            <button data-mode="after">修复后</button>
+          </div>
+          <div class="switch">
+            <span>模拟公网抖动（中间方 5~11s / 连接被掐断）</span>
+            <span class="sw on" id="swJitter" role="switch" aria-checked="true" tabindex="0"></span>
+          </div>
+          <button class="btn-run" id="btnRun">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            模拟登录
+          </button>
+          <p class="sim-note" id="simNote">当前：修复前 + 抖动开启。点“模拟登录”重放 16:22:57 那次请求。</p>
+        </div>
+        <div class="sim-panel">
+          <div class="sim-steps" id="simSteps"></div>
+          <div class="sim-result" id="simResult"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 落地清单 -->
+  <section id="todo">
+    <div class="sec-head">
+      <span class="no">05</span><h2>落地清单</h2>
+      <span class="sub">P0 完成即可根治“死连接 500”，并保证进程秒恢复</span>
+    </div>
+    <div class="card">
+      <div class="chk-progress">
+        <span id="chkCount">0 / 5</span>
+        <div class="chk-bar"><i id="chkBar"></i></div>
+      </div>
+      <div class="checks" id="checkList"></div>
+    </div>
+  </section>
+
+  <footer>
+    诊断于 <span class="mono">2026-11-04 15:30 ~ 16:26</span> · 证据：<span class="mono">access_log</span>（登录 4.1s→23s→10.2s→500）、<span class="mono">middle_call_log</span>（15 次 brief_info 全部 &gt;5s）、实时探针（恢复后登录 44ms / DB 查询 9ms）。
+    原型基于真实数据模拟，修复代码以评审通过后的实际提交为准。
+  </footer>
+</div>
+
+<script src="mock.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
