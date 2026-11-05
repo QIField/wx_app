@@ -1,9 +1,29 @@
 /** 聊天共享状态（Pinia）：多设备绑定、会话列表、当前会话、消息、WebSocket 事件分发。 */
 import { defineStore } from 'pinia'
+import { nextTick } from 'vue'
 import {
   checkDeviceOnline, connectWs, fetchConversations, fetchDevices, fetchMessages,
   markConversationRead, openConversation, sendTextMessage, updateConversation,
 } from '../api'
+import { prewarmThumbs } from '../utils/media'
+
+/* A方案·会话消息快照缓存（内存级）：再次点开先渲染旧内容即时显示（无骨架屏），
+ * 随后后台静默刷新纠正。key 带 openid 前缀防止切设备串窗；上限 20 会话，超出淘汰最早。 */
+const convCache = new Map()
+const CACHE_LIMIT = 20
+
+function cacheKey(openid, id) {
+  return `${openid || ''}:${id}`
+}
+
+function cachePut(openid, id, messages, hasMore) {
+  const key = cacheKey(openid, id)
+  convCache.delete(key) // 先删再放：命中顺序刷新，Map 即 LRU
+  convCache.set(key, { messages, hasMore })
+  if (convCache.size > CACHE_LIMIT) {
+    convCache.delete(convCache.keys().next().value)
+  }
+}
 
 /** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
 function nowStamp() {
@@ -136,11 +156,22 @@ export const useChatStore = defineStore('chat', {
      *  更新一轮请求，直接丢弃——根治快速切换会话时旧响应串窗的竞态。 */
     async loadMessages(id) {
       const seq = ++msgListSeq
+      const tApi = performance.now()
       try {
         const data = await fetchMessages(id)
+        const apiMs = performance.now() - tApi
         if (seq !== msgListSeq || this.currentId !== id) return
         this.currentMessages = data.messages
         this.hasMore = !!data.next_before_id
+        cachePut(this.activeOpenid, id, this.currentMessages, this.hasMore) // A方案：刷新快照
+        prewarmThumbs(data.messages) // B方案：后台预取缩略图（fire-and-forget）
+        // [perf] 打开会话全链路计时：接口耗时 + 渲染收尾（点开瞬间记录 _perfT0 才输出）
+        if (this._perfT0 != null) {
+          const total = performance.now() - this._perfT0
+          this._perfT0 = null
+          await nextTick()
+          console.info(`[perf] 打开会话#${id}: 接口=${apiMs.toFixed(0)}ms 合计=${total.toFixed(0)}ms 消息数=${data.messages.length}`)
+        }
       } finally {
         // 仅最新一轮负责骨架屏收尾：被作废的旧请求不许关掉新一轮的骨架屏
         if (seq === msgListSeq) this.loadingMessages = false
@@ -148,14 +179,16 @@ export const useChatStore = defineStore('chat', {
     },
 
     async selectConversation(id) {
+      this._perfT0 = performance.now() // [perf] 点击会话瞬间
       this.currentId = id
       // 点列表选择会话也标记已读：红点立即消失并落库（点击会话窗口内容同样清零）
       this.markCurrentRead()
 
-      // 先清残留再拉数据：面板立刻切骨架屏，避免旧会话消息撑到新数据到达才被替换
-      this.currentMessages = []
-      this.hasMore = false
-      this.loadingMessages = true
+      // A方案：点过的会话先渲染快照（点击即显示、无骨架屏），随后后台静默刷新纠正
+      const cached = convCache.get(cacheKey(this.activeOpenid, id))
+      this.currentMessages = cached ? cached.messages : []
+      this.hasMore = cached ? cached.hasMore : false
+      this.loadingMessages = !cached
       await this.loadMessages(id)
     },
 

@@ -13,6 +13,7 @@ from backend.models.message import Message
 from backend.services import anonymize, conversations as conversation_service
 from backend.services.auth import require_role
 from backend.services.devices import active_openid_for, user_openids
+from backend.services.quote_media import with_media_id
 
 bp = Blueprint("conversations", __name__)
 
@@ -171,23 +172,53 @@ def update_conversation(conversation_id):
 @bp.get("/api/conversations/<int:conversation_id>/messages")
 @require_role()
 def list_messages(conversation_id):
-    """聊天记录：时间正序，?before_id 游标翻页（拿上一页最小 id 往前翻）。"""
-    conv = _my_conversation(conversation_id)
-    if conv is None:
-        return jsonify(code=404, msg="会话不存在"), 404
+    """聊天记录：时间正序，?before_id 游标翻页（拿上一页最小 id 往前翻）。
 
+    C优化：会话归属校验 + 消息一页合并为一次 SQL 往返（远程库每次往返 25~35ms）。
+    附 [perf] 分段耗时日志（merged 合并查询 / fallback 补查 / assemble 组装）。
+    """
+    import time
+
+    _t0 = time.perf_counter()
     page_size = request.args.get("page_size", DEFAULT_PAGE_SIZE, type=int)
     page_size = max(1, min(page_size, MAX_PAGE_SIZE))
     before_id = request.args.get("before_id", type=int)
 
-    q = Message.query.filter(
-        Message.conversation_id == conversation_id,
-        Message.deleted_at.is_(None),
-    )
-    if before_id:
-        q = q.filter(Message.id < before_id)
+    # 会话归属（openid 可见性）+ 消息一页：JOIN 一次往返拿齐
+    from sqlalchemy import select
 
-    rows = q.order_by(Message.id.desc()).limit(page_size).all()
+    conv = None
+    rows = []
+    openids = _my_openids()
+    if openids:
+        mq = (
+            select(Conversation, Message)
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.openid.in_(openids),
+                Message.deleted_at.is_(None),
+            )
+        )
+        if before_id:
+            mq = mq.where(Message.id < before_id)
+        pairs = db.session.execute(
+            mq.order_by(Message.id.desc()).limit(page_size)
+        ).all()
+        if pairs:
+            conv, rows = pairs[0][0], [p[1] for p in pairs]
+    _t1 = time.perf_counter()
+
+    fallback_ms = 0.0
+    if conv is None:
+        # 无消息会话 / 未绑定设备的罕见路径：单独补查归属（跨账号仍当不存在）
+        _f0 = time.perf_counter()
+        conv = _my_conversation(conversation_id)
+        fallback_ms = (time.perf_counter() - _f0) * 1000
+        if conv is None:
+            return jsonify(code=404, msg="会话不存在"), 404
+
     rows.reverse()  # 库里倒序取最新一页，翻转成正序给前端
 
     # 群消息发言人资料：存库是 wxid 原文，展示时实时关联群成员名册（单聊返回空映射）
@@ -196,15 +227,22 @@ def list_messages(conversation_id):
     sender_map = group_member.sender_map_for(conv, [m.sender_wxid for m in rows])
 
     has_more = len(rows) == page_size
-    return jsonify(
-        code=0,
-        msg="success",
-        data={
-            "conversation": _conv_json(conv),
-            "messages": [_msg_json(m, sender_map) for m in rows],
-            "next_before_id": rows[0].id if has_more and rows else None,
-        },
+    data = {
+        "conversation": _conv_json(conv),
+        "messages": [_msg_json(m, sender_map) for m in rows],
+        "next_before_id": rows[0].id if has_more and rows else None,
+    }
+    _t2 = time.perf_counter()
+    quotes = sum(1 for m in rows if (m.payload or {}).get("quote"))
+    from flask import current_app
+
+    current_app.logger.info(
+        "[perf] messages#%s merged=%.0fms fallback=%.0fms assemble=%.0fms n=%d quotes=%d",
+        conversation_id,
+        (_t1 - _t0) * 1000, fallback_ms, (_t2 - _t1) * 1000,
+        len(rows), quotes,
     )
+    return jsonify(code=0, msg="success", data=data)
 
 
 def _conv_json(c):
@@ -238,7 +276,7 @@ def _msg_json(m, sender_map=None):
         "sender_avatar": info.get("avatar") if nickname else None,
         "sender_alias": anonymize.alias_of(m.sender_wxid),  # 匿名头像色相/标识用
         "content": m.content,
-        "payload": m.payload,
+        "payload": with_media_id(m.payload, m.content),  # 引用图片注入 media_id，前端渲染缩略图
         "operator_name": m.operator_name or "",  # 发出消息的操作人快照（气泡徽章）
         "create_time": m.create_time.strftime("%Y-%m-%d %H:%M:%S"),
         "status": m.status,

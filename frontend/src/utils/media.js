@@ -10,3 +10,16 @@ export function mediaUrlOf(m, imgType) {
     ? `/api/messages/${m.id}/media?img_type=${imgType}&${token}`
     : `/api/messages/${m.id}/media?${token}`
 }
+
+/** B方案：打开会话后后台预取图片缩略图（媒体接口带 max-age=86400，进浏览器磁盘缓存），
+ *  之后上翻历史缩略图层秒出。静默失败、fire-and-forget，不阻塞任何交互。 */
+export function prewarmThumbs(messages, limit = 30) {
+  if (!Array.isArray(messages)) return
+  messages
+    .filter((m) => m && m.msg_type === 2)
+    .slice(0, limit)
+    .forEach((m) => {
+      const img = new Image()
+      img.src = mediaUrlOf(m, 3)
+    })
+}
