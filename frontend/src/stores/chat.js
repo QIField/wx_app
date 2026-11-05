@@ -105,7 +105,6 @@ export const useChatStore = defineStore('chat', {
       this.currentId = null
       this.currentMessages = []
       this.hasMore = false
-      msgListSeq++ // 在途的旧会话消息请求作废
       await Promise.all([this.loadDevices(), this.loadConversations()])
     },
 
@@ -125,6 +124,22 @@ export const useChatStore = defineStore('chat', {
       await this.selectConversation(id)
     },
 
+    /** 拉取会话消息并整体替换视图（整表拉取唯一入口）。
+     *  每次调用递增 msgListSeq：响应回来若已切走（别的会话/账号）或已有
+     *  更新一轮请求，直接丢弃——根治快速切换会话时旧响应串窗的竞态。 */
+    async loadMessages(id) {
+      const seq = ++msgListSeq
+      try {
+        const data = await fetchMessages(id)
+        if (seq !== msgListSeq || this.currentId !== id) return
+        this.currentMessages = data.messages
+        this.hasMore = !!data.next_before_id
+      } finally {
+        // 仅最新一轮负责骨架屏收尾：被作废的旧请求不许关掉新一轮的骨架屏
+        if (seq === msgListSeq) this.loadingMessages = false
+      }
+    },
+
     async selectConversation(id) {
       this.currentId = id
       // 点列表选择会话也标记已读：红点立即消失并落库（点击会话窗口内容同样清零）
@@ -133,18 +148,8 @@ export const useChatStore = defineStore('chat', {
       // 先清残留再拉数据：面板立刻切骨架屏，避免旧会话消息撑到新数据到达才被替换
       this.currentMessages = []
       this.hasMore = false
-
-      const seq = ++msgListSeq
       this.loadingMessages = true
-      try {
-        const data = await fetchMessages(id)
-        // 已切走（点了别的会话/别的账号）：这份迟到响应直接丢弃，不许串窗
-        if (seq !== msgListSeq || this.currentId !== id) return
-        this.currentMessages = data.messages
-        this.hasMore = !!data.next_before_id
-      } finally {
-        if (seq === msgListSeq) this.loadingMessages = false
-      }
+      await this.loadMessages(id)
     },
 
     /** 用户点击了会话窗口范围内的内容：当前会话才算已读（本地清零并落库）。 */
@@ -236,16 +241,7 @@ export const useChatStore = defineStore('chat', {
       // 新消息气泡）靠这里找回来，不用手动刷新页面
       const resync = () => {
         this.loadConversations()
-        const convId = this.currentId
-        if (convId) {
-          fetchMessages(convId)
-            .then((data) => {
-              if (this.currentId !== convId) return // 补拉期间切了会话：丢弃
-              this.currentMessages = data.messages
-              this.hasMore = !!data.next_before_id
-            })
-            .catch(() => {})
-        }
+        if (this.currentId) this.loadMessages(this.currentId).catch(() => {})
       }
       connectWs((event, data) => {
         // 路由规则：本账号 → 正常处理；我的其他账号 → 卡片未读+1；别人的 → 忽略。
@@ -276,13 +272,7 @@ export const useChatStore = defineStore('chat', {
     /** 资料解析完成后推送：重拉列表；当前会话重拉消息（昵称/头像补齐即刷新）。 */
     async onConvUpdated() {
       await this.loadConversations()
-      const convId = this.currentId
-      if (convId) {
-        const data = await fetchMessages(convId)
-        if (this.currentId !== convId) return // 重拉期间切了会话：丢弃
-        this.currentMessages = data.messages
-        this.hasMore = !!data.next_before_id
-      }
+      if (this.currentId) await this.loadMessages(this.currentId)
     },
 
     onNewMessage(d) {
