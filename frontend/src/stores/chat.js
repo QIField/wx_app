@@ -6,24 +6,7 @@ import {
   markConversationRead, openConversation, sendTextMessage, updateConversation,
 } from '../api'
 import { prewarmThumbs } from '../utils/media'
-
-/* A方案·会话消息快照缓存（内存级）：再次点开先渲染旧内容即时显示（无骨架屏），
- * 随后后台静默刷新纠正。key 带 openid 前缀防止切设备串窗；上限 20 会话，超出淘汰最早。 */
-const convCache = new Map()
-const CACHE_LIMIT = 20
-
-function cacheKey(openid, id) {
-  return `${openid || ''}:${id}`
-}
-
-function cachePut(openid, id, messages, hasMore) {
-  const key = cacheKey(openid, id)
-  convCache.delete(key) // 先删再放：命中顺序刷新，Map 即 LRU
-  convCache.set(key, { messages, hasMore })
-  if (convCache.size > CACHE_LIMIT) {
-    convCache.delete(convCache.keys().next().value)
-  }
-}
+import { convCacheGet, convCachePut } from '../utils/convCache'
 
 /** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
 function nowStamp() {
@@ -163,7 +146,7 @@ export const useChatStore = defineStore('chat', {
         if (seq !== msgListSeq || this.currentId !== id) return
         this.currentMessages = data.messages
         this.hasMore = !!data.next_before_id
-        cachePut(this.activeOpenid, id, this.currentMessages, this.hasMore) // A方案：刷新快照
+        convCachePut(this.activeOpenid, id, this.currentMessages, this.hasMore) // A方案：刷新快照
         prewarmThumbs(data.messages) // B方案：后台预取缩略图（fire-and-forget）
         // [perf] 打开会话全链路计时：接口耗时 + 渲染收尾（点开瞬间记录 _perfT0 才输出）
         if (this._perfT0 != null) {
@@ -185,7 +168,7 @@ export const useChatStore = defineStore('chat', {
       this.markCurrentRead()
 
       // A方案：点过的会话先渲染快照（点击即显示、无骨架屏），随后后台静默刷新纠正
-      const cached = convCache.get(cacheKey(this.activeOpenid, id))
+      const cached = convCacheGet(this.activeOpenid, id)
       this.currentMessages = cached ? cached.messages : []
       this.hasMore = cached ? cached.hasMore : false
       this.loadingMessages = !cached

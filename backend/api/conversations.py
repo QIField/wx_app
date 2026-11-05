@@ -4,7 +4,10 @@
 绑定设备）过滤；归属校验按"当前登录人全部绑定设备"（同账号数据互通，
 跨账号严格隔离）。未绑定设备的账号看到的列表为空。
 """
-from flask import Blueprint, g, jsonify, request
+import time
+
+from flask import Blueprint, current_app, g, jsonify, request
+from sqlalchemy import select
 
 from backend.extensions import db
 from backend.models.contact import Contact
@@ -169,50 +172,50 @@ def update_conversation(conversation_id):
     return jsonify(code=0, msg="success", data=_conv_json(conv))
 
 
+def _fetch_conversation_page(conversation_id, openids, page_size, before_id):
+    """会话归属校验 + 消息一页合并为一次 SQL 往返（远程库每次往返 25~35ms）。
+
+    返回 (conv, rows)；conv 为 None 表示归属未命中（跨账号/已删除/无消息兜底交给调用方）。
+    """
+    conv, rows = None, []
+    if not openids:
+        return conv, rows
+    mq = (
+        select(Conversation, Message)
+        .join(Message, Message.conversation_id == Conversation.id)
+        .where(
+            Conversation.id == conversation_id,
+            Conversation.deleted_at.is_(None),
+            Conversation.openid.in_(openids),
+            Message.deleted_at.is_(None),
+        )
+    )
+    if before_id:
+        mq = mq.where(Message.id < before_id)
+    pairs = db.session.execute(mq.order_by(Message.id.desc()).limit(page_size)).all()
+    if pairs:
+        conv, rows = pairs[0][0], [p[1] for p in pairs]
+    return conv, rows
+
+
 @bp.get("/api/conversations/<int:conversation_id>/messages")
 @require_role()
 def list_messages(conversation_id):
     """聊天记录：时间正序，?before_id 游标翻页（拿上一页最小 id 往前翻）。
 
-    C优化：会话归属校验 + 消息一页合并为一次 SQL 往返（远程库每次往返 25~35ms）。
     附 [perf] 分段耗时日志（merged 合并查询 / fallback 补查 / assemble 组装）。
     """
-    import time
-
     _t0 = time.perf_counter()
     page_size = request.args.get("page_size", DEFAULT_PAGE_SIZE, type=int)
     page_size = max(1, min(page_size, MAX_PAGE_SIZE))
     before_id = request.args.get("before_id", type=int)
 
-    # 会话归属（openid 可见性）+ 消息一页：JOIN 一次往返拿齐
-    from sqlalchemy import select
-
-    conv = None
-    rows = []
-    openids = _my_openids()
-    if openids:
-        mq = (
-            select(Conversation, Message)
-            .join(Message, Message.conversation_id == Conversation.id)
-            .where(
-                Conversation.id == conversation_id,
-                Conversation.deleted_at.is_(None),
-                Conversation.openid.in_(openids),
-                Message.deleted_at.is_(None),
-            )
-        )
-        if before_id:
-            mq = mq.where(Message.id < before_id)
-        pairs = db.session.execute(
-            mq.order_by(Message.id.desc()).limit(page_size)
-        ).all()
-        if pairs:
-            conv, rows = pairs[0][0], [p[1] for p in pairs]
+    conv, rows = _fetch_conversation_page(conversation_id, _my_openids(), page_size, before_id)
     _t1 = time.perf_counter()
 
     fallback_ms = 0.0
     if conv is None:
-        # 无消息会话 / 未绑定设备的罕见路径：单独补查归属（跨账号仍当不存在）
+        # 无消息会话的罕见路径：单独补查归属（跨账号仍当不存在）
         _f0 = time.perf_counter()
         conv = _my_conversation(conversation_id)
         fallback_ms = (time.perf_counter() - _f0) * 1000
@@ -234,8 +237,6 @@ def list_messages(conversation_id):
     }
     _t2 = time.perf_counter()
     quotes = sum(1 for m in rows if (m.payload or {}).get("quote"))
-    from flask import current_app
-
     current_app.logger.info(
         "[perf] messages#%s merged=%.0fms fallback=%.0fms assemble=%.0fms n=%d quotes=%d",
         conversation_id,
