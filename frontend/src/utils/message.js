@@ -34,6 +34,19 @@ export function appInfoOf(m) {
   return { title: pick('title'), desc: pick('des'), url: pick('url') }
 }
 
+/** 微信转账消息识别：标题或摘要含"转账"即视为转账卡片，金额从摘要提取。
+ *
+ * 返回 { amount }（千分位原样保留；解析不到金额时为空串），非转账返回 null。
+ * 转账卡片与复制全文都不落 url——收款只能在手机微信操作，桌面端不留敏感链接。
+ */
+export function transferInfoOf(m) {
+  if (m.msg_type !== 5) return null
+  const app = appInfoOf(m)
+  if (!(app.title || '').includes('转账') && !(app.desc || '').includes('转账')) return null
+  const amount = ((app.desc || '').match(/([\d,]+(?:\.\d{1,2})?)\s*元/) || [])[1] || ''
+  return { amount }
+}
+
 /** 被引用内容是媒体 XML 时转展示标签（引用也支持引用图片/文件等）。 */
 function referLabelOf(xml) {
   const root = parseXml(xml)
@@ -108,6 +121,12 @@ const TEXT_OF = {
   1: (m) => String(m.content ?? ''),
   3: fileTitleOf,
   5: (m) => {
+    const t = transferInfoOf(m)
+    if (t) {
+      return t.amount
+        ? `转账 ¥${t.amount}（请在手机上确认收款）`
+        : `转账：${appInfoOf(m).desc || ''}`
+    }
     const app = appInfoOf(m)
     return [app.title, app.desc, app.url].filter(Boolean).join('\n')
   },
