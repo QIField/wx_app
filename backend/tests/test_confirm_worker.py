@@ -223,7 +223,7 @@ def test_confirm_skips_non_dispatched(app, conversation, monkeypatch):
 
 def test_confirm_skips_offline_device(app, conversation, monkeypatch):
     """已判定离线设备（online=0）的任务不查询结果：不白烧重试次数，保持已下发。"""
-    from backend.models.user_device import UserDevice
+    from backend.models.device import Device
 
     from backend.tests.conftest import make_user
 
@@ -236,7 +236,7 @@ def test_confirm_skips_offline_device(app, conversation, monkeypatch):
     monkeypatch.setattr(confirm_worker.middle_sender, "get_result", fake_get_result)
     make_user(open_ids=["dev01"])
     task, _ = make_task(app, conversation, SendTask.ST_DISPATCHED, Message.ST_SENDING)
-    UserDevice.query.filter_by(openid="dev01").update({"online": 0})
+    Device.query.filter_by(openid="dev01").update({"online": 0})
     db.session.commit()
 
     confirm_worker.confirm_once(app)

@@ -49,9 +49,10 @@ DEMO = [
 
 
 def _ensure_demo_user():
-    """演示账号：绑定 demo 设备（幂等，绑定已存在则跳过）。"""
+    """演示账号：关联 demo 设备（幂等，已关联则跳过）。"""
     from werkzeug.security import generate_password_hash
 
+    from backend.models.device import Device
     from backend.models.user import ROLE_AGENT, User
     from backend.models.user_device import UserDevice
 
@@ -61,9 +62,14 @@ def _ensure_demo_user():
                 password_hash=generate_password_hash("123456"))
     db.session.add(user)
     db.session.flush()
-    db.session.add(UserDevice(user_id=user.id, openid=DEMO_OPENID, remark="演示设备"))
+    device = Device.query.filter_by(openid=DEMO_OPENID).first()
+    if device is None:
+        device = Device(openid=DEMO_OPENID, name="演示设备")
+        db.session.add(device)
+        db.session.flush()
+    db.session.add(UserDevice(user_id=user.id, device_id=device.id, openid=device.openid))
     db.session.commit()
-    print("已创建演示账号 demo / 123456（绑定 demo 设备）")
+    print("已创建演示账号 demo / 123456（关联 demo 设备）")
 
 
 def seed():

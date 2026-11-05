@@ -5,6 +5,7 @@ from backend.models.base import SoftDeleteMixin
 from backend.models.contact import Contact
 from backend.models.contact_profile import ContactProfile
 from backend.models.conversation import Conversation
+from backend.models.device import Device
 from backend.models.group_member import GroupMember
 from backend.models.message import Message
 from backend.models.middle_call_log import MiddleCallLog
@@ -16,6 +17,6 @@ from backend.models.user_device import UserDevice
 
 __all__ = [
     "SoftDeleteMixin", "AccessLog", "AuditLog", "Contact", "ContactProfile", "Conversation",
-    "GroupMember", "Message", "MiddleCallLog", "Org", "SendTask", "SyncCursor", "User",
+    "Device", "GroupMember", "Message", "MiddleCallLog", "Org", "SendTask", "SyncCursor", "User",
     "UserDevice",
 ]

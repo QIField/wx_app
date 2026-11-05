@@ -32,18 +32,21 @@ def test_devices_cards_with_unread(app, client):
     resp = client.get("/api/devices", headers=login_headers(me))
 
     data = resp.get_json()["data"]
-    assert [d["openid"] for d in data] == ["dev01", "dev02"]  # 绑定顺序
+    assert [d["openid"] for d in data] == ["dev01", "dev02"]  # 关联顺序
     assert data[0]["unread"] == 5
     assert data[1]["unread"] == 7
-    assert set(data[0]) >= {"openid", "remark", "display_name", "online", "unread"}
+    assert set(data[0]) >= {"openid", "display_name", "online", "unread"}
 
 
 def test_devices_display_name_fallback(app, client):
-    """脱敏契约：无备注的设备按绑定顺序回退「设备N」，不回退 openid。"""
+    """脱敏契约：display_name 取设备字典名；未命名的按关联顺序回退「设备N」。"""
+    from backend.models.device import Device
     from backend.models.user import User
 
     me = User.query.filter_by(username="cs01").one()
-    bind_device(me, "dev02", remark="售前小号")  # dev01 无备注、dev02 有备注
+    bind_device(me, "dev02")
+    Device.query.filter_by(openid="dev02").one().name = "售前小号"  # dev01 未命名
+    db.session.commit()
 
     data = client.get("/api/devices", headers=login_headers(me)).get_json()["data"]
 
@@ -180,8 +183,8 @@ def test_check_device_online_parses_result(app, monkeypatch):
 
 
 def test_online_check_endpoint(app, client, monkeypatch):
-    """点击卡片即时检测：调 check_online 回写库并返回最新状态。"""
-    from backend.models.user_device import UserDevice
+    """点击卡片即时检测：调 check_online 回写设备字典行并返回最新状态。"""
+    from backend.models.device import Device
 
     monkeypatch.setattr(
         "backend.api.devices.check_device_online", lambda openid: 1)
@@ -189,13 +192,12 @@ def test_online_check_endpoint(app, client, monkeypatch):
     resp = client.post("/api/devices/dev01/online-check")
     assert resp.status_code == 200
     assert resp.get_json()["data"] == {"openid": "dev01", "online": 1}
-    assert UserDevice.query.filter_by(openid="dev01").one().online == 1
+    assert Device.query.filter_by(openid="dev01").one().online == 1
 
 
 def test_online_check_rejects_foreign_device(app, client, monkeypatch):
-    """别人的绑定设备不能借自己的登录态检测：403，且不写库。"""
-    from backend.models.user import User
-    from backend.models.user_device import UserDevice
+    """别人的关联设备不能借自己的登录态检测：403，且不写库。"""
+    from backend.models.device import Device
     from backend.tests.conftest import make_user
 
     monkeypatch.setattr(
@@ -203,7 +205,7 @@ def test_online_check_rejects_foreign_device(app, client, monkeypatch):
     make_user(username="cs08", name="别家客服", open_ids=["dev_other"])
 
     assert client.post("/api/devices/dev_other/online-check").status_code == 403
-    assert UserDevice.query.filter_by(openid="dev_other").one().online == -1
+    assert Device.query.filter_by(openid="dev_other").one().online == -1
 
 
 def test_unbound_account_sees_empty_lists(app):

@@ -78,8 +78,10 @@ def client(app):
 def make_user(**over):
     """测试造号工厂：默认客服角色 cs01/123456，可覆盖任意字段。
 
-    open_ids=["o1", ...]：造号同时按顺序绑定微信设备（user_device）。
+    open_ids=["o1", ...]：造号同时按顺序关联微信设备（device 字典 + user_device）；
+    openid 已在字典里时直接复用（多账号关联同一设备的多对多用例用）。
     """
+    from backend.models.device import Device
     from backend.models.user import ROLE_AGENT, User
     from backend.models.user_device import UserDevice
     from werkzeug.security import generate_password_hash
@@ -94,18 +96,32 @@ def make_user(**over):
     fields.update(over)
     user = User(**fields)
     _db.session.add(user)
-    _db.session.flush()  # 拿 id 再绑设备
+    _db.session.flush()  # 拿 id 再关联设备
     for openid in open_ids or []:
-        _db.session.add(UserDevice(user_id=user.id, openid=openid))
+        device = _device_of(openid)
+        _db.session.add(UserDevice(user_id=user.id, device_id=device.id, openid=device.openid))
     _db.session.commit()
     return user
 
 
+def _device_of(openid):
+    """按 openid 取设备字典行，没有就建（未命名、未分配组织）。"""
+    from backend.models.device import Device
+
+    device = Device.query.filter_by(openid=openid).first()
+    if device is None:
+        device = Device(openid=openid)
+        _db.session.add(device)
+        _db.session.flush()
+    return device
+
+
 def bind_device(user, openid, remark=None):
-    """给已有账号追加一台绑定设备（多设备用例用）。"""
+    """给已有账号追加一台关联设备（多设备用例用）。"""
     from backend.models.user_device import UserDevice
 
-    row = UserDevice(user_id=user.id, openid=openid, remark=remark)
+    device = _device_of(openid)
+    row = UserDevice(user_id=user.id, device_id=device.id, openid=device.openid, remark=remark)
     _db.session.add(row)
     _db.session.commit()
     return row

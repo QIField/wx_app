@@ -109,7 +109,7 @@ def test_sync_empty_round(app, monkeypatch):
 
 def test_sync_skips_offline_device(app, monkeypatch):
     """已判定离线（online=0）的设备整轮跳过，不发 get_message；未知/在线照常轮询。"""
-    from backend.models.user_device import UserDevice
+    from backend.models.device import Device
 
     captured = patch_pull(monkeypatch, make_body([make_item()]))
 
@@ -120,7 +120,7 @@ def test_sync_skips_offline_device(app, monkeypatch):
     msg_time = SyncCursor.query.one().last_sync_time
 
     # 判定离线：跳过，不再发请求，游标也不动
-    UserDevice.query.filter_by(openid="dev01").update({"online": 0})
+    Device.query.filter_by(openid="dev01").update({"online": 0})
     db.session.commit()
     captured.clear()
     message_sync.sync_once(app)
@@ -170,6 +170,19 @@ def test_sync_broadcast_masks_wxid(app, monkeypatch):
     assert ev["sender_name"].startswith("匿名 ")  # 存库快照是 wxid 原文，推送前必须匿名化
     assert ev["sender_avatar"] is None            # 无昵称 → 头像一并匿名
     assert ev["sender_alias"]
+
+
+def test_sync_broadcast_carries_summary(app, monkeypatch):
+    """推送契约：new_message 带 summary（后端算好的会话摘要），前端列表直接用。"""
+    from backend.ws import hub
+
+    broadcasts = []
+    monkeypatch.setattr(hub, "broadcast", lambda event, data: broadcasts.append((event, data)))
+    patch_pull(monkeypatch, make_body([make_item()]))
+    message_sync.sync_once(app)
+
+    events = [d for e, d in broadcasts if e == "new_message"]
+    assert events and events[0]["summary"] == "变速箱修好多钱"
 
 
 def test_sync_pull_error_silent(app, monkeypatch):
@@ -276,7 +289,8 @@ def test_sync_voice_and_emoji_mapping(app, monkeypatch):
 # ---------- msg_type=1 里塞 XML 的内容重分类（2026-10-31 实测） ----------
 
 IMG_XML = ('<msg><img aeskey="k1" encryver="1" cdnthumbaeskey="k1" '
-           'cdnthumburl="http://img.example/1" length="12345" /></msg>')
+           'cdnthumburl="http://img.example/1" cdnthumbwidth="180" cdnthumbheight="84" '
+           'length="12345" /></msg>')
 LINK_XML = ('<msg><appmsg appid="" sdkver="0"><title>活动报名</title>'
             '<des>点击查看详情</des><type>5</type>'
             '<url>https://mp.weixin.qq.com/s/abc</url></appmsg></msg>')
@@ -321,6 +335,201 @@ def test_sync_file_appmsg_reclassified(app, monkeypatch):
     msg = Message.query.one()
     assert msg.msg_type == Message.MSG_FILE
     assert msg.payload["app"]["title"] == "报价单.pdf"
+
+
+# ---------- 引用消息（appmsg type=57 带 refermsg，2026-11-04 实测） ----------
+
+QUOTE_XML = ('<msg><appmsg appid="" sdkver="0"><title>对</title><des />'
+             '<type>57</type><url />'
+             '<refermsg><type>1</type><svrid>3846952813383849708</svrid>'
+             '<fromusr>25303420694@chatroom</fromusr><chatusr>wxid_tang</chatusr>'
+             '<displayname>唐秋琪</displayname><content>现在送吗</content>'
+             '<createtime>1793442615</createtime></refermsg></appmsg></msg>')
+QUOTE_CDATA_XML = ('<msg><appmsg><title><![CDATA[@佛山巴博瑞 没有啊]]></title>'
+                   '<des /><type>57</type>'
+                   '<refermsg><type>1</type>'
+                   '<svrid><![CDATA[3547892121131514259]]></svrid>'
+                   '<displayname><![CDATA[佛山巴博瑞 啊洪]]></displayname>'
+                   '<content><![CDATA[有没有安装注意事项]]></content></refermsg>'
+                   '</appmsg></msg>')
+
+
+def test_sync_quote_appmsg_reclassified(app, monkeypatch):
+    """msg_type=49 的引用 appmsg（type=57）：还原为引用消息并提取引用信息。"""
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mq", new_msg_id="nq", msg_type="49", content=QUOTE_XML)]))
+
+    message_sync.sync_once(app)
+
+    msg = Message.query.one()
+    assert msg.msg_type == Message.MSG_QUOTE
+    assert msg.payload["quote"] == {"reply": "对", "name": "唐秋琪", "text": "现在送吗"}
+    conv = Conversation.query.one()
+    assert conv.last_msg == "[引用] 对"
+
+
+def test_sync_quote_appmsg_cdata(app, monkeypatch):
+    """CDATA 风格的引用 XML（部分设备实测）：同样识别为引用消息。"""
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mq2", new_msg_id="nq2", msg_type="49", content=QUOTE_CDATA_XML)]))
+
+    message_sync.sync_once(app)
+
+    msg = Message.query.one()
+    assert msg.msg_type == Message.MSG_QUOTE
+    assert msg.payload["quote"] == {
+        "reply": "@佛山巴博瑞 没有啊", "name": "佛山巴博瑞 啊洪", "text": "有没有安装注意事项",
+    }
+
+
+def test_quote_info_media_refer_as_label():
+    """引用的是图片等媒体消息：refermsg.content 是 XML，转 [图片] 标签展示。"""
+    from xml.sax.saxutils import escape
+
+    media_quote = ('<msg><appmsg><title>收到</title><type>57</type>'
+                   '<refermsg><type>3</type><displayname>李工</displayname>'
+                   f'<content>{escape(IMG_XML)}</content></refermsg></appmsg></msg>')
+    assert msg_xml.classify(QUOTE_XML) == msg_xml.QUOTE
+    assert msg_xml.quote_info(media_quote) == {
+        "reply": "收到", "name": "李工", "text": "[图片]",
+    }
+    # 部分渠道引用内容带发送者前缀（实测 "wxid_xxx:\n<msg>..."）：同样转标签
+    prefixed_quote = ('<msg><appmsg><title>收到</title><type>57</type>'
+                      '<refermsg><type>3</type><displayname>李工</displayname>'
+                      f'<content>wxid_abc123:{escape(IMG_XML)}</content></refermsg></appmsg></msg>')
+    assert msg_xml.quote_info(prefixed_quote) == {
+        "reply": "收到", "name": "李工", "text": "[图片]",
+    }
+    assert msg_xml.quote_info(LINK_XML) == {}  # 非引用 appmsg 返回空
+
+
+def test_quote_refer_svrid():
+    """提取 refermsg svrid（原消息 new_msg_id）；无 refermsg / 无 svrid 返回 None。
+
+    是否为图片不在 XML 层判定（企微客服引用 content 为空），由 quote_media
+    按库内原消息 msg_type 判定。
+    """
+    from xml.sax.saxutils import escape
+
+    media_quote = ('<msg><appmsg><title>收到</title><type>57</type>'
+                   '<refermsg><type>3</type><svrid>9001</svrid><displayname>李工</displayname>'
+                   f'<content>{escape(IMG_XML)}</content></refermsg></appmsg></msg>')
+    assert msg_xml.quote_refer_svrid(media_quote) == "9001"
+    # 企微客服（openim）引用：type=0、content 为空、svrid 带 CDATA
+    openim_quote = ('<msg><appmsg><title>安排了吧</title><type>57</type><refermsg>'
+                    '<type>0</type><svrid><![CDATA[1007512725332289483]]></svrid>'
+                    '<content /><ref_msg_text><![CDATA["小贺：\n[图片]"]]></ref_msg_text>'
+                    '</refermsg></appmsg></msg>')
+    assert msg_xml.quote_refer_svrid(openim_quote) == "1007512725332289483"
+    assert msg_xml.quote_refer_svrid("不是xml") is None
+
+
+def test_sync_image_payload_carries_size(app, monkeypatch):
+    """图片 XML 自带缩略图宽高：随 payload 下发（前端精确占位）；缺失则不带。"""
+    from backend.ws import hub
+
+    broadcasts = []
+    monkeypatch.setattr(hub, "broadcast", lambda event, data: broadcasts.append((event, data)))
+
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mi2", new_msg_id="img-nid2", msg_type="1", content=IMG_XML)]))
+    message_sync.sync_once(app)
+
+    saved = Message.query.filter_by(new_msg_id="img-nid2").one()
+    assert saved.payload.get("w") == 180
+    assert saved.payload.get("h") == 84
+
+    no_size_xml = '<msg><img aeskey="k2" cdnthumburl="http://img.example/2" /></msg>'
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mi3", new_msg_id="img-nid3", msg_type="1", content=no_size_xml)]))
+    message_sync.sync_once(app)
+    saved = Message.query.filter_by(new_msg_id="img-nid3").one()
+    assert "w" not in saved.payload
+
+
+def test_sync_quote_image_broadcast_carries_media_id(app, monkeypatch):
+    """引用图片且 svrid 对上库里原图消息：广播 payload.quote 带 media_id（前端渲染缩略图）。"""
+    from xml.sax.saxutils import escape
+
+    from backend.ws import hub
+
+    broadcasts = []
+    monkeypatch.setattr(hub, "broadcast", lambda event, data: broadcasts.append((event, data)))
+
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mi", new_msg_id="img-nid", msg_type="1", content=IMG_XML)]))
+    message_sync.sync_once(app)
+    media_quote = ('<msg><appmsg><title>收到</title><type>57</type>'
+                   '<refermsg><type>3</type><svrid>img-nid</svrid><displayname>李工</displayname>'
+                   f'<content>{escape(IMG_XML)}</content></refermsg></appmsg></msg>')
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mq3", new_msg_id="nq3", msg_type="49", content=media_quote)]))
+    message_sync.sync_once(app)
+
+    image_id = Message.query.filter_by(new_msg_id="img-nid").one().id
+    payload = broadcasts[-1][1]["payload"]
+    assert payload["quote"]["media_id"] == image_id
+    assert payload["quote"]["text"] == "[图片]"
+    assert payload["quote"]["w"] == 180  # 引用缩略图同样带原消息宽高，精确占位
+    assert payload["quote"]["h"] == 84
+
+
+def test_sync_quote_openim_empty_content_gets_media_id(app, monkeypatch):
+    """企微客服引用（type=0、content 为空、svrid 带 CDATA）：按库内原图消息判定并注入。"""
+    from backend.ws import hub
+
+    broadcasts = []
+    monkeypatch.setattr(hub, "broadcast", lambda event, data: broadcasts.append((event, data)))
+
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mo", new_msg_id="om-nid", msg_type="1", content=IMG_XML)]))
+    message_sync.sync_once(app)
+    openim_quote = ('<msg><appmsg><title>安排了吧</title><type>57</type><refermsg>'
+                    '<type>0</type><svrid><![CDATA[om-nid]]></svrid>'
+                    '<content /><ref_msg_text><![CDATA["小贺：\n[图片]"]]></ref_msg_text>'
+                    '</refermsg></appmsg></msg>')
+    patch_pull(monkeypatch, make_body([make_item(
+        msg_id="mq4", new_msg_id="nq4", msg_type="49", content=openim_quote)]))
+    message_sync.sync_once(app)
+
+    image_id = Message.query.filter_by(new_msg_id="om-nid").one().id
+    payload = broadcasts[-1][1]["payload"]
+    assert payload["quote"]["media_id"] == image_id
+    assert payload["quote"]["text"] == "[图片]"  # content 为空，展示文本也补上
+
+
+def test_quote_media_fallback_no_origin(app):
+    """svrid 对不上库内消息 / 原消息不是图片：不注入 media_id，前端回退标签。"""
+    from xml.sax.saxutils import escape
+
+    from backend.services.quote_media import with_media_id
+
+    payload = {"quote": {"reply": "收到", "name": "李工", "text": "[图片]"}}
+    media_quote = ('<msg><appmsg><title>收到</title><type>57</type>'
+                   '<refermsg><type>3</type><svrid>ghost</svrid><displayname>李工</displayname>'
+                   f'<content>{escape(IMG_XML)}</content></refermsg></appmsg></msg>')
+    out = with_media_id(payload, media_quote)
+    assert "media_id" not in out["quote"]
+
+    # svrid 对上了但原消息是文本：同样不注入
+    text_msg_quote = ('<msg><appmsg><title>好的</title><type>57</type>'
+                      '<refermsg><type>1</type><svrid>txt-nid</svrid><displayname>唐</displayname>'
+                      '<content>现在送吗</content></refermsg></appmsg></msg>')
+    conv = Conversation(openid="dev01", wxid="room1", name="群一")
+    db.session.add(conv)
+    db.session.commit()
+    db.session.add(Message(conversation_id=conv.id, msg_type=Message.MSG_TEXT,
+                           direction=1, new_msg_id="txt-nid", content="现在送吗"))
+    db.session.commit()
+    out = with_media_id({"quote": {"reply": "好的", "name": "唐", "text": "现在送吗"}},
+                        text_msg_quote)
+    assert "media_id" not in out["quote"]
+
+    # 引用纯文本 / 无 quote 的 payload：原样返回
+    assert with_media_id({"quote": {"reply": "对", "name": "唐", "text": "好"}}, QUOTE_XML) == {
+        "quote": {"reply": "对", "name": "唐", "text": "好"}
+    }
+    assert with_media_id(None, QUOTE_XML) is None
 
 
 def test_sync_revoke_marks_original(app, monkeypatch):

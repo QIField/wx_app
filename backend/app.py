@@ -85,6 +85,7 @@ def register_access_log_hooks(app: Flask) -> None:
 
 def register_routes(app: Flask) -> None:
     from backend.api.accounts import bp as accounts_bp
+    from backend.api.admin_devices import bp as admin_devices_bp
     from backend.api.audit_logs import bp as audit_logs_bp
     from backend.api.auth import bp as auth_bp
     from backend.api.contacts import bp as contacts_bp
@@ -98,6 +99,7 @@ def register_routes(app: Flask) -> None:
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(accounts_bp)
+    app.register_blueprint(admin_devices_bp)
     app.register_blueprint(audit_logs_bp)
     app.register_blueprint(messages_bp)
     app.register_blueprint(conversations_bp)

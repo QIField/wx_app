@@ -1,14 +1,15 @@
 """账号管理 API：列表 / 新增 / 编辑 / 启停用 / 重置密码。
 
 权限规则（已确认）：
-- developer：全部操作，含微信设备绑定（多设备）与创建任意角色
-- admin：可管理账号，但不可操作 developer 行、不可创建 developer、不可绑定设备
+- developer：全部操作，含设备关联配置（多对多、可跨组织）与创建任意角色
+- admin：可管理账号，但不可操作 developer 行、不可创建 developer、不可配置设备关联
 - 所有写操作记审计日志，业务规则拒绝也记 fail
 """
 from flask import Blueprint, g, jsonify, request
 from werkzeug.security import generate_password_hash
 
 from backend.extensions import db
+from backend.models.device import Device
 from backend.models.user import (
     MANAGE_ROLES,
     ROLE_ADMIN,
@@ -21,7 +22,7 @@ from backend.models.user import (
 from backend.models.user_device import UserDevice
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.auth import require_role
-from backend.services.devices import user_devices, user_openids
+from backend.services.devices import user_devices
 
 bp = Blueprint("accounts", __name__)
 
@@ -211,74 +212,63 @@ def reset_password(user_id):
     return jsonify(code=0, msg="success")
 
 
-def _parse_devices(body):
-    """解析 body.devices → [(openid, remark), ...]；格式非法返回 None。
-
-    兼容两种写法：["openid", ...] 或 [{"openid": "...", "remark": "..."}, ...]。
-    """
-    raw = body.get("devices")
+def _parse_device_ids(body):
+    """解析 body.device_ids → [int, ...]；格式非法返回 None。"""
+    raw = body.get("device_ids")
     if raw is None:
         return []
     if not isinstance(raw, list) or len(raw) > _MAX_DEVICES:
         return None
-    parsed = []
+    ids = []
     for item in raw:
-        if isinstance(item, str):
-            openid, remark = item, ""
-        elif isinstance(item, dict):
-            openid, remark = str(item.get("openid") or "").strip(), str(item.get("remark") or "").strip()
-        else:
+        if isinstance(item, bool) or not isinstance(item, int):
             return None
-        if not openid or len(openid) > 64 or len(remark) > 64:
-            return None
-        parsed.append((openid, remark))
-    return parsed
+        ids.append(item)
+    return ids
 
 
 def _sync_devices(user, body, me):
-    """同步绑定设备列表（仅 developer 可配置）；body 无 devices 字段=不动绑定。
+    """同步关联设备列表（仅 developer 可配置）；body 无 device_ids 字段=不动关联。
 
-    规则：openid 全局唯一（别的账号绑了就拒）、单次列表内不重复；
-    已有绑定保持原 id（绑定顺序不变），新设备按传入顺序追加，删除不在列表里的。
+    规则：整体替换——列表外的现有关联解除，新增的按传入顺序追加，
+    已有关联保持原 id（关联顺序不变）。同一台设备允许多个账号关联，
+    解除自己的关联不影响他人，不做互斥校验。
     成功返回 None，失败返回 (json, code)。
     """
-    parsed = _parse_devices(body)
-    if parsed is None:
-        return jsonify(code=400, msg=f"devices 须为 openid 数组（≤{_MAX_DEVICES}台，含 64 字内备注）"), 400
-    if "devices" not in body:
-        return None  # 编辑姓名等场景不带 devices，不视为清空绑定
+    ids = _parse_device_ids(body)
+    if ids is None:
+        return jsonify(code=400, msg=f"device_ids 须为设备 id 数组（≤{_MAX_DEVICES}个）"), 400
+    if "device_ids" not in body:
+        return None  # 编辑姓名等场景不带 device_ids，不视为清空关联
 
-    openids = [openid for openid, _ in parsed]
-    if len(set(openids)) != len(openids):
-        log_action(AuditModule.ACCOUNT, "绑定微信设备", _target(user),
+    if len(set(ids)) != len(ids):
+        log_action(AuditModule.ACCOUNT, "关联设备", _target(user),
                    result=AuditLog.RESULT_FAIL, detail="设备列表内有重复")
         return jsonify(code=400, msg="设备列表内有重复"), 400
 
-    if openids != user_openids(user.id) and me.role != ROLE_DEVELOPER:
-        log_action(AuditModule.ACCOUNT, "绑定微信设备", _target(user),
-                   result=AuditLog.RESULT_FAIL, detail="微信设备绑定仅开发者可配置")
-        return jsonify(code=403, msg="微信设备绑定仅开发者可配置"), 403
+    current = {d.device_id: d for d in user_devices(user.id)}
+    if ids != [k for k in current if k is not None] and me.role != ROLE_DEVELOPER:
+        log_action(AuditModule.ACCOUNT, "关联设备", _target(user),
+                   result=AuditLog.RESULT_FAIL, detail="设备关联仅开发者可配置")
+        return jsonify(code=403, msg="设备关联仅开发者可配置"), 403
 
-    occupied = UserDevice.query.filter(
-        UserDevice.openid.in_(openids), UserDevice.user_id != user.id,
-    ).all()
-    if occupied:
-        other = occupied[0]
-        other_user = db.session.get(User, other.user_id)
-        log_action(AuditModule.ACCOUNT, "绑定微信设备", _target(user),
-                   result=AuditLog.RESULT_FAIL, detail=f"设备 {other.openid} 已绑定 {_target(other_user)}")
-        return jsonify(
-            code=400, msg=f"设备 {other.openid} 已绑定 {other_user.username}（{other_user.name}）"
-        ), 400
+    found = {}
+    if ids:
+        for row in Device.query.filter(Device.id.in_(ids)).all():
+            found[row.id] = row
+    missing = [i for i in ids if i not in found]
+    if missing:
+        log_action(AuditModule.ACCOUNT, "关联设备", _target(user),
+                   result=AuditLog.RESULT_FAIL, detail=f"设备 {missing[0]} 不存在")
+        return jsonify(code=400, msg="关联的设备不存在，请刷新后重试"), 400
 
-    current = {d.openid: d for d in user_devices(user.id)}
-    for openid, d in current.items():
-        if openid not in openids:  # 列表里没有 = 解除绑定
-            db.session.delete(d)
-    for openid, remark in parsed:  # 已有保持顺序，新增按传入顺序追加
-        row = current.get(openid)
-        if row is None:
-            db.session.add(UserDevice(user_id=user.id, openid=openid, remark=remark or None))
-        elif (row.remark or "") != remark:
-            row.remark = remark or None
+    for did, row in current.items():
+        if did not in ids:  # 列表里没有 = 解除关联
+            db.session.delete(row)
+    for did in ids:  # 已有关联保持顺序，新增按传入顺序追加
+        if did not in current:
+            device = found[did]
+            # openid 冗余自设备字典（device.openid 录入后不可改且关联中不可删，不失步）
+            db.session.add(UserDevice(user_id=user.id, device_id=device.id,
+                                      openid=device.openid))
     return None

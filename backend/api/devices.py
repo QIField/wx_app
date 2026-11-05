@@ -13,9 +13,10 @@ bp = Blueprint("devices", __name__)
 @bp.get("/api/devices")
 @require_role()
 def list_devices():
-    """当前账号的绑定设备：openid（路由键）/备注/在线状态/未读数（绑定顺序）。
+    """当前账号的关联设备：openid（路由键）/显示名/在线状态/未读数（关联顺序）。
 
-    脱敏契约：display_name 无备注时按绑定顺序回退「设备N」，不出现 openid 字样。
+    脱敏契约：display_name 取设备字典名，未命名时按关联顺序回退「设备N」，
+    不出现 openid 字样。
     """
     devices = user_devices(g.current_user.id)
     if not devices:
@@ -44,16 +45,16 @@ def list_devices():
 @bp.post("/api/devices/<openid>/online-check")
 @require_role()
 def check_online_now(openid):
-    """点击账号卡片即时查一次在线状态：调中间方 check_online 并回写库。
+    """点击账号卡片即时查一次在线状态：调中间方 check_online 并回写字典行。
 
-    只查当前登录人自己绑定的设备，别人的设备按无权拒绝。
+    只查当前登录人自己关联的设备，别人的设备按无权拒绝。
     """
     device = next(
         (d for d in user_devices(g.current_user.id) if d.openid == openid), None
     )
-    if device is None:
+    if device is None or device.device is None:
         return jsonify(code=403, msg="无权访问该设备"), 403
-    device.online = check_device_online(openid)
+    device.device.online = check_device_online(openid)
     db.session.commit()
     return jsonify(code=0, msg="success",
-                   data={"openid": openid, "online": device.online})
+                   data={"openid": openid, "online": device.device.online})

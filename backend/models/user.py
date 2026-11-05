@@ -50,9 +50,10 @@ class User(db.Model):
         return org.name if org is not None else ""
 
     def to_json(self, with_devices=False):
-        """账号信息；设备绑定列表仅登录/管理接口按需返回。
+        """账号信息；设备关联仅登录/管理接口按需返回。
 
-        devices 按绑定顺序（user_device.id 升序），登录后默认进第一个。
+        device_ids 是设备字典 id 数组（编辑回填用），devices 按关联顺序
+        （user_device.id 升序）展开摘要；登录后默认进第一台。
         """
         data = {
             "id": self.id,
@@ -72,7 +73,21 @@ class User(db.Model):
             from backend.models.user_device import UserDevice
 
             rows = UserDevice.query.filter_by(user_id=self.id).order_by(UserDevice.id).all()
-            data["devices"] = [d.to_json() for d in rows]
+            devices = []
+            device_ids = []
+            for row in rows:
+                device = row.device
+                if device is None:
+                    continue  # 迁移遗留（字典行缺失），不进关联列表
+                device_ids.append(device.id)
+                devices.append({
+                    "id": device.id,
+                    "name": device.name or "",
+                    "org_id": device.org_id,
+                    "org_name": device.org_name,
+                })
+            data["device_ids"] = device_ids
+            data["devices"] = devices
         return data
 
     @property

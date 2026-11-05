@@ -17,7 +17,9 @@ def test_login_ok_returns_token_and_user(client):
     assert body["code"] == 0
     assert body["data"]["token"]
     assert body["data"]["user"]["role"] == ROLE_AGENT
-    assert [d["openid"] for d in body["data"]["user"]["devices"]] == ["dev01"]
+    # 设备关联摘要：字典形态（无 openid，脱敏）
+    assert [d["name"] for d in body["data"]["user"]["devices"]] == [""]
+    assert body["data"]["user"]["device_ids"] == [1]
 
 
 def test_login_wrong_password(client):
