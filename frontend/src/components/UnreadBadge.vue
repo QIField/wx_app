@@ -3,6 +3,7 @@
  *  count<=0 不渲染；>99 显示 99+；variant 区分浅色面板（row）与深色导航（rail）；
  *  dot=true 退化为纯红点不显示数字（免打扰会话的微信同款弱化提示）。 */
 import { computed } from 'vue'
+import { formatBadgeCount } from '../utils/badge'
 
 const props = defineProps({
   count: { type: Number, default: 0 },
@@ -10,7 +11,7 @@ const props = defineProps({
   dot: { type: Boolean, default: false },
 })
 
-const label = computed(() => (props.count > 99 ? '99+' : String(props.count)))
+const label = computed(() => formatBadgeCount(props.count))
 const wide = computed(() => props.count > 9)
 </script>
 

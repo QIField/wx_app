@@ -45,16 +45,23 @@ export const useChatStore = defineStore('chat', {
 
   getters: {
     currentConv: (s) => s.conversations.find((c) => c.id === s.currentId) || null,
-    activeDevice: (s) => s.devices.find((d) => d.openid === s.activeOpenid) || null,
+
+    /** 找回我的某台绑定设备卡片（找不到说明消息属于别人的设备）。 */
+    myDevice: (s) => (openid) => s.devices.find((d) => d.openid === openid) || null,
+
+    activeDevice() {
+      return this.myDevice(this.activeOpenid)
+    },
 
     /** 统一未读模块：当前账号按会话列表实时求和，其他账号用设备快照计数。
      *  侧栏「会话」红点与顶栏账号卡片红点必须都从这里取数，保证两处始终同步。 */
-    unreadOf: (s) => (openid) => {
-      if (openid === s.activeOpenid) {
-        return s.conversations.reduce((n, c) => n + (c.unread_count || 0), 0)
+    unreadOf() {
+      return (openid) => {
+        if (openid === this.activeOpenid) {
+          return this.conversations.reduce((n, c) => n + (c.unread_count || 0), 0)
+        }
+        return this.myDevice(openid)?.unread || 0
       }
-      const dev = s.devices.find((d) => d.openid === openid)
-      return dev?.unread || 0
     },
 
     /** 当前账号总未读（侧栏「会话」按钮红点）。 */
@@ -255,11 +262,6 @@ export const useChatStore = defineStore('chat', {
         else if (event === 'conv_updated') this.onConvUpdated(data)
         else if (event === 'message_revoked') this.onMessageRevoked(data)
       }, resync)
-    },
-
-    /** 找回我的某台绑定设备卡片（找不到说明消息属于别人的设备）。 */
-    myDevice(openid) {
-      return this.devices.find((d) => d.openid === openid) || null
     },
 
     /** 其他绑定账号来消息：对应卡片未读 +1（不弹框；红点由 unreadOf 统一派生）。 */

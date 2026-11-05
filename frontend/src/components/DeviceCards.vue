@@ -1,14 +1,12 @@
 <script setup>
 /** 顶栏聊天账号卡片组：显示名 + 在线点 + 未读徽标，点击切换当前查看的设备。 */
 import { useChatStore } from '../stores/chat'
+import { formatBadgeCount } from '../utils/badge'
 
 const chat = useChatStore()
 
-/** 未读徽标文案：与侧栏红点同一来源（chat.unreadOf），>99 显示 99+。 */
-function badgeText(openid) {
-  const n = chat.unreadOf(openid)
-  return n > 99 ? '99+' : String(n)
-}
+/** 未读徽标文案：与侧栏红点同一来源（chat.unreadOf），99+ 折叠规则共用 formatBadgeCount。 */
+const badgeText = (openid) => formatBadgeCount(chat.unreadOf(openid))
 </script>
 
 <template>
