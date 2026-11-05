@@ -1,6 +1,7 @@
 <script setup>
 /** 通用右键菜单弹层：Teleport 到 body，按坐标贴边自动翻转，收起时机统一收口。
- *  items: [{ key, label, checked?, sepBefore? }]；checked 渲染右侧对勾（开关类菜单项）。 */
+ *  items: [{ key, label, checked?, disabled?, sepBefore? }]；checked 渲染右侧对勾（开关类菜单项），
+ *  disabled 置灰不可点（按消息/会话能力启停）。 */
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps({
@@ -52,8 +53,11 @@ onBeforeUnmount(() => {
         <div v-if="item.sepBefore" class="ctx-sep"></div>
         <button
           class="ctx-item"
+          :class="{ disabled: item.disabled }"
           :role="item.checked === undefined ? 'menuitem' : 'menuitemradio'"
           :aria-checked="item.checked"
+          :aria-disabled="item.disabled || undefined"
+          :disabled="item.disabled || undefined"
           @click="emit('select', item.key)"
         >
           <span>{{ item.label }}</span>
@@ -91,6 +95,8 @@ onBeforeUnmount(() => {
   transition: background 0.1s;
 }
 .ctx-item:hover { background: var(--c-primary-soft); color: var(--c-primary-deep); }
+.ctx-item:disabled { color: var(--c-border-strong); cursor: not-allowed; }
+.ctx-item:disabled:hover { background: none; }
 .ctx-item .check { color: var(--c-ok); flex-shrink: 0; }
 .ctx-sep { height: 1px; margin: 4px 6px; background: var(--c-border); }
 </style>

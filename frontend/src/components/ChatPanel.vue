@@ -5,6 +5,8 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf } from '../utils/format'
 import { msgTextOf } from '../utils/message'
+import { mediaUrlOf } from '../utils/media'
+import { copyImageFromUrl, copyText } from '../utils/clipboard'
 import { buildTimeline } from '../utils/timeline'
 import MessageRow from './MessageRow.vue'
 import ContextMenu from './ContextMenu.vue'
@@ -75,21 +77,28 @@ function onReEdit(content) {
 /* ---------- 消息右键菜单 ---------- */
 const menu = ref(null) // { msg, x, y }；null 即收起
 
-/* 菜单项随消息能力启停：目前仅"复制"，后续按需追加（转发/撤回/引用…） */
+/* 菜单项随消息能力启停：图片走"复制图片"，其余文本类"复制"，
+ * 语音/视频/表情暂无可复制内容（置灰），后续按需追加（转发/撤回/引用…） */
 const menuItems = computed(() => {
   const m = menu.value?.msg
   if (!m) return []
+  if (m.msg_type === 2) return [{ key: 'copy', label: '复制图片' }]
   return [{ key: 'copy', label: '复制', disabled: !msgTextOf(m) }]
 })
 
-/* 复制：写剪贴板 + toast；纯媒体消息置灰进不来这里 */
+/* 复制：文本写文本剪贴板，图片取原图转 PNG 写位图剪贴板；失败统一 toast */
 async function onMenuSelect(key) {
   const m = menu.value?.msg
   menu.value = null
   if (!m || key !== 'copy') return
   try {
-    await navigator.clipboard.writeText(msgTextOf(m))
-    ElMessage.success('已复制')
+    if (m.msg_type === 2) {
+      await copyImageFromUrl(mediaUrlOf(m, 1))
+      ElMessage.success('已复制图片')
+    } else {
+      await copyText(msgTextOf(m))
+      ElMessage.success('已复制')
+    }
   } catch {
     ElMessage.error('复制失败，请重试')
   }
@@ -160,6 +169,9 @@ async function onMenuSelect(key) {
 }
 .peer { font-weight: 600; font-size: 14px; user-select: none; }
 .scroll { flex: 1; background: var(--c-bg); }
+/* S1 滚动锚定：上方媒体加载改变高度时，浏览器原生把位移补偿回 scrollTop，
+   视野不动（无宽高预占位的历史消息走此兜底；Safari 不支持时退化为现状） */
+.scroll :deep(.el-scrollbar__wrap) { overflow-anchor: auto; }
 .tip { text-align: center; color: var(--c-text-sub); font-size: 12px; padding: 8px; }
 
 /* 时间分隔线：居中小胶囊，只在时间断层出现（与 badge 同风格），不再通栏压线 */

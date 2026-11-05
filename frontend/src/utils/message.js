@@ -96,25 +96,31 @@ export function hostOf(url) {
   }
 }
 
+/* 引用消息全文：回复正文 + 引用行（回复为空不留空行） */
+function quoteTextOf(q) {
+  const reply = (q.reply || '').trim()
+  const quoted = [q.name, q.text].filter(Boolean).join('：')
+  return [reply, quoted && `引用 ${quoted}`].filter(Boolean).join('\n')
+}
+
+/* 消息类型 → 全文提取器：新增类型取值在此挂函数（无文本可取的类型不挂，返回空串） */
+const TEXT_OF = {
+  1: (m) => String(m.content ?? ''),
+  3: fileTitleOf,
+  5: (m) => {
+    const app = appInfoOf(m)
+    return [app.title, app.desc, app.url].filter(Boolean).join('\n')
+  },
+}
+
 /** 整条消息的可复制全文：右键复制/后续转发等操作的统一取值口。
  *
- * 取值与 MessageRow 渲染分支对齐：引用消息带回复与被引原文，
- * 链接卡片取 标题/摘要/链接，文件取文件名；纯媒体（图片/语音/视频/表情）
- * 无文本可取，返回空串（菜单据此置灰，媒体操作后续单独扩展）。
- */
+ * 引用消息带回复与被引原文，链接卡片取 标题/摘要/链接，文件取文件名；
+ * 纯媒体（图片/语音/视频/表情）无文本可取，返回空串（菜单据此置灰，
+ * 媒体操作后续单独扩展）。 */
 export function msgTextOf(m) {
   if (!m) return ''
   const quote = quoteInfoOf(m)
-  if (quote) {
-    const reply = (quote.reply || '').trim()
-    const quoted = [quote.name, quote.text].filter(Boolean).join('：')
-    return [reply, quoted && `引用 ${quoted}`].filter(Boolean).join('\n')
-  }
-  if (m.msg_type === 1) return String(m.content ?? '')
-  if (m.msg_type === 3) return fileTitleOf(m)
-  if (m.msg_type === 5) {
-    const app = appInfoOf(m)
-    return [app.title, app.desc, app.url].filter(Boolean).join('\n')
-  }
-  return ''
+  if (quote) return quoteTextOf(quote)
+  return (TEXT_OF[m.msg_type] || (() => ''))(m)
 }
