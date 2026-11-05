@@ -3,6 +3,12 @@
 import { useChatStore } from '../stores/chat'
 
 const chat = useChatStore()
+
+/** 未读徽标文案：与侧栏红点同一来源（chat.unreadOf），>99 显示 99+。 */
+function badgeText(openid) {
+  const n = chat.unreadOf(openid)
+  return n > 99 ? '99+' : String(n)
+}
 </script>
 
 <template>
@@ -17,7 +23,7 @@ const chat = useChatStore()
     >
       <span class="dev-dot" :class="{ on: d.online === 1, off: d.online === 0 }"></span>
       <span class="dev-name">{{ d.display_name }}</span>
-      <span v-if="d.unread" class="dev-unread num">{{ d.unread > 99 ? '99+' : d.unread }}</span>
+      <span v-if="chat.unreadOf(d.openid)" class="dev-unread num">{{ badgeText(d.openid) }}</span>
     </button>
     <span v-if="!chat.devices.length" class="dev-empty">未绑定聊天账号</span>
   </div>

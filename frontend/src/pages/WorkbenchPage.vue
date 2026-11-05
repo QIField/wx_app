@@ -1,7 +1,6 @@
 <script setup>
 /** 三栏工作台：深色顶栏 + 微信式图标侧栏（会话/通讯录）+ 列表 / 聊天窗 / 报价处理台。 */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useContactsStore } from '../stores/contacts'
 import BrandLogo from '../components/BrandLogo.vue'
@@ -25,10 +24,6 @@ const ROLE_TEXT = { developer: '开发者', admin: '管理员', agent: '客服' 
 
 const activeView = ref('chat') // chat | contacts
 
-/* 侧栏「会话」按钮的未读总数角标 */
-const totalUnread = computed(() =>
-  chat.conversations.reduce((n, c) => n + (c.unread_count || 0), 0))
-
 onMounted(async () => {
   chat.operatorName = props.me.name // 本地气泡直接显示操作人
   await chat.loadDevices(true)      // 默认进第一个绑定的聊天账号
@@ -40,16 +35,6 @@ onUnmounted(() => chat.stopDevicePolling())
 
 /* 切换聊天账号 → 通讯录跟着换设备重拉 */
 watch(() => chat.activeOpenid, () => { contacts.load() })
-
-/* 其他绑定账号来消息：顶栏卡片红点（store 已加）+ 这里弹 toast */
-watch(() => chat.crossMsg, (m) => {
-  if (!m) return
-  ElMessage({
-    message: `来自「${m.name}」的新消息：${String(m.content).slice(0, 30)}`,
-    type: 'warning',
-    duration: 3200,
-  })
-})
 </script>
 
 <template>
@@ -92,7 +77,7 @@ watch(() => chat.crossMsg, (m) => {
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
             </svg>
-            <UnreadBadge :count="totalUnread" variant="rail" />
+            <UnreadBadge :count="chat.totalUnread" variant="rail" />
           </button>
           <button class="rail-btn" :class="{ on: activeView === 'contacts' }" title="通讯录" @click="activeView = 'contacts'">
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
