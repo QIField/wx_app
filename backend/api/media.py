@@ -15,7 +15,7 @@ from backend.services.auth import must_change_guard, request_user, user_from_tok
 
 bp = Blueprint("media", __name__)
 
-_IMG_TYPES = {1, 2, 3}  # 1高清 2常规 3缩略图（V2 约定，默认 2）
+_IMG_TYPES = {1, 2, 3}  # 实测中间方语义：2=大图/高清；1 与 3 返回的均为缩略图（默认 2）
 
 
 @bp.get("/api/messages/<int:message_id>/media")

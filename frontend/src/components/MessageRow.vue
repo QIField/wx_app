@@ -94,7 +94,7 @@ const quoteImg = computed(() => {
   return id ? mediaUrlOf({ id }, 3) : null
 })
 function quoteFullUrl() {
-  return mediaUrlOf({ id: quote.value.media_id }, 1)
+  return mediaUrlOf({ id: quote.value.media_id }, 2)
 }
 
 /* 图片/表情/视频撑满气泡：去掉内边距（微信样式） */
@@ -162,7 +162,7 @@ function onMenu(e) {
             decoding="async"
             @load="onMediaOk"
             @error="onMediaOk"
-            @click="emit('preview', mediaUrlOf(msg, 1))"
+            @click="emit('preview', mediaUrlOf(msg, 2))"
           />
           <img
             class="layer-sharp fade"
