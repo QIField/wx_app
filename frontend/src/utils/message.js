@@ -34,6 +34,47 @@ export function appInfoOf(m) {
   return { title: pick('title'), desc: pick('des'), url: pick('url') }
 }
 
+/** 被引用内容是媒体 XML 时转展示标签（引用也支持引用图片/文件等）。 */
+function referLabelOf(xml) {
+  const root = parseXml(xml)
+  if (!root) return '[引用]'
+  const tag = (root.nodeName || '').toLowerCase()
+  const has = (name) => !!root.getElementsByTagName(name)?.length
+  if (tag === 'msg') {
+    if (has('img')) return '[图片]'
+    if (has('videomsg')) return '[视频]'
+    if (has('voicemsg')) return '[语音]'
+    if (has('emoji')) return '[表情]'
+    const app = root.getElementsByTagName('appmsg')?.[0]
+    if (app) {
+      const sub = (app.getElementsByTagName('type')[0]?.textContent || '').trim()
+      return sub === '6' ? '[文件]' : '[链接]'
+    }
+  }
+  return '[引用]'
+}
+
+/** 引用消息信息 → {reply, name, text}；非引用返回 null。
+ *
+ * 新消息后端存好 payload.quote；历史数据（按链接入库的 msg_type=5）
+ * 只有 content 里的原始 XML，这里解析 refermsg 兜底。
+ */
+export function quoteInfoOf(m) {
+  const saved = m.payload?.quote
+  if (saved && (saved.reply || saved.text || saved.name)) return saved
+  if (![5, 8].includes(m.msg_type)) return null
+  const root = parseXml(m.content)
+  const refer = root?.getElementsByTagName?.('refermsg')?.[0]
+  if (!refer) return null
+  const pick = (el, tag) => (el?.getElementsByTagName(tag)[0]?.textContent || '').trim()
+  const raw = pick(refer, 'content')
+  return {
+    reply: pick(root.getElementsByTagName('appmsg')[0], 'title'),
+    name: pick(refer, 'displayname'),
+    text: raw.startsWith('<') ? referLabelOf(raw) : raw,
+  }
+}
+
 /** 文件消息的显示名：普通文件名直接用，appmsg 文件取卡片标题。 */
 export function fileTitleOf(m) {
   const raw = String(m.content ?? '').trim()
@@ -53,4 +94,27 @@ export function hostOf(url) {
   } catch {
     return ''
   }
+}
+
+/** 整条消息的可复制全文：右键复制/后续转发等操作的统一取值口。
+ *
+ * 取值与 MessageRow 渲染分支对齐：引用消息带回复与被引原文，
+ * 链接卡片取 标题/摘要/链接，文件取文件名；纯媒体（图片/语音/视频/表情）
+ * 无文本可取，返回空串（菜单据此置灰，媒体操作后续单独扩展）。
+ */
+export function msgTextOf(m) {
+  if (!m) return ''
+  const quote = quoteInfoOf(m)
+  if (quote) {
+    const reply = (quote.reply || '').trim()
+    const quoted = [quote.name, quote.text].filter(Boolean).join('：')
+    return [reply, quoted && `引用 ${quoted}`].filter(Boolean).join('\n')
+  }
+  if (m.msg_type === 1) return String(m.content ?? '')
+  if (m.msg_type === 3) return fileTitleOf(m)
+  if (m.msg_type === 5) {
+    const app = appInfoOf(m)
+    return [app.title, app.desc, app.url].filter(Boolean).join('\n')
+  }
+  return ''
 }
