@@ -104,7 +104,10 @@ describe('transferInfoOf 微信转账识别', () => {
 
   it('标准转账消息识别并提取金额', () => {
     const m = { msg_type: 5, payload: { app: transferApp } }
-    expect(transferInfoOf(m)).toEqual({ amount: '500.00' })
+    expect(transferInfoOf(m)).toEqual({
+      amount: '500.00',
+      desc: '收到转账500.00元。如需收钱，请点此升级至最新版本',
+    })
   })
 
   it('标题为空但摘要含转账也能识别', () => {
@@ -112,7 +115,7 @@ describe('transferInfoOf 微信转账识别', () => {
       msg_type: 5,
       payload: { app: { title: '', desc: '向你转账1000元，请查收', url: '' } },
     }
-    expect(transferInfoOf(m)).toEqual({ amount: '1000' })
+    expect(transferInfoOf(m)).toEqual({ amount: '1000', desc: '向你转账1000元，请查收' })
   })
 
   it('金额带千分位原样保留', () => {
@@ -120,7 +123,7 @@ describe('transferInfoOf 微信转账识别', () => {
       msg_type: 5,
       payload: { app: { title: '微信转账', desc: '收到转账1,200.50元', url: '' } },
     }
-    expect(transferInfoOf(m)).toEqual({ amount: '1,200.50' })
+    expect(transferInfoOf(m)).toEqual({ amount: '1,200.50', desc: '收到转账1,200.50元' })
   })
 
   it('摘要无金额时返回空金额（卡片走摘要兜底）', () => {
@@ -128,7 +131,7 @@ describe('transferInfoOf 微信转账识别', () => {
       msg_type: 5,
       payload: { app: { title: '微信转账', desc: '', url: 'https://support.weixin.qq.com/x' } },
     }
-    expect(transferInfoOf(m)).toEqual({ amount: '' })
+    expect(transferInfoOf(m)).toEqual({ amount: '', desc: '' })
   })
 
   it('非转账链接卡片返回 null', () => {
