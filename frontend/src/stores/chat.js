@@ -13,8 +13,10 @@ function nowStamp() {
     + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-/** 会话摘要文案：未识别的微信 XML 显示 [系统消息]；系统灰条自带可读文案直接用。 */
+/** 会话摘要兜底：WS 推送优先用后端算好的 d.summary；缺失时（旧后端）
+ * 未识别的微信 XML 显示 [系统消息]，系统灰条自带可读文案直接用。 */
 function summaryOf(d) {
+  if (d.summary) return d.summary
   const isXml = typeof d.content === 'string' && d.content.trimStart().startsWith('<')
   if (isXml) return '[系统消息]'
   if (d.payload?.system) return d.content || '[系统消息]'
@@ -23,6 +25,10 @@ function summaryOf(d) {
 
 /** 设备卡片在线状态轮询定时器（模块级：Pinia store 单例共享）。 */
 let devPollTimer = null
+
+/** 消息列表请求序号（模块级）：切会话/切账号时递增，迟到的旧响应凭序号丢弃。
+ *  修复快速切换会话时旧会话消息串进新会话窗口的竞态（标题与内容对不上）。 */
+let msgListSeq = 0
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -35,12 +41,26 @@ export const useChatStore = defineStore('chat', {
     devices: [],         // 绑定的聊天账号卡片 [{openid, remark, display_name, online, unread}]
     activeOpenid: '',    // 当前查看的聊天账号（缺省=第一个绑定）
     operatorName: '',    // 当前登录人姓名：本地乐观气泡直接显示操作人
-    crossMsg: null,      // 其他绑定账号新消息 {openid, name, content}，页面据此弹 toast
   }),
 
   getters: {
     currentConv: (s) => s.conversations.find((c) => c.id === s.currentId) || null,
     activeDevice: (s) => s.devices.find((d) => d.openid === s.activeOpenid) || null,
+
+    /** 统一未读模块：当前账号按会话列表实时求和，其他账号用设备快照计数。
+     *  侧栏「会话」红点与顶栏账号卡片红点必须都从这里取数，保证两处始终同步。 */
+    unreadOf: (s) => (openid) => {
+      if (openid === s.activeOpenid) {
+        return s.conversations.reduce((n, c) => n + (c.unread_count || 0), 0)
+      }
+      const dev = s.devices.find((d) => d.openid === openid)
+      return dev?.unread || 0
+    },
+
+    /** 当前账号总未读（侧栏「会话」按钮红点）。 */
+    totalUnread() {
+      return this.unreadOf(this.activeOpenid)
+    },
   },
 
   actions: {
@@ -85,6 +105,7 @@ export const useChatStore = defineStore('chat', {
       this.currentId = null
       this.currentMessages = []
       this.hasMore = false
+      msgListSeq++ // 在途的旧会话消息请求作废
       await Promise.all([this.loadDevices(), this.loadConversations()])
     },
 
@@ -113,13 +134,16 @@ export const useChatStore = defineStore('chat', {
       this.currentMessages = []
       this.hasMore = false
 
+      const seq = ++msgListSeq
       this.loadingMessages = true
       try {
         const data = await fetchMessages(id)
+        // 已切走（点了别的会话/别的账号）：这份迟到响应直接丢弃，不许串窗
+        if (seq !== msgListSeq || this.currentId !== id) return
         this.currentMessages = data.messages
         this.hasMore = !!data.next_before_id
       } finally {
-        this.loadingMessages = false
+        if (seq === msgListSeq) this.loadingMessages = false
       }
     },
 
@@ -153,10 +177,13 @@ export const useChatStore = defineStore('chat', {
     /** 往前翻更早的记录（滚动到顶时调）。 */
     async loadOlderMessages() {
       if (!this.currentId || !this.hasMore || this.loadingMore) return
+      const convId = this.currentId
       this.loadingMore = true
       try {
         const oldest = this.currentMessages[0]?.id
-        const data = await fetchMessages(this.currentId, oldest)
+        const data = await fetchMessages(convId, oldest)
+        // 等待期间切了会话：旧会话的翻页不得前插进新会话
+        if (this.currentId !== convId) return
         this.currentMessages = [...data.messages, ...this.currentMessages]
         this.hasMore = !!data.next_before_id
       } finally {
@@ -205,8 +232,23 @@ export const useChatStore = defineStore('chat', {
 
     /** 连接 WebSocket 并按 data.openid 分发推送。 */
     connect() {
+      // 断线重连成功后补拉一次：后端重启/网络闪断期间错过的推送（未读红点、
+      // 新消息气泡）靠这里找回来，不用手动刷新页面
+      const resync = () => {
+        this.loadConversations()
+        const convId = this.currentId
+        if (convId) {
+          fetchMessages(convId)
+            .then((data) => {
+              if (this.currentId !== convId) return // 补拉期间切了会话：丢弃
+              this.currentMessages = data.messages
+              this.hasMore = !!data.next_before_id
+            })
+            .catch(() => {})
+        }
+      }
       connectWs((event, data) => {
-        // 路由规则：本账号 → 正常处理；我的其他账号 → 红点+toast；别人的 → 忽略。
+        // 路由规则：本账号 → 正常处理；我的其他账号 → 卡片未读+1；别人的 → 忽略。
         // 旧事件不带 openid 时保持原行为（进当前视图）。
         if (data?.openid && data.openid !== this.activeOpenid) {
           if (event === 'new_message' && this.myDevice(data.openid)) this.onCrossMessage(data)
@@ -216,7 +258,7 @@ export const useChatStore = defineStore('chat', {
         else if (event === 'send_result') this.onSendResult(data)
         else if (event === 'conv_updated') this.onConvUpdated(data)
         else if (event === 'message_revoked') this.onMessageRevoked(data)
-      })
+      }, resync)
     },
 
     /** 找回我的某台绑定设备卡片（找不到说明消息属于别人的设备）。 */
@@ -224,23 +266,20 @@ export const useChatStore = defineStore('chat', {
       return this.devices.find((d) => d.openid === openid) || null
     },
 
-    /** 其他绑定账号来消息：对应卡片未读 +1，并抛 crossMsg 让页面弹 toast。 */
+    /** 其他绑定账号来消息：对应卡片未读 +1（不弹框；红点由 unreadOf 统一派生）。 */
     onCrossMessage(d) {
       const dev = this.myDevice(d.openid)
       if (!dev) return
       if (d.direction === 1) dev.unread = (dev.unread || 0) + 1
-      this.crossMsg = {
-        openid: d.openid,
-        name: dev.display_name || '设备',  // display_name 后端已保证非空（无备注回退设备N）
-        content: summaryOf(d),
-      }
     },
 
     /** 资料解析完成后推送：重拉列表；当前会话重拉消息（昵称/头像补齐即刷新）。 */
     async onConvUpdated() {
       await this.loadConversations()
-      if (this.currentId) {
-        const data = await fetchMessages(this.currentId)
+      const convId = this.currentId
+      if (convId) {
+        const data = await fetchMessages(convId)
+        if (this.currentId !== convId) return // 重拉期间切了会话：丢弃
         this.currentMessages = data.messages
         this.hasMore = !!data.next_before_id
       }
