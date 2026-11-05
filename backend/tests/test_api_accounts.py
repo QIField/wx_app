@@ -1,16 +1,18 @@
-"""账号管理接口单测：权限门控、设备绑定唯一性、审计日志接入、组织归属。"""
+"""账号管理接口单测：权限门控、设备关联（多对多）、审计日志接入、组织归属。"""
 from backend.extensions import db
 from backend.models.audit_log import AuditLog
+from backend.models.device import Device
 from backend.models.org import Org
 from backend.models.user import ROLE_ADMIN, ROLE_AGENT, ROLE_DEVELOPER, User
-from backend.models.user_device import UserDevice
 from backend.services.audit import AuditModule
 
 from backend.tests.conftest import login_headers, make_user
 
 
 def _devices_of(user_id):
-    """某账号的绑定 openid 列表（按绑定顺序）。"""
+    """某账号关联设备的 openid 列表（按关联顺序）。"""
+    from backend.models.user_device import UserDevice
+
     rows = UserDevice.query.filter_by(user_id=user_id).order_by(UserDevice.id).all()
     return [r.openid for r in rows]
 
@@ -25,6 +27,14 @@ def _admin():
 
 def _org(name="佛山"):
     row = Org(name=name)
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+def _device(openid, name=None, org_id=None):
+    """建设备字典行，返回 Device。"""
+    row = Device(openid=openid, name=name, org_id=org_id)
     db.session.add(row)
     db.session.commit()
     return row
@@ -223,74 +233,85 @@ def test_reset_password(client, app):
 
 
 def test_bind_devices_developer_only(client, app):
-    """绑定设备：developer 可以，admin 不可（服务端强校验）。"""
+    """关联设备：developer 可以，admin 不可（服务端强校验）。"""
     _dev()
     _admin()
     make_user(username="cs03", name="客服三", role=ROLE_AGENT)
     dev = User.query.filter_by(username="dev").one()
     adm = User.query.filter_by(username="adm").one()
     target = User.query.filter_by(username="cs03").one()
+    device = _device("ABC123", name="一号机")
 
     ok = client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
-                    json={"name": "客服三", "devices": [{"openid": "ABC123", "remark": "一号机"}]})
+                    json={"name": "客服三", "device_ids": [device.id]})
     assert ok.status_code == 200
     db.session.expire_all()
     assert _devices_of(target.id) == ["ABC123"]
 
     target2 = make_user(username="cs04", name="客服四", role=ROLE_AGENT)
     denied = client.put(f"/api/accounts/{target2.id}", headers=login_headers(adm),
-                        json={"name": "客服四", "devices": ["XYZ789"]})
+                        json={"name": "客服四", "device_ids": [device.id]})
     assert denied.status_code == 403
     db.session.expire_all()
     assert _devices_of(target2.id) == []
-    log = AuditLog.query.filter_by(action="绑定微信设备", result="fail").one()
+    log = AuditLog.query.filter_by(action="关联设备", result="fail").one()
     assert "仅开发者" in log.detail
 
 
 def test_bind_devices_multiple_in_order(client, app):
-    """一台账号绑多台设备：按传入顺序追加；再传列表时已有绑定保持原顺序。"""
+    """一个账号关联多台设备：按传入顺序追加；再传列表时已有关联保持原顺序。"""
     _dev()
     make_user(username="cs14", name="客服十四", role=ROLE_AGENT)
     dev = User.query.filter_by(username="dev").one()
     target = User.query.filter_by(username="cs14").one()
+    d1, d2, d3, d4 = _device("D1"), _device("D2"), _device("D3"), _device("D4")
 
     ok = client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
-                    json={"name": "客服十四", "devices": ["D1", "D2", "D3"]})
+                    json={"name": "客服十四", "device_ids": [d1.id, d2.id, d3.id]})
     assert ok.status_code == 200
     db.session.expire_all()
     assert _devices_of(target.id) == ["D1", "D2", "D3"]
 
-    # 去掉 D2：D1/D3 保持原绑定，D2 解除；新加 D4 排最后
+    # 去掉 D2：D1/D3 保持原关联，D2 解除；新加 D4 排最后
     ok2 = client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
-                     json={"name": "客服十四", "devices": ["D1", "D3", "D4"]})
+                     json={"name": "客服十四", "device_ids": [d1.id, d3.id, d4.id]})
     assert ok2.status_code == 200
     db.session.expire_all()
     assert _devices_of(target.id) == ["D1", "D3", "D4"]
 
 
+def test_bind_devices_unknown_device_rejected(client, app):
+    """关联不存在的设备：400 + fail 日志。"""
+    _dev()
+    make_user(username="cs16", name="客服十六", role=ROLE_AGENT)
+    dev = User.query.filter_by(username="dev").one()
+    target = User.query.filter_by(username="cs16").one()
+
+    resp = client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
+                      json={"name": "客服十六", "device_ids": [9999]})
+    assert resp.status_code == 400
+    assert _devices_of(target.id) == []
+    log = AuditLog.query.filter_by(action="关联设备", result="fail").one()
+    assert "不存在" in log.detail
+
+
 def test_bind_devices_all_roles(client, app):
-    """开发者/管理员账号也可绑定设备；角色间设备冲突同样拒绝。"""
+    """开发者/管理员账号也可关联设备。"""
     _dev()
     _admin()
     dev = User.query.filter_by(username="dev").one()
     adm = User.query.filter_by(username="adm").one()
+    device = _device("ADM1")
 
     ok = client.put(f"/api/accounts/{adm.id}", headers=login_headers(dev),
-                    json={"name": "管理员", "devices": ["ADM1"]})
+                    json={"name": "管理员", "device_ids": [device.id]})
     assert ok.status_code == 200
     db.session.expire_all()
     assert _devices_of(adm.id) == ["ADM1"]
 
-    # 客服占用管理员已绑的设备：同样拒绝
-    target = make_user(username="cs13", name="客服十三", role=ROLE_AGENT)
-    resp = client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
-                      json={"name": "客服十三", "devices": ["ADM1"]})
-    assert resp.status_code == 400
-    assert "已绑定" in resp.get_json()["msg"]
-
-    # developer 传空列表 = 解除全部绑定
+    # developer 传空列表 = 解除全部关联
     clear = client.put(f"/api/accounts/{adm.id}", headers=login_headers(dev),
-                       json={"name": "管理员", "devices": []})
+                       json={"name": "管理员", "device_ids": []})
     assert clear.status_code == 200
     db.session.expire_all()
     assert _devices_of(adm.id) == []
@@ -302,38 +323,57 @@ def test_bind_devices_duplicate_in_list(client, app):
     make_user(username="cs15", name="客服十五", role=ROLE_AGENT)
     dev = User.query.filter_by(username="dev").one()
     target = User.query.filter_by(username="cs15").one()
+    device = _device("D1")
 
     resp = client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
-                      json={"name": "客服十五", "devices": ["D1", "D1"]})
+                      json={"name": "客服十五", "device_ids": [device.id, device.id]})
     assert resp.status_code == 400
     assert _devices_of(target.id) == []
 
 
-def test_bind_devices_unique(client, app):
-    """一台设备只能绑一个账号：冲突 400 + fail 日志。"""
+def test_multiple_accounts_share_device(client, app):
+    """多账号关联同一台设备：放行（多对多）；解除自己的关联不影响他人。"""
     _dev()
-    make_user(username="cs11", name="客服十一", role=ROLE_AGENT, open_ids=["DEV1"])
+    device = _device("SHARED", name="共用机")
+    first = make_user(username="cs11", name="客服十一", role=ROLE_AGENT, open_ids=["SHARED"])
     dev = User.query.filter_by(username="dev").one()
-    other = make_user(username="cs12", name="客服十二", role=ROLE_AGENT)
+    second = make_user(username="cs12", name="客服十二", role=ROLE_AGENT)
 
-    resp = client.put(f"/api/accounts/{other.id}", headers=login_headers(dev),
-                      json={"name": "客服十二", "devices": ["DEV1"]})
+    # 同一设备再关联第二个账号：放行
+    resp = client.put(f"/api/accounts/{second.id}", headers=login_headers(dev),
+                      json={"name": "客服十二", "device_ids": [device.id]})
+    assert resp.status_code == 200
+    db.session.expire_all()
+    assert _devices_of(first.id) == ["SHARED"]
+    assert _devices_of(second.id) == ["SHARED"]
 
-    assert resp.status_code == 400
-    assert "已绑定" in resp.get_json()["msg"]
-    log = AuditLog.query.filter_by(action="绑定微信设备", result="fail").one()
-    assert "客服十一" in log.detail
+    # 第二个账号解除关联：第一个不受影响
+    resp2 = client.put(f"/api/accounts/{second.id}", headers=login_headers(dev),
+                       json={"name": "客服十二", "device_ids": []})
+    assert resp2.status_code == 200
+    db.session.expire_all()
+    assert _devices_of(first.id) == ["SHARED"]
+    assert _devices_of(second.id) == []
+
+    # 新增账号时直接带 device_ids 也放行（多对多）
+    resp3 = client.post("/api/accounts", headers=login_headers(dev),
+                        json={"username": "cs13", "name": "客服十三", "role": ROLE_AGENT,
+                              "org_id": _org("中山").id, "device_ids": [device.id]})
+    assert resp3.status_code == 200
+    created = User.query.filter_by(username="cs13").one()
+    assert created.to_json(with_devices=True)["device_ids"] == [device.id]
 
 
 def test_admin_edit_name_with_existing_devices_ok(client, app):
-    """管理员编辑姓名时原样带回已有绑定（未变化）：放行，不算越权。"""
+    """管理员编辑姓名时原样带回已有关联（未变化）：放行，不算越权。"""
     _admin()
+    device = _device("DEV2")
     make_user(username="cs06", name="旧名", role=ROLE_AGENT, open_ids=["DEV2"])
     adm = User.query.filter_by(username="adm").one()
     target = User.query.filter_by(username="cs06").one()
 
     resp = client.put(f"/api/accounts/{target.id}", headers=login_headers(adm),
-                      json={"name": "新名", "devices": [{"openid": "DEV2"}]})
+                      json={"name": "新名", "device_ids": [device.id]})
 
     assert resp.status_code == 200
     db.session.expire_all()
