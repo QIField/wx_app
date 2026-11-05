@@ -1,6 +1,6 @@
 /* ===== app.js · 主控：视图路由 / 事件委托 / ws-sim 来消息 / 发送闭环 ===== */
 (() => {
-  const S = window.Store, V = window.V, API = window.API, MOCK = window.MOCK;
+  const S = window.Store, V = window.V, API = window.API, MOCK = window.MOCK, Notify = window.Notify;
   const $ = (sel, root = document) => root.querySelector(sel);
   const viewEl = $('#view'), barEl = $('#topbar-right'), toastEl = $('#toast-zone'), drawerEl = $('#drawer-root'), ctxEl = $('#ctx-root');
 
@@ -26,6 +26,7 @@
 
   /* ---------- 视图流转 ---------- */
   async function doLogin(username) {
+    Notify.unlock(); // 登录点击手势内解锁 AudioContext（浏览器自动播放策略）
     const { user, devices } = await API.login(username);
     S.state.me = user;
     S.state.myDevices = devices.map((d) => d.openid);
@@ -112,6 +113,7 @@
     conv.last_msg = item.content; conv.last_msg_at = item.time;
     refreshChatParts();
     showToast(conv, item);
+    Notify.incoming(conv); // 微信策略：合并窗口内只响一次；免打扰不响
   }
 
   function showToast(conv, item) {
@@ -227,7 +229,7 @@
     else if (act === 'close-logs') { S.state.logsOpen = false; renderDrawer(); }
     else if (act === 'logs-page') { S.state.logsOpen = false; renderDrawer(); gotoLogsPage(); }
     else if (act === 'back-workbench') { currentView = 'workbench'; renderView(); refreshChatParts(); }
-    else if (act === 'logout') { stopSim(); S.state.logsOpen = false; renderDrawer(); currentView = 'login'; renderView(); }
+    else if (act === 'logout') { stopSim(); Notify.reset(); S.state.logsOpen = false; renderDrawer(); currentView = 'login'; renderView(); }
     else if (act === 'toast-goto') {
       const conv = S.conv(Number(t.dataset.conv));
       dismiss(t);
