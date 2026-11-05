@@ -1,9 +1,13 @@
 /* ===== media.js · 媒体地址统一生成 ===== */
 
 /** 媒体地址：<img>/<audio>/<video> 带不了 Authorization 头，统一走 ?token= 兜底；
- *  imgType 仅图片消息有效（实测中间方语义：2=大图/高清，1 与 3 均返回缩略图）——
- *  气泡/引用缩略图用 3 省流量，点开大图用 2。 */
+ *  imgType 仅图片消息有效（实测中间方语义：IMG_BIG=2 返回大图/高清，IMG_THUMB=3
+ *  与 1 均返回缩略图）——气泡/引用缩略图用 IMG_THUMB 省流量，点开大图用 IMG_BIG。 */
 import { getToken } from '../api'
+
+/** 图片档位唯一事实来源（语义见文件头注释；改这里即可全局生效）。 */
+export const IMG_BIG = 2 // 大图/高清（点开预览）
+export const IMG_THUMB = 3 // 缩略图（气泡与引用块）
 
 export function mediaUrlOf(m, imgType) {
   const token = `token=${encodeURIComponent(getToken())}`
@@ -21,6 +25,6 @@ export function prewarmThumbs(messages, limit = 30) {
     .slice(0, limit)
     .forEach((m) => {
       const img = new Image()
-      img.src = mediaUrlOf(m, 3)
+      img.src = mediaUrlOf(m, IMG_THUMB)
     })
 }
