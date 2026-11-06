@@ -44,3 +44,13 @@ body {
 /* 消息工作台：头像与图片禁止拖拽（避免拖动时出现图片残影） */
 .wb-frame img,
 .wb-frame svg { -webkit-user-drag: none; user-select: none; }
+
+/* 微信表情内联图：消息气泡 / 引用块 / 输入区共用，与文字基线对齐（微信同款视觉） */
+.wx-emoji {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  vertical-align: -6px;
+  margin: 0 1px;
+}
+.q-text .wx-emoji { width: 18px; height: 18px; vertical-align: -4px; }

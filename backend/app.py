@@ -96,6 +96,7 @@ def register_routes(app: Flask) -> None:
     from backend.api.messages import bp as messages_bp
     from backend.api.orgs import bp as orgs_bp
     from backend.api.send_logs import bp as send_logs_bp
+    from backend.api.uploads import bp as uploads_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(accounts_bp)
@@ -107,6 +108,7 @@ def register_routes(app: Flask) -> None:
     app.register_blueprint(devices_bp)
     app.register_blueprint(send_logs_bp)
     app.register_blueprint(media_bp)
+    app.register_blueprint(uploads_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(orgs_bp)
 

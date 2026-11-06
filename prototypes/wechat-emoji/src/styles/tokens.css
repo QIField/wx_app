@@ -1,0 +1,40 @@
+/* 设计契约 tokens：与 wx_app/frontend/src/style.css 同源，平移后零视觉偏差 */
+:root {
+  --c-primary: #1d5de4;
+  --c-primary-soft: #e9f0ff;
+  --c-panel: #ffffff;
+  --c-surface: #f5f7fa;
+  --c-border: #e3e8f0;
+  --c-border-strong: #cfd8e6;
+  --c-text: #17233a;
+  --c-text-sub: #8492a6;
+  --c-ok: #18a058;
+  --c-danger: #e5484d;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --font-ui: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--c-text);
+  background:
+    radial-gradient(1200px 480px at 85% -10%, #e9f0ff 0%, transparent 60%),
+    radial-gradient(900px 420px at -10% 110%, #eef3fb 0%, transparent 55%),
+    var(--c-surface);
+  min-height: 100vh;
+}
+
+/* 微信表情内联图：24px 与文字基线对齐（微信同款视觉） */
+.wx-emoji {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  vertical-align: -6px;
+  margin: 0 1px;
+}

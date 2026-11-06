@@ -7,6 +7,7 @@
  */
 import { computed, ref } from 'vue'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
+import { renderEmojiHtml } from '../utils/emoji'
 import { mediaUrlOf, IMG_BIG, IMG_THUMB } from '../utils/media'
 import { displayNameOf } from '../utils/format'
 import AnonAvatar from './AnonAvatar.vue'
@@ -87,6 +88,13 @@ const transferTo = computed(() =>
 /* 引用消息：新消息读 payload.quote；历史按链接入库的数据解析 XML 兜底 */
 const quote = computed(() => quoteInfoOf(props.msg))
 
+/* 文本消息渲染：[微笑] 等微信表情码 → 内联表情图（先转义防 XSS，未识别码原样显示） */
+const contentHtml = computed(() => renderEmojiHtml(props.msg.content))
+/* 引用块文本同样走表情渲染（被引用的原消息常含表情码） */
+const quoteHtml = computed(() =>
+  renderEmojiHtml((quote.value?.name ? `${quote.value.name}：` : '') + (quote.value?.text || '[原消息]'))
+)
+
 /* 引用块内的被引用图片：后端解析出原图片消息 id（media_id）才有，
  * 找不到原消息时回退 [图片] 标签 */
 const quoteImg = computed(() => {
@@ -96,6 +104,10 @@ const quoteImg = computed(() => {
 function quoteFullUrl() {
   return mediaUrlOf({ id: quote.value.media_id }, IMG_BIG)
 }
+
+/* 自己刚发的媒体：payload.path 是本服务上传文件的相对地址，直接用它预览。
+   （媒体接口走的是中间方下载链路，只对收到的消息有 XML 参数，发出的消息拉不到） */
+const localMedia = computed(() => props.msg.payload?.path || null)
 
 /* 图片/表情/视频撑满气泡：去掉内边距（微信样式） */
 const isTight = computed(() => [2, 4, 7].includes(props.msg.msg_type))
@@ -155,16 +167,17 @@ function onMenu(e) {
           <img
             class="media img"
             :style="imgBox"
-            :src="mediaUrlOf(msg, IMG_THUMB)"
+            :src="localMedia || mediaUrlOf(msg, IMG_THUMB)"
             alt="图片消息"
             title="点击查看大图"
             referrerpolicy="no-referrer"
             decoding="async"
             @load="onMediaOk"
             @error="onMediaOk"
-            @click="emit('preview', mediaUrlOf(msg, IMG_BIG))"
+            @click="emit('preview', localMedia || mediaUrlOf(msg, IMG_BIG))"
           />
           <img
+            v-if="!localMedia"
             class="layer-sharp fade"
             :class="{ ok: sharpOk }"
             :src="mediaUrlOf(msg)"
@@ -175,7 +188,7 @@ function onMenu(e) {
           />
         </span>
         <audio v-else-if="msg.msg_type === 6" class="media audio" :src="mediaUrlOf(msg)" controls preload="none"></audio>
-        <video v-else-if="msg.msg_type === 4" class="media video" :src="mediaUrlOf(msg)" controls preload="metadata" @loadeddata="emit('mediaload')"></video>
+        <video v-else-if="msg.msg_type === 4" class="media video" :src="localMedia || mediaUrlOf(msg)" controls preload="metadata" @loadeddata="emit('mediaload')"></video>
         <span v-else-if="msg.msg_type === 7" class="ph ph-emoji" :class="{ on: loaded }">
           <img
             class="media emoji fade"
@@ -190,7 +203,7 @@ function onMenu(e) {
         </span>
 
         <!-- 文件卡片：图标 + 文件名 + 下载 -->
-        <a v-else-if="msg.msg_type === 3" class="file-card" :href="mediaUrlOf(msg)" download>
+        <a v-else-if="msg.msg_type === 3" class="file-card" :href="localMedia || mediaUrlOf(msg)" :download="fileTitle">
           <span class="badge">文件</span>
           <span class="fc-main">
             <span class="fc-title">{{ fileTitle }}</span>
@@ -222,7 +235,7 @@ function onMenu(e) {
             </span>
           </template>
           <div v-else class="quote-box">
-            <span class="q-text">{{ quote.name ? `${quote.name}：` : '' }}{{ quote.text || '[原消息]' }}</span>
+            <span class="q-text" v-html="quoteHtml"></span>
           </div>
         </template>
 
@@ -250,7 +263,7 @@ function onMenu(e) {
         <div v-else-if="msg.msg_type === 5" class="content type-label">[链接]</div>
 
         <div v-else-if="msg.msg_type !== 1" class="content type-label">[未知类型]</div>
-        <div v-else class="content">{{ msg.content }}</div>
+        <div v-else class="content" v-html="contentHtml"></div>
 
         <!-- 时间不再逐条显示（由时间分隔线承担），仅出方向保留发送状态；完整时间悬停气泡可见 -->
         <div v-if="msg.direction === 2" class="meta">

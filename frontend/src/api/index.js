@@ -139,6 +139,17 @@ export const sendTextMessage = (convId, content) =>
     payload: {},
   })
 
+/** 上传任意文件：返回 {url(中间方可下载的绝对地址), path(本地预览相对路径), file_name, size}。 */
+export const uploadFile = (file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return http.post('/uploads', form, { timeout: 60000 }) // 大文件放宽超时
+}
+
+/** 发媒体消息：msgType 2图片 3文件 4视频 5链接卡片，payload 按类型给对应 url 字段。 */
+export const sendMediaMessage = (convId, msgType, content, payload) =>
+  http.post(`/conversations/${convId}/messages`, { msg_type: msgType, content, payload })
+
 /** 通讯录：好友/群列表（type: friends | groups，keyword 可选）。 */
 export const fetchContacts = (type, keyword, openid) =>
   http.get('/contacts', {

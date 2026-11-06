@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { nextTick } from 'vue'
 import {
   checkDeviceOnline, connectWs, fetchConversations, fetchDevices, fetchMessages,
-  markConversationRead, openConversation, sendTextMessage, updateConversation,
+  markConversationRead, openConversation, sendMediaMessage, sendTextMessage, updateConversation,
 } from '../api'
 import { prewarmThumbs } from '../utils/media'
 import { convCacheGet, convCachePut } from '../utils/convCache'
@@ -242,6 +242,34 @@ export const useChatStore = defineStore('chat', {
       if (conv) {
         conv.last_msg = content
         conv.last_msg_at = nowStamp() // 自己发的消息也按最后消息时间置顶
+        this.sortConversations()
+      }
+    },
+
+    /** 发媒体消息（2图片/3文件/4视频）：上传拿到 URL 后由 ChatComposer 调这里。
+     *  乐观上屏规则同 sendText；文件类摘要直接显示文件名。 */
+    async sendMedia(msgType, content, payload) {
+      if (!this.currentId) return
+      const convId = this.currentId
+      const data = await sendMediaMessage(convId, msgType, content, payload)
+
+      if (this.currentId === convId) {
+        this.currentMessages.push({
+          id: data.message_id,
+          msg_type: msgType,
+          direction: 2,
+          operator_name: this.operatorName || '客服',
+          content,
+          payload,
+          status: data.status,
+          create_time: new Date().toLocaleString('zh-CN', { hour12: false }),
+        })
+      }
+      const summary = { 2: '[图片]', 4: '[视频]' }[msgType] || ''
+      const conv = this.conversations.find((c) => c.id === convId)
+      if (conv) {
+        conv.last_msg = summary || content || '[媒体]'
+        conv.last_msg_at = nowStamp()
         this.sortConversations()
       }
     },

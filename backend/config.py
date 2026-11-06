@@ -54,3 +54,9 @@ PROFILE_LOGIN_COOLDOWN_SECONDS = int(os.getenv("PROFILE_LOGIN_COOLDOWN_SECONDS",
 
 # 媒体缓存目录：中间方下载接口拉回的图片/文件/视频/语音/表情落盘缓存
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or (BASE_DIR / "backend" / "media"))
+
+# 上传文件公网基址：发图片/文件/视频要给中间方一个它服务器能下载到的 URL，
+# 本机开发（127.0.0.1）中间方拉不到，部署到公网后在这里配 http(s)://域名
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+# 上传文件大小上限（字节，默认 50MB）
+UPLOAD_MAX_BYTES = int(os.getenv("UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))

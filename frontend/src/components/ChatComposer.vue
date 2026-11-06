@@ -1,15 +1,26 @@
 <script setup>
-/** 输入区：工具栏 + 可拖高输入框 + 发送（Enter 发送 / Shift+Enter 换行）。
+/** 输入区：工具栏 + 可拖高输入框 + 表情面板 + 发送（Enter 发送 / Shift+Enter 换行）。
  *  消息列表/滚动锚定等职责在 ChatPanel，本组件只管"输入与发送"。
- *  撤回消息"重新编辑"由父组件经 ref 调 fillAndFocus 回填聚焦。 */
-import { nextTick, ref } from 'vue'
+ *  撤回消息"重新编辑"由父组件经 ref 调 fillAndFocus 回填聚焦。
+ *  输入区用 contenteditable：选表情在光标处显示表情图（微信同款），
+ *  发送前 serializeComposer 还原为 `[名称]` 码随 msg_type=1 文本上行。 */
+import { nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
+import { uploadFile } from '../api'
+import EmojiPicker from './EmojiPicker.vue'
+import {
+  insertEmojiAtCursor, insertBreakAtCursor, insertPlainTextAtCursor,
+  serializeComposer, setComposerFromText,
+} from '../utils/emoji'
 
 const chat = useChatStore()
-const input = ref('')
 const composerEl = ref(null)
+const draftEmpty = ref(true)
+const pickerVisible = ref(false)
 const composerH = ref(72) // 底部要给悬浮发送按钮留位，最小高度随之加大
+
+watch(() => chat.currentId, () => { pickerVisible.value = false })
 
 /* 顶部拖拽拉伸：按住输入框上边缘上下拖，向上拖=变高 */
 let drag = null
@@ -27,10 +38,31 @@ function onGrabUp() {
   drag = null
 }
 
+function refreshDraft() {
+  draftEmpty.value = serializeComposer(composerEl.value).length === 0
+}
+
+/* 面板选中 → 光标处插入表情图（wx）/字符（unicode） */
+function onEmojiSelect(payload) {
+  insertEmojiAtCursor(composerEl.value, payload)
+  refreshDraft()
+}
+
+/* 粘贴仅收纯文本：防富文本/图片破坏编辑器结构 */
+function onPaste(e) {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (text) {
+    insertPlainTextAtCursor(composerEl.value, text)
+    refreshDraft()
+  }
+}
+
 async function onSend() {
-  const content = input.value.trim()
+  const content = serializeComposer(composerEl.value).trim()
   if (!content) return
-  input.value = ''
+  composerEl.value.innerHTML = ''
+  refreshDraft()
   try {
     await chat.sendText(content)
   } catch (e) {
@@ -38,20 +70,62 @@ async function onSend() {
   }
 }
 
-/* Enter 发送 / Shift+Enter 换行（换行交还默认行为）。
+/* 文件按钮：打开系统文件资源管理器，任意类型（excel/图片/视频…）。
+   按 MIME 分发 msg_type：image/*→2 图片，video/*→4 视频，其余→3 文件。 */
+const fileInput = ref(null)
+const uploading = ref(false)
+const UPLOAD_MAX_MB = 50
+
+function msgTypeOf(file) {
+  if (file.type.startsWith('image/')) return 2
+  if (file.type.startsWith('video/')) return 4
+  return 3
+}
+
+async function onFilePicked(e) {
+  const file = e.target.files?.[0]
+  e.target.value = '' // 清掉允许重复选同一个文件
+  if (!file || !chat.currentId) return
+  if (file.size > UPLOAD_MAX_MB * 1024 * 1024) {
+    ElMessage.error(`文件不能超过 ${UPLOAD_MAX_MB}MB`)
+    return
+  }
+  uploading.value = true
+  try {
+    const up = await uploadFile(file)
+    const type = msgTypeOf(file)
+    const payload = type === 2
+      ? { img_url: up.url, path: up.path }
+      : type === 4
+        ? { video_url: up.url, thumb_url: '', video_duration: 0, path: up.path }
+        : { file_url: up.url, file_name: up.file_name, path: up.path }
+    await chat.sendMedia(type, type === 3 ? up.file_name : '', payload)
+  } catch (err) {
+    ElMessage.error(err.message)
+  } finally {
+    uploading.value = false
+  }
+}
+
+/* Enter 发送 / Shift+Enter 换行（手动插 <br>，避免浏览器包块级元素导致序列化歧义）。
    isComposing / keyCode 229：输入法选词时的回车不算发送 */
 function onEnterKey(e) {
-  if (e.shiftKey) return
   if (e.isComposing || e.keyCode === 229) return
+  if (e.shiftKey) {
+    e.preventDefault()
+    insertBreakAtCursor(composerEl.value)
+    refreshDraft()
+    return
+  }
   e.preventDefault()
   onSend()
 }
 
-/* 原文回填输入框并聚焦（父组件经 ref 调用） */
+/* 原文回填输入框并聚焦（父组件经 ref 调用）：[码] 渲染为表情图，光标落末尾 */
 async function fillAndFocus(content) {
-  input.value = content
   await nextTick()
-  composerEl.value?.focus()
+  setComposerFromText(composerEl.value, content)
+  refreshDraft()
 }
 defineExpose({ fillAndFocus })
 </script>
@@ -60,30 +134,47 @@ defineExpose({ fillAndFocus })
   <div class="editor">
     <div class="grab-bar" title="拖拽调整输入框高度" @mousedown.prevent="onGrabDown"><i></i></div>
     <div class="tools">
-      <svg viewBox="0 0 24 24" class="ticon"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      <svg viewBox="0 0 24 24" class="ticon"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9.5" cy="9.5" r="1.6" fill="currentColor"/><path d="M5 17l4.5-4.5L13 16l3-3 3 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      <button
+        type="button" class="ticon-btn" :class="{ on: pickerVisible }"
+        :disabled="!chat.currentId" title="表情" @click="pickerVisible = !pickerVisible"
+      >
+        <svg viewBox="0 0 24 24" class="ticon"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+      <button
+        type="button" class="ticon-btn" :disabled="!chat.currentId || uploading"
+        title="发送文件（任意类型）" @click="fileInput?.click()"
+      >
+        <svg viewBox="0 0 24 24" class="ticon"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <input ref="fileInput" type="file" style="display: none" @change="onFilePicked" />
       <svg viewBox="0 0 24 24" class="ticon"><path d="M13 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 12l7-7m-4 0h4v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="hint">Enter 发送 · Shift+Enter 换行</span>
     </div>
     <div class="input-row">
       <div class="input-wrap">
-        <textarea
+        <div
           ref="composerEl"
-          v-model="input"
           class="composer"
+          :class="{ disabled: !chat.currentId }"
+          :contenteditable="chat.currentId ? 'true' : 'false'"
           :style="{ height: composerH + 'px' }"
-          :disabled="!chat.currentId"
-          placeholder="输入消息，Enter 发送…"
+          data-placeholder="输入消息，Enter 发送…"
+          spellcheck="false"
+          @input="refreshDraft"
           @keydown.enter="onEnterKey"
-        ></textarea>
-        <button type="button" class="send" :disabled="!chat.currentId || !input.trim()" @click="onSend">发送(Enter)</button>
+          @keydown.esc="pickerVisible = false"
+          @paste="onPaste"
+        ></div>
+        <button type="button" class="send" :disabled="!chat.currentId || draftEmpty" @click="onSend">发送(Enter)</button>
       </div>
     </div>
+
+    <EmojiPicker :visible="pickerVisible" @select="onEmojiSelect" />
   </div>
 </template>
 
 <style scoped>
-.editor { border-top: 1px solid var(--c-border); background: var(--c-panel); padding: 0 12px 10px; }
+.editor { position: relative; border-top: 1px solid var(--c-border); background: var(--c-panel); padding: 0 12px 10px; }
 .grab-bar {
   height: 10px; margin: 0 -12px;
   display: flex; align-items: center; justify-content: center;
@@ -98,18 +189,19 @@ defineExpose({ fillAndFocus })
 }
 .grab-bar:hover i { background: var(--c-primary); width: 44px; }
 .tools { display: flex; align-items: center; gap: 10px; padding: 3px 2px 6px; }
+.ticon-btn { border: none; background: none; padding: 0; line-height: 0; }
 .ticon { width: 16px; height: 16px; color: var(--c-text-sub); cursor: pointer; transition: color 0.15s; }
-.ticon:hover { color: var(--c-primary); }
+.ticon-btn:hover .ticon, .ticon-btn.on .ticon { color: var(--c-primary); }
+.ticon-btn:disabled .ticon { color: var(--c-border-strong); cursor: not-allowed; }
 .hint { margin-left: auto; font-size: 10px; color: var(--c-border-strong); }
 .input-row { display: flex; }
 
 /* 输入框 + 悬浮发送按钮（企业微信风格）：按钮叠在输入框右下角，
-   textarea 底部留出等高 padding，文字不会滚到按钮底下 */
+   输入框底部留出等高 padding，文字不会滚到按钮底下 */
 .input-wrap { position: relative; flex: 1; }
 
-/* 高度由顶部拖拽条控制，禁用原生 resize 手柄 */
+/* 高度由顶部拖拽条控制（contenteditable div） */
 .composer {
-  display: block;
   width: 100%;
   font-family: var(--font-ui);
   font-size: 13px;
@@ -119,14 +211,21 @@ defineExpose({ fillAndFocus })
   border: 1px solid var(--c-border-strong);
   border-radius: var(--r-md);
   background: var(--c-panel);
-  resize: none;
   outline: none;
   overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
   transition: border-color 0.15s;
 }
 .composer:focus { border-color: var(--c-primary); }
-.composer:disabled { background: #f5f7fa; cursor: not-allowed; }
-.composer::placeholder { color: var(--c-border-strong); }
+.composer.disabled { background: #f5f7fa; cursor: not-allowed; }
+.composer:empty::before {
+  content: attr(data-placeholder);
+  color: var(--c-border-strong);
+  pointer-events: none;
+}
+.composer img { cursor: default; }
 .send {
   position: absolute;
   right: 8px;
