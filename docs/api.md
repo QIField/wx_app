@@ -92,6 +92,16 @@ msg_type 对照：1文本 2图片 3文件 4视频 5链接卡片 6语音 7表情�
 
 返回 data：`{ "message_id": 1002, "status": 0 }`（status=0 发送中，之后 WebSocket 推送结果）
 
+### POST /api/uploads — 上传文件（发图片/文件/视频的前置）
+
+multipart 字段 `file`，任意类型，默认上限 50MB。登录鉴权。
+
+返回 data：`{ "url": "http(s)://域名/media/uploads/<uuid>.png", "path": "/media/uploads/<uuid>.png", "file_name": "报价单.xlsx", "size": 1024 }`
+
+- `url` 绝对地址，随 msg_type 2/3/4 的 payload 给中间方下载（域名取 .env `PUBLIC_BASE_URL`，不配则用请求地址）
+- `path` 相对路径，前端本地气泡预览用
+- `GET /media/uploads/<name>` 无需登录（中间方服务器要直接拉），uuid 文件名不可猜测
+
 ### POST /api/messages/{id}/revoke — 撤回
 
 后端用该消息的 middle_msg_id / new_msg_id / create_time 调中间方撤回接口。
