@@ -5,10 +5,10 @@
 仅作迁移数据源，新代码不再写：身份与显示名在 device 表，在线状态也在 device 表。
 """
 from backend.extensions import db
-from backend.models.base import BigIntPK
+from backend.models.base import BigIntPK, SoftDeleteMixin
 
 
-class UserDevice(db.Model):
+class UserDevice(db.Model, SoftDeleteMixin):
     """关联关系：系统账号 ↔ 设备字典（消息/会话/通讯录按 device.openid 隔离）。"""
 
     __tablename__ = "user_device"

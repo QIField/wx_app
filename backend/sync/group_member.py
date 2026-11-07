@@ -7,34 +7,39 @@ from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.group_member import GroupMember
 from backend.sync.friend_profile import query_brief_infos
+from backend.sync.roster import reconcile
 
 AVATAR_BATCH = 40  # 每轮最多补 40 个成员头像（brief_info 20/次，两次调用）
 
 
 def save_members(openid, chatroom_wxid, members):
-    """memberList → upsert 昵称（不覆盖已有头像）。返回是否有新增成员。"""
+    """memberList 全量对齐：新增/复活成员，退群成员标记 deleted_at。
+
+    memberList 是群的权威名册，为空时直接返回，避免接口偶发空数组
+    把整群成员误标为已删除。
+    """
     rows = [m for m in members or [] if isinstance(m, dict) and m.get("wxid")]
     if not rows:
         return False
-    wxids = [m["wxid"] for m in rows]
+    by_wxid = {m["wxid"]: m for m in rows}
     existing = {
         gm.wxid: gm
-        for gm in GroupMember.query.filter_by(openid=openid, chatroom_wxid=chatroom_wxid)
-        .filter(GroupMember.wxid.in_(wxids))
-        .all()
+        for gm in GroupMember.query.filter_by(
+            openid=openid, chatroom_wxid=chatroom_wxid
+        ).all()
     }
-    added = False
-    for m in rows:
-        row = existing.get(m["wxid"])
-        if row is None:
-            db.session.add(GroupMember(
-                openid=openid, chatroom_wxid=chatroom_wxid,
-                wxid=m["wxid"], nickname=m.get("nickname") or None,
-            ))
-            added = True
-        elif not row.nickname and m.get("nickname"):
+    created, changed = reconcile(existing, list(by_wxid))
+    for wxid in created:
+        db.session.add(GroupMember(
+            openid=openid, chatroom_wxid=chatroom_wxid,
+            wxid=wxid, nickname=by_wxid[wxid].get("nickname") or None,
+        ))
+    for wxid, m in by_wxid.items():  # 只补空昵称，不覆盖已有值
+        row = existing.get(wxid)
+        if row is not None and not row.nickname and m.get("nickname"):
             row.nickname = m["nickname"]
-    return added
+            changed = True
+    return changed or bool(created)
 
 
 def sender_map_for(conv, wxids):
@@ -53,7 +58,8 @@ def sender_profiles(openid, chatroom_wxid, wxids):
     if not ids:
         return {}
     rows = (
-        GroupMember.query.filter_by(openid=openid, chatroom_wxid=chatroom_wxid)
+        GroupMember.query.filter_by(openid=openid, chatroom_wxid=chatroom_wxid,
+                                   deleted_at=None)
         .filter(GroupMember.wxid.in_(ids))
         .all()
     )
@@ -71,6 +77,7 @@ def refresh_avatars_of_device(openid, chatroom_wxid=None, batch=AVATAR_BATCH):
     """
     q = GroupMember.query.filter(
         GroupMember.openid == openid,
+        GroupMember.deleted_at.is_(None),
         GroupMember.avatar.is_(None),
     )
     if chatroom_wxid:

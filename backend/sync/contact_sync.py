@@ -13,6 +13,7 @@ from backend.models.contact import Contact
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.devices import pollable_devices
 from backend.sync import friend_profile, group_profile
+from backend.sync.roster import reconcile
 from backend.sync.task_query import as_dict, new_task_uuid, query_record, unwrap_result
 
 FRIEND_PROFILE_BATCHES = 10  # 每轮最多补 10 批 brief_info（20/批），约 2 轮补齐 300 好友
@@ -65,27 +66,23 @@ def _clean_wxids(items):
 
 
 def upsert_contacts(openid, catalog):
-    """wxid 清单入库：缺的插入（好友/群各建各的），已有的不动。"""
+    """全量名册对齐：新增插入、重新出现复活、消失的标记 deleted_at。
+
+    只有拿到非空清单时才做“消失”判定——中间方偶发返回空列表
+    不能把整份通讯录误判为全删。
+    """
     plan = [
         (Contact.TYPE_FRIEND, catalog.get("friends") or []),
         (Contact.TYPE_GROUP, catalog.get("chatrooms") or []),
     ]
-    inserted = False
-    for ctype, wxids in plan:
-        if not wxids:
-            continue
-        exists = {
-            c.wxid
-            for c in Contact.query.filter(
-                Contact.openid == openid, Contact.wxid.in_(wxids)
-            ).all()
-        }
-        for wxid in wxids:
-            if wxid in exists:
-                continue
-            db.session.add(Contact(openid=openid, wxid=wxid, type=ctype))
-            inserted = True
-    if inserted:
+    types = {wxid: ctype for ctype, wxids in plan for wxid in wxids}
+    if not types:
+        return
+    existing = {c.wxid: c for c in Contact.query.filter_by(openid=openid).all()}
+    created, changed = reconcile(existing, list(types))
+    for wxid in created:
+        db.session.add(Contact(openid=openid, wxid=wxid, type=types[wxid]))
+    if created or changed:
         db.session.commit()
 
 
@@ -102,6 +99,7 @@ def _fill_friends(openid):
             Contact.query.filter(
                 Contact.openid == openid,
                 Contact.type == Contact.TYPE_FRIEND,
+                Contact.deleted_at.is_(None),
                 db.or_(Contact.name.is_(None), Contact.name == "", Contact.avatar.is_(None)),
             )
             .limit(friend_profile.FRIEND_BATCH)
@@ -124,6 +122,7 @@ def _fill_groups(openid):
     rows = Contact.query.filter(
         Contact.openid == openid,
         Contact.type == Contact.TYPE_GROUP,
+        Contact.deleted_at.is_(None),
         db.or_(Contact.name.is_(None), Contact.name == "", Contact.avatar.is_(None)),
     ).all()
     for c in rows:

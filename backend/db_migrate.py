@@ -22,8 +22,16 @@ def upgrade_existing_schema():
     _try_drop_user_openid()
     # 2026-11-05 设备字典重构：user_device 由手填 openid 改为引用 device.id
     _try_alter("ALTER TABLE user_device ADD COLUMN device_id BIGINT")
+    # 软删除列要在 user_device 重建（SQLite 分支）之前补齐：
+    # 重建会按 ORM 当前列清单拷贝数据，缺列会导致 INSERT ... SELECT 失败。
+    _try_alter("ALTER TABLE device ADD COLUMN deleted_at DATETIME NULL")
+    _try_alter("ALTER TABLE user_device ADD COLUMN deleted_at DATETIME NULL")
+    _try_alter("ALTER TABLE contact ADD COLUMN deleted_at DATETIME NULL")
+    _try_alter("ALTER TABLE contact_profile ADD COLUMN deleted_at DATETIME NULL")
+    _try_alter("ALTER TABLE group_member ADD COLUMN deleted_at DATETIME NULL")
     _drop_user_device_openid_unique()
     _backfill_devices()
+    _try_alter("ALTER TABLE device ADD INDEX idx_device_deleted (deleted_at)")
 
 
 def _try_alter(sql):
@@ -88,7 +96,10 @@ def _drop_user_device_openid_unique():
     table = db.metadata.tables["user_device"]
     tmp_meta = sa.MetaData()  # 独立临时 metadata，避免污染共享 ORM 定义
     new_table = table.to_metadata(tmp_meta, name="user_device_new")
-    cols = ", ".join(c.name for c in table.columns)
+    # 只拷贝旧表真实存在的列：新增列（如 deleted_at）在存量库里可能还没加，
+    # 直接用 ORM 全列会 INSERT ... SELECT 报 no such column。
+    old_cols = {c["name"] for c in insp.get_columns("user_device")}
+    cols = ", ".join(c.name for c in table.columns if c.name in old_cols)
     db.session.execute(text(str(sa.schema.CreateTable(new_table).compile(db.engine))))
     db.session.execute(text(
         f"INSERT INTO user_device_new ({cols}) SELECT {cols} FROM user_device"

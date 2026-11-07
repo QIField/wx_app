@@ -26,6 +26,37 @@ def _patch_catalog(monkeypatch, friends, chatrooms, ghs=None):
                         lambda module, action, u, openid="": record)
 
 
+def test_roster_missing_contact_marked_deleted_then_restored(app, monkeypatch):
+    """好友从名册消失 → deleted_at；重新出现 → 复活同一行（不新增）。"""
+    _patch_catalog(monkeypatch, ["wxid_a", "wxid_b"], [])
+    contact_sync.sync_contacts()
+
+    _patch_catalog(monkeypatch, ["wxid_a"], [])
+    contact_sync.sync_contacts()
+    db.session.expire_all()
+    gone = Contact.query.filter_by(openid="o1", wxid="wxid_b").one()
+    assert gone.deleted_at is not None
+    assert Contact.query.filter_by(openid="o1").count() == 2  # 行仍在
+
+    _patch_catalog(monkeypatch, ["wxid_a", "wxid_b"], [])
+    contact_sync.sync_contacts()
+    db.session.expire_all()
+    back = Contact.query.filter_by(openid="o1", wxid="wxid_b").one()
+    assert back.deleted_at is None
+    assert back.id == gone.id
+
+
+def test_roster_empty_catalog_does_not_mass_delete(app, monkeypatch):
+    """中间方偶发返回空清单时，不能把整份通讯录标记为已删除。"""
+    _patch_catalog(monkeypatch, ["wxid_a", "wxid_b"], [])
+    contact_sync.sync_contacts()
+
+    _patch_catalog(monkeypatch, [], [])
+    contact_sync.sync_contacts()
+    db.session.expire_all()
+    assert all(c.deleted_at is None for c in Contact.query.filter_by(openid="o1").all())
+
+
 def test_roster_upsert_friends_and_groups(app, monkeypatch):
     """好友+群 wxid 入库；ghs 公众号按要求不入通讯录。"""
     _patch_catalog(monkeypatch, ["wxid_a", "wxid_b"], ["1@chatroom"], ghs=["gh_official"])

@@ -57,6 +57,31 @@ def test_save_members_inserts(app, group_conv):
     assert row.avatar is None
 
 
+def test_save_members_marks_leaver_deleted_then_restores(app, group_conv):
+    """退群：名册里消失标记 deleted_at；重新进群复活同一行。"""
+    members_v1 = [{"wxid": "wxid_a", "nickname": "甲"}, {"wxid": "wxid_b", "nickname": "乙"}]
+    group_member.save_members(group_conv.openid, group_conv.wxid, members_v1)
+    db.session.commit()
+
+    group_member.save_members(group_conv.openid, group_conv.wxid, members_v1[:1])
+    db.session.commit()
+    db.session.expire_all()
+    leaver = GroupMember.query.filter_by(
+        openid=group_conv.openid, chatroom_wxid=group_conv.wxid, wxid="wxid_b"
+    ).one()
+    assert leaver.deleted_at is not None
+    assert GroupMember.query.filter_by(chatroom_wxid=group_conv.wxid).count() == 2
+
+    group_member.save_members(group_conv.openid, group_conv.wxid, members_v1)
+    db.session.commit()
+    db.session.expire_all()
+    back = GroupMember.query.filter_by(
+        openid=group_conv.openid, chatroom_wxid=group_conv.wxid, wxid="wxid_b"
+    ).one()
+    assert back.deleted_at is None
+    assert back.id == leaver.id
+
+
 def test_save_members_upsert_keeps_avatar(app, group_conv):
     """重复收割：已有成员只补昵称，不覆盖已有头像；无新增返回 False。"""
     _member(avatar="http://a/x.jpg")

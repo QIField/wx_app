@@ -5,10 +5,10 @@ openid 全局唯一是设备的真实身份，入库后不可改。
 online 由在线检测轮询回写，是全系统唯一的在线状态事实源。
 """
 from backend.extensions import db
-from backend.models.base import BigIntPK
+from backend.models.base import BigIntPK, SoftDeleteMixin
 
 
-class Device(db.Model):
+class Device(db.Model, SoftDeleteMixin):
     """设备字典：openid（设备 ID）+ 名称 + 所属组织 + 在线状态。"""
 
     ONLINE_UNKNOWN = -1  # 尚未轮询到
@@ -46,4 +46,5 @@ class Device(db.Model):
             "org_name": self.org_name,
             "online": self.online,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "deleted_at": self.deleted_at.strftime("%Y-%m-%d %H:%M:%S") if self.deleted_at else None,
         }

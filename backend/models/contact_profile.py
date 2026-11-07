@@ -4,9 +4,10 @@
 仅存本系统数据库，不写回微信。
 """
 from backend.extensions import db
+from backend.models.base import SoftDeleteMixin
 
 
-class ContactProfile(db.Model):
+class ContactProfile(db.Model, SoftDeleteMixin):
     __tablename__ = "contact_profile"
 
     # 业务约束（接口层据此校验）

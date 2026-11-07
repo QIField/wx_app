@@ -45,10 +45,20 @@ def list_contacts():
     like = f"%{keyword}%"
 
     # 主源：通讯录表；备注（业务自建）也参与搜索
-    cq = Contact.query.filter(Contact.openid == openid, Contact.type == contact_type)
+    cq = Contact.query.filter(
+        Contact.openid == openid,
+        Contact.type == contact_type,
+        Contact.deleted_at.is_(None),
+    )
     if keyword:
         cq = (
-            cq.outerjoin(ContactProfile, ContactProfile.wxid == Contact.wxid)
+            cq.outerjoin(
+                ContactProfile,
+                db.and_(
+                    ContactProfile.wxid == Contact.wxid,
+                    ContactProfile.deleted_at.is_(None),
+                ),
+            )
             .filter(
                 db.or_(
                     Contact.name.ilike(like),
@@ -70,10 +80,18 @@ def list_contacts():
 
     # 补集：会话里有、通讯录还没同步到的老会话（关键词只按昵称过滤）
     known = {c.wxid for c in contacts}
+    deleted_wxids = {
+        c.wxid
+        for c in Contact.query.filter(
+            Contact.openid == openid,
+            Contact.deleted_at.isnot(None),
+        ).all()
+    }
     kw = keyword.lower()
     extras = [
         c for c in convs
         if c.wxid not in known
+        and c.wxid not in deleted_wxids
         and (not kw or kw in (c.name or "").lower())
     ]
     items.extend(_conv_contact_json(c) for c in extras)
@@ -142,7 +160,11 @@ def _profile_wxid(contact_id):
     openids = user_openids(g.current_user.id)
     if not openids:
         return None
-    c = Contact.query.filter(Contact.id == contact_id, Contact.openid.in_(openids)).first()
+    c = Contact.query.filter(
+        Contact.id == contact_id,
+        Contact.openid.in_(openids),
+        Contact.deleted_at.is_(None),
+    ).first()
     if c:
         return c.wxid
     conv = Conversation.query.filter(
@@ -160,7 +182,7 @@ def get_profile(contact_id):
     wxid = _profile_wxid(contact_id)
     if not wxid:
         return jsonify(code=404, msg="联系人不存在"), 404
-    p = ContactProfile.query.filter_by(wxid=wxid).first()
+    p = ContactProfile.query.filter_by(wxid=wxid, deleted_at=None).first()
     return jsonify(code=0, msg="success", data=p.to_json() if p else {"remark": "", "tags": []})
 
 
@@ -189,10 +211,12 @@ def put_profile(contact_id):
     if any(len(t) > ContactProfile.MAX_TAG_LEN for t in tags):
         return jsonify(code=400, msg=f"单个标签不能超过 {ContactProfile.MAX_TAG_LEN} 字"), 400
 
-    p = ContactProfile.query.filter_by(wxid=wxid).first()
+    p = ContactProfile.query.filter_by(wxid=wxid).first()  # 含已删除：命中则复活旧行
     if p is None:
         p = ContactProfile(wxid=wxid)
         db.session.add(p)
+    else:
+        p.restore()
     p.remark = remark
     p.tags = tags
     db.session.commit()

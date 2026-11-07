@@ -29,7 +29,7 @@ def _bound_users(device_id):
     rows = (
         db.session.query(User)
         .join(UserDevice, UserDevice.user_id == User.id)
-        .filter(UserDevice.device_id == device_id)
+        .filter(UserDevice.device_id == device_id, UserDevice.deleted_at.is_(None))
         .order_by(User.id)
         .all()
     )
@@ -58,8 +58,15 @@ def _resolve_org(org_id):
 @bp.get("/api/admin/devices")
 @require_role(*MANAGE_ROLES)
 def list_devices():
-    """设备列表：附组织名与关联账号（可多个，跨组织）。"""
-    rows = Device.query.order_by(Device.id).all()
+    """设备列表：默认只看未删除；?include_deleted=1 为回收站（含已删除）。
+
+    已删除设备同时清零 online，避免回收站里仍显示“在线”。
+    """
+    include_deleted = request.args.get("include_deleted") == "1"
+    q = Device.query
+    if not include_deleted:
+        q = q.filter(Device.deleted_at.is_(None))
+    rows = q.order_by(Device.id).all()
     data = []
     for d in rows:
         data.append({**d.to_json(), "bound_users": _bound_users(d.id)})
@@ -89,9 +96,10 @@ def create_device():
 
     exists = Device.query.filter_by(openid=openid).first()
     if exists is not None:
+        detail = "设备 ID 在回收站中，请先恢复" if exists.is_deleted else "设备 ID 已存在"
         log_action(AuditModule.DEVICE, "新增设备", f"{openid}",
-                   result=AuditLog.RESULT_FAIL, detail="设备 ID 已存在")
-        return jsonify(code=409, msg=f"设备 ID {openid} 已存在"), 409
+                   result=AuditLog.RESULT_FAIL, detail=detail)
+        return jsonify(code=409, msg=f"设备 ID {openid} {detail}"), 409
 
     device = Device(openid=openid, name=name, org_id=org.id)
     db.session.add(device)
@@ -101,11 +109,19 @@ def create_device():
     return jsonify(code=0, msg="success", data=device.to_json())
 
 
+def _active_device(device_id):
+    """取未删除的设备；回收站里的行对编辑/删除操作视为不存在。"""
+    device = db.session.get(Device, device_id)
+    if device is None or device.is_deleted:
+        return None
+    return device
+
+
 @bp.put("/api/admin/devices/<int:device_id>")
 @require_role(ROLE_DEVELOPER)
 def update_device(device_id):
     """编辑设备：名称 / 组织；openid 录入后不可改（body 里的 openid 一律忽略）。"""
-    device = db.session.get(Device, device_id)
+    device = _active_device(device_id)
     if device is None:
         return jsonify(code=404, msg="设备不存在"), 404
 
@@ -137,12 +153,12 @@ def update_device(device_id):
 @bp.delete("/api/admin/devices/<int:device_id>")
 @require_role(ROLE_DEVELOPER)
 def delete_device(device_id):
-    """删除设备：仍被账号关联时 409，需先在账号管理解除关联。"""
-    device = db.session.get(Device, device_id)
+    """删除设备（软删除）：仍被账号关联时 409，需先在账号管理解除关联。"""
+    device = _active_device(device_id)
     if device is None:
         return jsonify(code=404, msg="设备不存在"), 404
 
-    linked = UserDevice.query.filter_by(device_id=device_id).count()
+    linked = UserDevice.query.filter_by(device_id=device_id, deleted_at=None).count()
     if linked:
         log_action(AuditModule.DEVICE, "删除设备", _device_target(device),
                    result=AuditLog.RESULT_FAIL, detail=f"仍被 {linked} 个账号关联")
@@ -150,7 +166,22 @@ def delete_device(device_id):
             code=409, msg=f"该设备仍被 {linked} 个账号关联，请先在账号管理中解除关联"
         ), 409
 
-    db.session.delete(device)
+    device.soft_delete()
+    device.online = Device.ONLINE_UNKNOWN  # 回收站里不再显示在线
     db.session.commit()
-    log_action(AuditModule.DEVICE, "删除设备", _device_target(device))
+    log_action(AuditModule.DEVICE, "删除设备", _device_target(device), detail="软删除，可恢复")
     return jsonify(code=0, msg="success")
+
+
+@bp.post("/api/admin/devices/<int:device_id>/restore")
+@require_role(ROLE_DEVELOPER)
+def restore_device(device_id):
+    """从回收站恢复设备：deleted_at 置回 NULL，原 id 与关联不变。"""
+    device = db.session.get(Device, device_id)
+    if device is None or not device.is_deleted:
+        return jsonify(code=404, msg="回收站中没有该设备"), 404
+
+    device.restore()
+    db.session.commit()
+    log_action(AuditModule.DEVICE, "恢复设备", _device_target(device))
+    return jsonify(code=0, msg="success", data=device.to_json())

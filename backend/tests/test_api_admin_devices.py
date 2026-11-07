@@ -1,6 +1,7 @@
 """管理后台设备字典接口单测：CRUD、openid 唯一、关联拦截删除、权限门控。
 
 client 夹具登录的是 cs01（agent）；管理接口用 login_headers(dev/adm) 自带身份。
+删除一律软删除：行保留、deleted_at 有值、可在回收站恢复。
 """
 from backend.extensions import db
 from backend.models.audit_log import AuditLog
@@ -140,13 +141,36 @@ def test_delete_device_blocked_when_bound(app, client):
                                         result="fail").one()
     assert "1 个账号" in fail_log.detail
 
-    # 解除关联后可删
+    # 解除关联（软删除）后可删
+    from datetime import datetime
+
     from backend.models.user_device import UserDevice
-    UserDevice.query.filter_by(device_id=device.id).delete()
+    UserDevice.query.filter_by(device_id=device.id).update({"deleted_at": datetime.now()})
     db.session.commit()
     assert client.delete(f"/api/admin/devices/{device.id}",
                          headers=login_headers(dev)).status_code == 200
-    assert Device.query.filter_by(id=device.id).count() == 0
+
+    # 软删除：行仍在，只是打了 deleted_at；在线状态归为未知
+    db.session.expire_all()
+    row = Device.query.filter_by(id=device.id).one()
+    assert row.deleted_at is not None
+    assert row.online == -1
+
+    # 默认列表（在用）看不到，回收站参数可见
+    live = client.get("/api/admin/devices", headers=login_headers(dev)).get_json()["data"]
+    assert all(d["id"] != device.id for d in live)
+    trash = client.get("/api/admin/devices?include_deleted=1",
+                       headers=login_headers(dev)).get_json()["data"]
+    assert any(d["id"] == device.id and d["deleted_at"] for d in trash)
+
+    # 恢复：deleted_at 置回 NULL，原 id 与关联不变
+    assert client.post(f"/api/admin/devices/{device.id}/restore",
+                       headers=login_headers(dev)).status_code == 200
+    db.session.expire_all()
+    assert Device.query.filter_by(id=device.id).one().deleted_at is None
+    # 重复恢复（已不在回收站）→ 404
+    assert client.post(f"/api/admin/devices/{device.id}/restore",
+                       headers=login_headers(dev)).status_code == 404
 
 
 def test_admin_device_write_requires_developer(app, client):

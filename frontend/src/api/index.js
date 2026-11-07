@@ -86,7 +86,7 @@ export const updateOrgStatus = (id, status) => http.put(`/orgs/${id}/status`, { 
 /* ===== 设备字典管理（developer/admin 可读，developer 可写） ===== */
 
 /** 设备列表：附组织名与关联账号 bound_users（可多个，跨组织）。 */
-export const fetchAdminDevices = () => http.get('/admin/devices')
+export const fetchAdminDevices = (params) => http.get('/admin/devices', { params })
 
 /** 入库新设备 {openid, name, org_id}；openid 全局唯一（重复 409）。 */
 export const createAdminDevice = (payload) => http.post('/admin/devices', payload)
@@ -96,6 +96,9 @@ export const updateAdminDevice = (id, payload) => http.put(`/admin/devices/${id}
 
 /** 删除设备：仍被账号关联时 409，需先在账号管理解除关联。 */
 export const deleteAdminDevice = (id) => http.delete(`/admin/devices/${id}`)
+
+/** 从回收站恢复设备（软删除反向操作，原 id 与关联不变）。 */
+export const restoreAdminDevice = (id) => http.post(`/admin/devices/${id}/restore`)
 
 /* ===== 审计日志 / 总览 ===== */
 

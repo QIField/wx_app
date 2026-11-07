@@ -117,7 +117,9 @@ def _resolve_contact_wxid(contact_id, openid, chat_type):
     contact_type = (
         Contact.TYPE_FRIEND if chat_type == Conversation.CHAT_SINGLE else Contact.TYPE_GROUP
     )
-    contact = Contact.query.filter_by(id=contact_id, openid=openid, type=contact_type).first()
+    contact = Contact.query.filter_by(
+        id=contact_id, openid=openid, type=contact_type, deleted_at=None
+    ).first()
     if contact:
         return contact.wxid
     conv = Conversation.query.filter(
