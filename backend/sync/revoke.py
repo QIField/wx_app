@@ -52,6 +52,7 @@ def apply_revoke(openid, fields, revokes):
             revokes.append({
                 "message_id": original.id,
                 "conversation_id": conv.id,
+                "direction": original.direction,  # 前端区分摘要文案（你撤回/对方撤回）
             })
         return None
 

@@ -552,7 +552,7 @@ def test_sync_revoke_marks_original(app, monkeypatch):
     conv = Conversation.query.one()
     assert conv.last_msg == "对方撤回了一条消息"  # 客户撤回，不能照抄 replacemsg 的"你撤回了"
     assert broadcasts == [("message_revoked", {"message_id": msg.id, "conversation_id": conv.id,
-                                               "openid": "dev01"})]
+                                               "direction": Message.DIR_IN, "openid": "dev01"})]
 
 
 def test_sync_self_revoke_marks_original(app, monkeypatch):

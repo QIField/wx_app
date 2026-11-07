@@ -140,6 +140,7 @@ def test_revoke_ok(client, conversation, monkeypatch):
     assert captured["create_time"].isdigit()
     db.session.expire_all()
     assert msg.payload["revoked"] is True
+    assert conversation.last_msg == "你撤回了一条消息"  # 会话摘要同步换灰条文案
 
 
 def test_revoke_incoming_rejected(client, conversation, monkeypatch):

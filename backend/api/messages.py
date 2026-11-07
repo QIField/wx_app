@@ -142,12 +142,15 @@ def revoke_message_api(message_id):
 
     payload["revoked"] = True
     msg.payload = payload
+    conv.last_msg = "你撤回了一条消息"  # 会话摘要同步换灰条文案（与对方撤回路径一致）
+    conv.last_msg_at = msg.create_time or datetime.now()
     db.session.commit()
 
     from backend.ws import hub
     hub.broadcast("message_revoked", {
         "message_id": msg.id,
         "conversation_id": msg.conversation_id,
+        "direction": Message.DIR_OUT,  # 前端区分摘要文案（你撤回/对方撤回）
         "openid": openid,
     })
     return jsonify(code=0, msg="success", data={"message_id": msg.id})
