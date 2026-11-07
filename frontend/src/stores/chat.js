@@ -1,6 +1,7 @@
 /** 聊天共享状态（Pinia）：多设备绑定、会话列表、当前会话、消息、WebSocket 事件分发。 */
 import { defineStore } from 'pinia'
 import { nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 import {
   checkDeviceOnline, connectWs, fetchConversations, fetchDevices, fetchMessages,
   markConversationRead, openConversation, sendMediaMessage, sendTextMessage, updateConversation,
@@ -8,6 +9,7 @@ import {
 } from '../api'
 import { prewarmThumbs } from '../utils/media'
 import { convCacheGet, convCachePut } from '../utils/convCache'
+import { notifyIncoming, setNotifyBlockedHandler } from '../utils/notify'
 
 /** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
 function nowStamp() {
@@ -302,6 +304,8 @@ export const useChatStore = defineStore('chat', {
 
     /** 连接 WebSocket 并按 data.openid 分发推送。 */
     connect() {
+      // 提示音被浏览器音频策略拦截时给一次性提示（utils/notify 只回调一次）
+      setNotifyBlockedHandler(() => ElMessage.info('提示音被浏览器音频策略拦截，点击页面任意处即可恢复'))
       // 断线重连成功后补拉一次：后端重启/网络闪断期间错过的推送（未读红点、
       // 新消息气泡）靠这里找回来，不用手动刷新页面
       const resync = () => {
@@ -326,7 +330,12 @@ export const useChatStore = defineStore('chat', {
     onCrossMessage(d) {
       const dev = this.myDevice(d.openid)
       if (!dev) return
-      if (d.direction === 1) dev.unread = (dev.unread || 0) + 1
+      if (d.direction === 1) {
+        dev.unread = (dev.unread || 0) + 1
+        // 跨账号来消息响铃（多账号监控核心场景）；会话列表只含当前账号，
+        // 对方会话的免打扰状态本地不可得，按响处理（已知限制）
+        notifyIncoming({ muted: false })
+      }
     },
 
     /** 资料解析完成后推送：重拉列表；当前会话重拉消息（昵称/头像补齐即刷新）。 */
@@ -348,8 +357,14 @@ export const useChatStore = defineStore('chat', {
         this.loadConversations() // 新联系人的会话不在列表里，重拉
       }
 
-      if (d.conversation_id === this.currentId) {
+      const isViewing = d.conversation_id === this.currentId
+      if (isViewing) {
         this.currentMessages.push({ ...d, direction: d.direction, status: 1 })
+      }
+
+      if (d.direction === 1) {
+        // 微信合并提示音：免打扰/正在查看/系统灰条不响，窗口内一批一响（utils/notify）
+        notifyIncoming({ muted: !!conv?.muted, viewing: isViewing, system: !!d.payload?.system })
       }
     },
 
