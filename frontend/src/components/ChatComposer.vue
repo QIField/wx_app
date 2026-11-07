@@ -7,7 +7,6 @@
 import { nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
-import { uploadFile } from '../api'
 import EmojiPicker from './EmojiPicker.vue'
 import {
   insertEmojiAtCursor, insertBreakAtCursor, insertPlainTextAtCursor,
@@ -71,35 +70,17 @@ async function onSend() {
 }
 
 /* 文件按钮：打开系统文件资源管理器，任意类型（excel/图片/视频…）。
-   按 MIME 分发 msg_type：image/*→2 图片，video/*→4 视频，其余→3 文件。 */
+   大小校验、MIME 分发与 payload 组装都在 chat store 的 sendFile。 */
 const fileInput = ref(null)
 const uploading = ref(false)
-const UPLOAD_MAX_MB = 50
-
-function msgTypeOf(file) {
-  if (file.type.startsWith('image/')) return 2
-  if (file.type.startsWith('video/')) return 4
-  return 3
-}
 
 async function onFilePicked(e) {
   const file = e.target.files?.[0]
   e.target.value = '' // 清掉允许重复选同一个文件
   if (!file || !chat.currentId) return
-  if (file.size > UPLOAD_MAX_MB * 1024 * 1024) {
-    ElMessage.error(`文件不能超过 ${UPLOAD_MAX_MB}MB`)
-    return
-  }
   uploading.value = true
   try {
-    const up = await uploadFile(file)
-    const type = msgTypeOf(file)
-    const payload = type === 2
-      ? { img_url: up.url, path: up.path }
-      : type === 4
-        ? { video_url: up.url, thumb_url: '', video_duration: 0, path: up.path }
-        : { file_url: up.url, file_name: up.file_name, path: up.path }
-    await chat.sendMedia(type, type === 3 ? up.file_name : '', payload)
+    await chat.sendFile(file)
   } catch (err) {
     ElMessage.error(err.message)
   } finally {

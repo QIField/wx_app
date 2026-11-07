@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 import {
   checkDeviceOnline, connectWs, fetchConversations, fetchDevices, fetchMessages,
   markConversationRead, openConversation, sendMediaMessage, sendTextMessage, updateConversation,
+  uploadFile,
 } from '../api'
 import { prewarmThumbs } from '../utils/media'
 import { convCacheGet, convCachePut } from '../utils/convCache'
@@ -14,6 +15,26 @@ function nowStamp() {
   const p = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
     + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/** 上传文件大小上限（与后端 UPLOAD_MAX_BYTES 默认一致）。 */
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+/** 媒体类会话摘要占位；文件类直接显示文件名。 */
+const MEDIA_SUMMARY = { 2: '[图片]', 4: '[视频]' }
+
+/** 按 MIME 分发 msg_type：image/*→2 图片，video/*→4 视频，其余（excel/pdf/zip…）→3 文件。 */
+function msgTypeOf(file) {
+  if (file.type.startsWith('image/')) return 2
+  if (file.type.startsWith('video/')) return 4
+  return 3
+}
+
+/** 按类型组装发消息 payload：url 给中间方下载，path 给本地气泡预览。 */
+function mediaPayloadOf(type, up) {
+  if (type === 2) return { img_url: up.url, path: up.path }
+  if (type === 4) return { video_url: up.url, thumb_url: '', video_duration: 0, path: up.path }
+  return { file_url: up.url, file_name: up.file_name, path: up.path }
 }
 
 /** 会话摘要兜底：WS 推送优先用后端算好的 d.summary；缺失时（旧后端）
@@ -219,59 +240,52 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** 发文本消息：先本地加"发送中"气泡，等 WS 推最终状态。 */
-    async sendText(content) {
-      if (!this.currentId || !content.trim()) return
-      const convId = this.currentId
-      const data = await sendTextMessage(convId, content)
-
-      // 若期间切了会话就不追加
+    /** 发送成功后的公共收尾：乐观上屏（等待期间切走会话不追加）+ 会话摘要更新置顶。 */
+    _afterSend(convId, msg, summary) {
       if (this.currentId === convId) {
         this.currentMessages.push({
-          id: data.message_id,
-          msg_type: 1,
           direction: 2,
           operator_name: this.operatorName || '客服',
-          content,
-          payload: {},
-          status: data.status,
           create_time: new Date().toLocaleString('zh-CN', { hour12: false }),
+          ...msg,
         })
       }
       const conv = this.conversations.find((c) => c.id === convId)
       if (conv) {
-        conv.last_msg = content
+        conv.last_msg = summary
         conv.last_msg_at = nowStamp() // 自己发的消息也按最后消息时间置顶
         this.sortConversations()
       }
     },
 
-    /** 发媒体消息（2图片/3文件/4视频）：上传拿到 URL 后由 ChatComposer 调这里。
-     *  乐观上屏规则同 sendText；文件类摘要直接显示文件名。 */
+    /** 发文本消息：先本地加"发送中"气泡，等 WS 推最终状态。 */
+    async sendText(content) {
+      if (!this.currentId || !content.trim()) return
+      const convId = this.currentId
+      const data = await sendTextMessage(convId, content)
+      this._afterSend(convId, {
+        id: data.message_id, msg_type: 1, content, payload: {}, status: data.status,
+      }, content)
+    },
+
+    /** 发媒体消息（2图片/3文件/4视频）：payload 由 sendFile 组好传入。 */
     async sendMedia(msgType, content, payload) {
       if (!this.currentId) return
       const convId = this.currentId
       const data = await sendMediaMessage(convId, msgType, content, payload)
+      this._afterSend(convId, {
+        id: data.message_id, msg_type: msgType, content, payload, status: data.status,
+      }, MEDIA_SUMMARY[msgType] || content || '[媒体]')
+    },
 
-      if (this.currentId === convId) {
-        this.currentMessages.push({
-          id: data.message_id,
-          msg_type: msgType,
-          direction: 2,
-          operator_name: this.operatorName || '客服',
-          content,
-          payload,
-          status: data.status,
-          create_time: new Date().toLocaleString('zh-CN', { hour12: false }),
-        })
-      }
-      const summary = { 2: '[图片]', 4: '[视频]' }[msgType] || ''
-      const conv = this.conversations.find((c) => c.id === convId)
-      if (conv) {
-        conv.last_msg = summary || content || '[媒体]'
-        conv.last_msg_at = nowStamp()
-        this.sortConversations()
-      }
+    /** 发文件（文件按钮入口）：上传 → 按 MIME 分发类型与 payload → sendMedia。
+     *  大小/类型规则收敛在这里，组件只负责选文件和转圈。 */
+    async sendFile(file) {
+      if (!this.currentId) return
+      if (file.size > UPLOAD_MAX_BYTES) throw new Error('文件不能超过 50MB')
+      const up = await uploadFile(file)
+      const type = msgTypeOf(file)
+      await this.sendMedia(type, type === 3 ? up.file_name : '', mediaPayloadOf(type, up))
     },
 
     /** 按后端同一规则重排：置顶优先，其余按最后消息时间倒序（无时间排最后）。 */
@@ -344,10 +358,12 @@ export const useChatStore = defineStore('chat', {
       if (msg) msg.status = d.status
     },
 
-    /** 自己发的消息撤回成功：打标记，气泡变"已撤回"。 */
+    /** 撤回成功（自己/对方）：打标记，气泡变灰条；会话列表摘要同步换成撤回文案。 */
     onMessageRevoked(d) {
       const msg = this.currentMessages.find((m) => m.id === d.message_id)
       if (msg) msg.payload = { ...(msg.payload || {}), revoked: true }
+      const conv = this.conversations.find((c) => c.id === d.conversation_id)
+      if (conv) conv.last_msg = d.direction === 2 ? '你撤回了一条消息' : '对方撤回了一条消息'
     },
   },
 })
