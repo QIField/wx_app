@@ -8,7 +8,7 @@
 - data.list 数组，元素含 from_wxid/to_wxid/msg_type(字符串)/content/create_time(RFC 1123)/raw_json
 - 群消息 content = "发言人wxid:\n正文"，需拆分
 - new_msg_id 在 raw_json 的 NewMsgId 字段里
-- 无 is_sender：from==设备wxid 视为自己发出（设备wxid取 raw_json.Wxid）
+- 无 is_sender：from==设备wxid 视为自己发出（设备wxid 由接收消息的 to_wxid 学习，见 _device_wxid）
 """
 from datetime import datetime, timedelta
 
@@ -21,10 +21,13 @@ from backend.services import conversations as conversation_service
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.devices import pollable_devices
 from backend.sync import msg_xml, revoke, sysmsg
-from backend.sync.media_predownload import predownload_media
+from backend.sync.media_predownload import enqueue_predownload
 
 PAGE_SIZE = 100        # 每轮拉一页；单轮增量超一页的情况极少，靠下一轮补
 FIRST_HOURS = 1        # 首次运行没有游标时，从最近 1 小时开始拉
+
+# 设备自己的 wxid：中间方 raw_json 不提供，靠历史接收消息的 to_wxid 学习后缓存（进程内）
+_SELF_WXID_CACHE: dict[str, str] = {}
 
 # 中间方消息类型编码 → 本系统类型（微信常见编码，联调时校准）
 _TYPE_MAP = {
@@ -68,7 +71,7 @@ def sync_once(app):
                 from backend.sync.profile_sync import refresh_missing_profiles
 
                 refresh_missing_profiles(openid, [p["conversation_id"] for p in pushed])
-            predownload_media(pushed)  # 新媒体立刻串行预下载（限时，失败不拖同步）
+            enqueue_predownload(pushed)  # 只入队，媒体由后台线程下载，不阻塞下一轮收消息
 
 
 def sync_device(openid):
@@ -254,6 +257,7 @@ def _build_message(fields, conv, deleted=False):
         middle_msg_id=fields["middle_msg_id"],
         new_msg_id=fields["new_msg_id"],
         create_time=fields["create_time"],
+        status=Message.ST_SENT,  # 同步进来的消息（含手机自己发的）都已完成，不能显示"发送中"
         deleted_at=datetime.now() if deleted else None,
     )
 
@@ -267,7 +271,7 @@ def _normalize(item, openid=""):
     """
     try:
         raw = _parse_raw_json(item.get("raw_json"))
-        peer_wxid, content, sender_wxid, direction = _direction_and_sender(item, raw)
+        peer_wxid, content, sender_wxid, direction = _direction_and_sender(item, raw, openid)
         if not peer_wxid:
             return None
 
@@ -345,15 +349,22 @@ def _normalize(item, openid=""):
         return None  # 单条坏数据不拖垮整轮
 
 
-def _direction_and_sender(item, raw):
-    """方向与发言人：from == 设备wxid（raw_json.Wxid）视为自己发出，
-    对方取 to_wxid；否则为客户发来，对方取 from_wxid。
-    群消息 content = "发言人wxid:\n正文"，拆出发言人。
+def _direction_and_sender(item, raw, openid=""):
+    """方向与发言人：from == 设备自己的 wxid 视为「自己发出」。
+
+    中间方 raw_json 只有 Data.FromUserName/ToUserName，没有 Wxid、也没有 is_sender，
+    所以设备 wxid 靠 _device_wxid 从历史接收消息的 to_wxid 学习；学到之前退回
+    to_wxid 兜底（老逻辑）。群消息 content = "发言人wxid:\\n正文"，拆出发言人。
     """
     from_wxid = item.get("from_wxid", "")
     to_wxid = item.get("to_wxid", "")
     content = item.get("content") or ""
-    is_self = bool(item.get("is_sender")) or from_wxid == (raw.get("Wxid") or to_wxid)
+    self_wxid = raw.get("Wxid") or _device_wxid(openid)
+    is_self = (
+        bool(item.get("is_sender"))
+        or (bool(self_wxid) and from_wxid == self_wxid)
+        or from_wxid == to_wxid
+    )
     peer_wxid = to_wxid if is_self else from_wxid
     sender_wxid = from_wxid
     if not is_self and "@chatroom" in peer_wxid and ":\n" in content:
@@ -363,6 +374,45 @@ def _direction_and_sender(item, raw):
             content = rest
     direction = Message.DIR_OUT if is_self else Message.DIR_IN
     return peer_wxid, content, sender_wxid, direction
+
+
+def _device_wxid(openid):
+    """学习设备自己的 wxid：收到的消息 to_wxid 恒为自己，取最近 200 条出现最多的。
+
+    没有这个值就分不清「业务端/手机自己发的」和「客户发来的」：手机发的消息会被
+    当成客户消息显示在左侧。进程内缓存，设备 wxid 不会变。
+    """
+    if not openid:
+        return ""
+    if openid in _SELF_WXID_CACHE:
+        return _SELF_WXID_CACHE[openid]
+    self_wxid = ""
+    try:
+        from collections import Counter
+
+        rows = (
+            db.session.query(Message.payload)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .filter(
+                Conversation.openid == openid,
+                Message.direction == Message.DIR_IN,
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.id.desc())
+            .limit(200)
+            .all()
+        )
+        counts = Counter(
+            p.get("to_wxid")
+            for (p,) in rows
+            if isinstance(p, dict) and (p.get("to_wxid") or "").startswith("wxid_")
+        )
+        if counts:
+            self_wxid = counts.most_common(1)[0][0]
+    except Exception:
+        self_wxid = ""
+    _SELF_WXID_CACHE[openid] = self_wxid
+    return self_wxid
 
 
 def _parse_raw_json(value):

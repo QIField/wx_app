@@ -130,7 +130,13 @@ def _log(module, action, form, params, started, **kwargs):
 
 
 def call_download(module, action, params=None, openid=""):
-    """调中间方媒体下载接口（get_download_xxx）：返回 (文件字节, Content-Type)。
+    """调中间方媒体下载接口（get_download_xxx）：返回 (文件字节, Content-Type)。"""
+    data, content_type, _ = call_download_with_url(module, action, params, openid)
+    return data, content_type
+
+
+def call_download_with_url(module, action, params=None, openid=""):
+    """同 call_download，额外返回 CDN 预签名地址：三档 URL 相同时可只 GET 一次省流量。
 
     实测两步流程（见 docs/api.md 附录「联调实测记录」，与 V2 文档描述不同）：
     1. POST 返回 JSON（不是文件本身），文件地址在 data.data.fileUrl，表情接口是 data.data.url
@@ -142,7 +148,7 @@ def call_download(module, action, params=None, openid=""):
     if DEMO_MODE:
         middle_log.log_call(module, action, openid=openid or "", params=params,
                             resp_code=0, response_body="(demo) 占位媒体", success=1)
-        return _DEMO_MEDIA.get(action, (b"", "application/octet-stream"))
+        return _DEMO_MEDIA.get(action, (b"", "application/octet-stream")) + ("",)
 
     started = time.perf_counter()
     form = {"openid": openid or ""}
@@ -200,4 +206,4 @@ def call_download(module, action, params=None, openid=""):
     file_meta = f"\n[file] status={file_resp.status_code} type={content_type} bytes={len(file_resp.content)}"
     _log(module, action, form, params, started, http_status=http_status, resp_code=resp_code,
          response_body=raw + file_meta, success=1)
-    return file_resp.content, content_type
+    return file_resp.content, content_type, file_url

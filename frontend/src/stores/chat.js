@@ -378,8 +378,13 @@ export const useChatStore = defineStore('chat', {
 
       if (d.conversation_id === this.currentId) {
         // WS 推送字段是 message_id，必须映射成 id：否则 v-for 的 :key 全是 undefined，
-        // Vue 复用 DOM 会让图片气泡错位/重叠；同时按 id 幂等，重复推送只更新不追加
-        const incoming = { ...d, id: d.message_id, direction: d.direction, status: 1 }
+        // Vue 复用 DOM 会让图片气泡错位/被文本行顶替；id 缺失时兜底生成唯一 key
+        const incoming = {
+          ...d,
+          id: d.message_id ?? d.id ?? `ws-${Date.now()}-${this.currentMessages.length}`,
+          direction: d.direction,
+          status: 1,
+        }
         const exist = this.currentMessages.find((m) => m.id === incoming.id)
         if (exist) Object.assign(exist, incoming)
         else this.currentMessages.push(incoming)

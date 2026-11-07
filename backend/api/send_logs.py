@@ -4,6 +4,7 @@
 消息本身就是最全的发送记录（含发送中/失败状态）。
 """
 from flask import Blueprint, g, jsonify, request
+from sqlalchemy import or_
 
 from backend.extensions import db
 from backend.models.conversation import Conversation
@@ -44,6 +45,8 @@ def list_send_logs():
         .filter(
             Message.deleted_at.is_(None),
             Message.direction == Message.DIR_OUT,
+            # 只统计业务端发送：手机端同步回来的消息也是 DIR_OUT，但没有操作人快照
+            or_(Message.operator_id.isnot(None), Message.operator_name.isnot(None)),
             Conversation.deleted_at.is_(None),
             Conversation.openid.in_(openids),
         )

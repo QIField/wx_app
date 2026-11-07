@@ -15,12 +15,12 @@ from backend.services.auth import must_change_guard, request_user, user_from_tok
 
 bp = Blueprint("media", __name__)
 
-_IMG_TYPES = {1, 2, 3}  # 实测中间方语义：2=大图/高清；1 与 3 返回的均为缩略图（默认 2）
+_IMG_RANKS = {1, 2, 3}  # 清晰度名次：后端三档全下载并按像素排序，1=最清、3=缩略图
 
 
 @bp.get("/api/messages/<int:message_id>/media")
 def get_media(message_id):
-    """返回该条消息的媒体文件流；?img_type= 仅图片有效（1高清 2常规 3缩略图）。
+    """返回该条消息的媒体文件流；?img_type= 仅图片有效，表示清晰度名次（1 最清 / 3 缩略图，默认 3）。
 
     鉴权：优先 Authorization 头；<img>/<audio> 带不了头，允许 ?token= 兜底。
     """
@@ -37,17 +37,17 @@ def get_media(message_id):
     if msg.msg_type not in media_fetch.DOWNLOAD_ACTION:
         return jsonify(code=400, msg="该消息类型没有可拉取的媒体"), 400
 
-    img_type = request.args.get("img_type", type=int) or 2
-    if msg.msg_type == Message.MSG_IMAGE and img_type not in _IMG_TYPES:
-        img_type = 2
+    rank = request.args.get("img_type", type=int) or 3
+    if msg.msg_type == Message.MSG_IMAGE and rank not in _IMG_RANKS:
+        rank = 3
 
-    cached = media_fetch.cached_path(msg, img_type)
+    cached = media_fetch.cached_path(msg, rank)
     if cached is not None:
         # max-age 长缓存：媒体按消息 id 不可变，命中后浏览器不再回源（含 304 协商）
         return send_file(cached, mimetype=media_fetch.mimetype_of(cached),
                          conditional=True, max_age=86400)
 
-    return _download_and_cache(msg, img_type)
+    return _download_and_cache(msg, rank)
 
 
 def _load_message(message_id, user):
@@ -69,10 +69,14 @@ def _load_message(message_id, user):
     )
 
 
-def _download_and_cache(msg, img_type):
-    """未命中缓存：调中间方下载 → 落盘 → 回文件流。失败记审计日志（仅 fail）。"""
+def _download_and_cache(msg, rank):
+    """未命中缓存：调中间方下载 → 落盘 → 回文件流。失败记审计日志（仅 fail）。
+
+    图片会先把三档全部下载并按像素排名（见 media_fetch.fetch_and_cache），
+    rank 最终映射到实际最清/最弱的那一档。
+    """
     try:
-        path = media_fetch.fetch_and_cache(msg, img_type)
+        path = media_fetch.fetch_and_cache(msg, rank)
     except MiddleApiError as exc:
         log_action(AuditModule.SYNC, "媒体下载", f"消息 {msg.id}",
                    result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])

@@ -1,12 +1,13 @@
 /* ===== media.js · 媒体地址统一生成 ===== */
 
 /** 媒体地址：<img>/<audio>/<video> 带不了 Authorization 头，统一走 ?token= 兜底；
- *  imgType 仅图片消息有效（实测中间方语义：IMG_BIG=2 返回大图/高清，IMG_THUMB=3
- *  与 1 均返回缩略图）——气泡/引用缩略图用 IMG_THUMB 省流量，点开大图用 IMG_BIG。 */
+ *  imgType 仅图片消息有效：后端会把中间方 1/2/3 三档全部下载并按像素比较，
+ *  再以 img_type=1/2/3 暴露清晰度名次（1 最清、3 缩略图，不传默认 3）。
+ *  气泡/引用用 IMG_THUMB 省流量，点开预览与复制用 IMG_BIG。 */
 import { getToken } from '../api'
 
 /** 图片档位唯一事实来源（语义见文件头注释；改这里即可全局生效）。 */
-export const IMG_BIG = 2 // 大图/高清（点开预览）
+export const IMG_BIG = 1 // 最清（点开预览、复制图片）
 export const IMG_THUMB = 3 // 缩略图（气泡与引用块）
 
 export function mediaUrlOf(m, imgType) {

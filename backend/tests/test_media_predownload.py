@@ -56,26 +56,24 @@ def mock_download(monkeypatch, data=b"MEDIABYTES", content_type="image/png"):
 
     def fake(module, action, params=None, openid=""):
         calls.append({"action": action, "params": params, "openid": openid})
-        return data, content_type
+        return data, content_type, ""
 
-    monkeypatch.setattr(media_fetch.middle_client, "call_download", fake)
+    monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", fake)
     return calls
 
 
-def test_predownload_image_only_t2(app, conv, tmp_path, monkeypatch):
-    """图片只预下载常规规格：img_type=2，落盘一份缓存。"""
+def test_predownload_image_all_tiers(app, conv, tmp_path, monkeypatch):
+    """图片预下载三档全部拉取，比较像素后按 q1/q2/q3 落盘。"""
     monkeypatch.setattr(media_fetch, "MEDIA_DIR", tmp_path)
     msg = make_media_msg(conv.id, Message.MSG_IMAGE, '<msg><img aeskey="k" /></msg>')
     calls = mock_download(monkeypatch)
 
     media_predownload.predownload_media(make_pushed(msg))
 
-    assert calls == [{
-        "action": "get_download_image",
-        "params": {"xml": msg.content, "img_type": 2},
-        "openid": "dev01",
-    }]
-    assert list(media_fetch.cache_dir_for(msg).glob(f"{msg.id}_t2.png"))
+    assert [c["params"]["img_type"] for c in calls] == [1, 2, 3]
+    assert all(c["action"] == "get_download_image" for c in calls)
+    assert dict(calls[0])["openid"] == "dev01"
+    assert len(list(media_fetch.cache_dir_for(msg).glob(f"{msg.id}_q*.png"))) == 3
 
 
 def test_predownload_skips_text_and_cached(app, conv, tmp_path, monkeypatch):
@@ -85,7 +83,8 @@ def test_predownload_skips_text_and_cached(app, conv, tmp_path, monkeypatch):
     cached = make_media_msg(conv.id, Message.MSG_IMAGE, '<msg><img aeskey="k" /></msg>')
     cached_dir = media_fetch.cache_dir_for(cached)
     cached_dir.mkdir(parents=True, exist_ok=True)
-    (cached_dir / f"{cached.id}_t2.png").write_bytes(b"OLD")
+    for rank in (1, 2, 3):  # 三档齐全才算已缓存
+        (cached_dir / f"{cached.id}_q{rank}.png").write_bytes(b"OLD")
     calls = mock_download(monkeypatch)
 
     media_predownload.predownload_media(make_pushed(text) + make_pushed(cached))
@@ -104,9 +103,9 @@ def test_predownload_failure_continues(app, conv, tmp_path, monkeypatch):
     def flaky(module, action, params=None, openid=""):
         if action == "get_download_video":
             raise MiddleApiError("已达上限")
-        return b"GIF89", "image/gif"
+        return b"GIF89", "image/gif", ""
 
-    monkeypatch.setattr(media_fetch.middle_client, "call_download", flaky)
+    monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", flaky)
 
     media_predownload.predownload_media(make_pushed(bad) + make_pushed(good))
 
