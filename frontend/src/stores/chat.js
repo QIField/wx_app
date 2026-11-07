@@ -2,12 +2,15 @@
 import { defineStore } from 'pinia'
 import { nextTick } from 'vue'
 import {
-  checkDeviceOnline, connectWs, fetchConversations, fetchDevices, fetchMessages,
-  markConversationRead, openConversation, sendMediaMessage, sendTextMessage, updateConversation,
-  uploadFile,
+  checkDeviceOnline, connectWs, fetchConversationMembers, fetchConversations, fetchDevices,
+  fetchMessages, markConversationRead, openConversation, sendMediaMessage, sendTextMessage,
+  updateConversation, uploadFile,
 } from '../api'
 import { prewarmThumbs } from '../utils/media'
 import { convCacheGet, convCachePut } from '../utils/convCache'
+
+/** 群成员名册在途请求：连打两次 @ 只发一条请求（Pinia 状态不适合放 Promise） */
+const membersInflight = new Map()
 
 /** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
 function nowStamp() {
@@ -65,10 +68,14 @@ export const useChatStore = defineStore('chat', {
     devices: [],         // 绑定的聊天账号卡片 [{openid, remark, display_name, online, unread}]
     activeOpenid: '',    // 当前查看的聊天账号（缺省=第一个绑定）
     operatorName: '',    // 当前登录人姓名：本地乐观气泡直接显示操作人
+    membersByConv: {},   // 群成员名册缓存 { convId: [{id,name,avatar,alias,pinyin,initials}] }
   }),
 
   getters: {
     currentConv: (s) => s.conversations.find((c) => c.id === s.currentId) || null,
+
+    /** 当前会话的群成员名册（@ 提及选择器用；单聊为空数组）。 */
+    currentMembers: (s) => s.membersByConv[s.currentId] || [],
 
     /** 找回我的某台绑定设备卡片（找不到说明消息属于别人的设备）。 */
     myDevice: (s) => (openid) => s.devices.find((d) => d.openid === openid) || null,
@@ -135,6 +142,7 @@ export const useChatStore = defineStore('chat', {
       this.activeOpenid = openid
       this.currentId = null
       this.currentMessages = []
+      this.membersByConv = {} // 名册按账号隔离，换号必须清缓存
       this.hasMore = false
       await Promise.all([this.loadDevices(), this.loadConversations()])
     },
@@ -258,13 +266,33 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** 发文本消息：先本地加"发送中"气泡，等 WS 推最终状态。 */
-    async sendText(content) {
+    /** 拉取并缓存群成员名册：一次取回，之后 @ 检索全在本地做（打字不发请求）。
+     *  单聊/未同步名册的群后端返回空列表，前端据此不弹选择层。
+     *  membersInflight 保证连打两次 @ 只会发一条请求。 */
+    async loadMembers(convId) {
+      const cached = this.membersByConv[convId]
+      if (cached) return cached
+      if (membersInflight.has(convId)) return membersInflight.get(convId)
+      const pending = fetchConversationMembers(convId)
+        .then((data) => {
+          const list = data.list || []
+          this.membersByConv[convId] = list
+          return list
+        })
+        .finally(() => membersInflight.delete(convId))
+      membersInflight.set(convId, pending)
+      return pending
+    },
+
+    /** 发文本消息：先本地加"发送中"气泡，等 WS 推最终状态。
+     *  atIds 是 @提醒的群成员行号（服务端换算 ats，前端始终不持有 wxid）。 */
+    async sendText(content, atIds = []) {
       if (!this.currentId || !content.trim()) return
       const convId = this.currentId
-      const data = await sendTextMessage(convId, content)
+      const payload = atIds.length ? { at_ids: atIds } : {}
+      const data = await sendTextMessage(convId, content, payload)
       this._afterSend(convId, {
-        id: data.message_id, msg_type: 1, content, payload: {}, status: data.status,
+        id: data.message_id, msg_type: 1, content, payload, status: data.status,
       }, content)
     },
 
@@ -349,7 +377,12 @@ export const useChatStore = defineStore('chat', {
       }
 
       if (d.conversation_id === this.currentId) {
-        this.currentMessages.push({ ...d, direction: d.direction, status: 1 })
+        // WS 推送字段是 message_id，必须映射成 id：否则 v-for 的 :key 全是 undefined，
+        // Vue 复用 DOM 会让图片气泡错位/重叠；同时按 id 幂等，重复推送只更新不追加
+        const incoming = { ...d, id: d.message_id, direction: d.direction, status: 1 }
+        const exist = this.currentMessages.find((m) => m.id === incoming.id)
+        if (exist) Object.assign(exist, incoming)
+        else this.currentMessages.push(incoming)
       }
     },
 

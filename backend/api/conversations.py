@@ -7,11 +7,13 @@
 import time
 
 from flask import Blueprint, current_app, g, jsonify, request
+from pypinyin import Style, lazy_pinyin
 from sqlalchemy import select
 
 from backend.extensions import db
 from backend.models.contact import Contact
 from backend.models.conversation import Conversation
+from backend.models.group_member import GroupMember
 from backend.models.message import Message
 from backend.services import anonymize, conversations as conversation_service
 from backend.services.auth import require_role
@@ -244,6 +246,45 @@ def list_messages(conversation_id):
         len(rows), quotes,
     )
     return jsonify(code=0, msg="success", data=data)
+
+
+@bp.get("/api/conversations/<int:conversation_id>/members")
+@require_role()
+def list_members(conversation_id):
+    """群成员名册：输入框 @提及 选择器的数据源。
+
+    脱敏契约：只给行号 id，不下发 wxid；全拼/首字母由后端 pypinyin 预算，
+    前端一次取回即可本地过滤，打字过程中不再请求（零延迟）。
+    单聊没有名册，返回空列表而不是报错，前端据此不弹选择层。
+    """
+    conv = _my_conversation(conversation_id)
+    if conv is None:
+        return jsonify(code=404, msg="会话不存在"), 404
+    if conv.chat_type != Conversation.CHAT_GROUP:
+        return jsonify(code=0, msg="success", data={"list": [], "total": 0})
+
+    rows = GroupMember.query.filter_by(
+        openid=conv.openid, chatroom_wxid=conv.wxid, deleted_at=None,
+    ).all()
+    items = [_member_json(m) for m in rows]
+    # 昵称未解析（拼音为空）的排最后，其余按全拼字典序
+    items.sort(key=lambda x: (not x["pinyin"], x["pinyin"] or x["alias"]))
+    return jsonify(code=0, msg="success", data={"list": items, "total": len(items)})
+
+
+def _member_json(m):
+    """群成员出参：昵称/头像走现有脱敏规则，附全拼与首字母供 @ 搜索。"""
+    name = anonymize.resolved_name(m.nickname, m.wxid)
+    pinyin = "".join(lazy_pinyin(name)) if name else ""
+    initials = "".join(lazy_pinyin(name, style=Style.FIRST_LETTER)) if name else ""
+    return {
+        "id": m.id,
+        "name": name,
+        "avatar": anonymize.avatar_or_none(name, m.avatar),
+        "alias": anonymize.alias_of(m.wxid),
+        "pinyin": pinyin.lower(),
+        "initials": initials.lower(),
+    }
 
 
 def _conv_json(c):

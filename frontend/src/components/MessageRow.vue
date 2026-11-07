@@ -8,6 +8,7 @@
 import { computed, ref } from 'vue'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
 import { renderEmojiHtml } from '../utils/emoji'
+import { renderMessageHtml } from '../utils/mention'
 import { mediaUrlOf, IMG_BIG, IMG_THUMB } from '../utils/media'
 import { displayNameOf } from '../utils/format'
 import AnonAvatar from './AnonAvatar.vue'
@@ -88,8 +89,8 @@ const transferTo = computed(() =>
 /* 引用消息：新消息读 payload.quote；历史按链接入库的数据解析 XML 兜底 */
 const quote = computed(() => quoteInfoOf(props.msg))
 
-/* 文本消息渲染：[微笑] 等微信表情码 → 内联表情图（先转义防 XSS，未识别码原样显示） */
-const contentHtml = computed(() => renderEmojiHtml(props.msg.content))
+/* 文本消息渲染：先过表情（内部已转义），再把 @昵称 标蓝——微信同款提醒样式 */
+const contentHtml = computed(() => renderMessageHtml(props.msg.content))
 /* 引用块文本同样走表情渲染（被引用的原消息常含表情码） */
 const quoteHtml = computed(() =>
   renderEmojiHtml((quote.value?.name ? `${quote.value.name}：` : '') + (quote.value?.text || '[原消息]'))
@@ -381,6 +382,8 @@ function onMenu(e) {
 .lc-host .host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .content { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+/* 气泡正文走 v-html，拿不到 scoped 属性，@昵称高亮必须用 :deep */
+.content :deep(.msg-mention) { color: var(--c-primary); font-weight: 600; }
 .type-label { color: var(--c-primary); }
 
 /* 引用块：微信同款灰底 + 左侧竖线（仅文字引用用；图片引用走 .q-ph 骨架屏） */

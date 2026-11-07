@@ -132,11 +132,15 @@ export const fetchMessages = (convId, beforeId) =>
     params: beforeId ? { before_id: beforeId } : {},
   })
 
-export const sendTextMessage = (convId, content) =>
+/** 群成员名册：@提及选择器数据源（附全拼/首字母，前端本地过滤）。 */
+export const fetchConversationMembers = (convId) =>
+  http.get(`/conversations/${convId}/members`)
+
+export const sendTextMessage = (convId, content, payload = {}) =>
   http.post(`/conversations/${convId}/messages`, {
     msg_type: 1,
     content,
-    payload: {},
+    payload,
   })
 
 /** 上传任意文件：返回 {url(中间方可下载的绝对地址), path(本地预览相对路径), file_name, size}。 */

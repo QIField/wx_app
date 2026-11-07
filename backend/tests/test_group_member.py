@@ -294,3 +294,72 @@ def datetime_now():
     from datetime import datetime
 
     return datetime(2026, 10, 31, 12, 0, 0)
+
+
+# ---------- @提及名册接口 ----------
+
+def test_members_api_returns_roster_with_pinyin(client, app, group_conv):
+    """名册接口：只给行号 id（脱敏契约），附全拼/首字母供前端本地检索。"""
+    _member(wxid="wxid_a", nickname="张三")
+    _member(wxid="wxid_b", nickname="李四")
+
+    resp = client.get(f"/api/conversations/{group_conv.id}/members")
+
+    assert resp.status_code == 200
+    data = resp.get_json()["data"]
+    assert data["total"] == 2
+    by_name = {m["name"]: m for m in data["list"]}
+    assert by_name["张三"]["pinyin"] == "zhangsan"
+    assert by_name["张三"]["initials"] == "zs"
+    assert by_name["李四"]["pinyin"] == "lisi"
+    for m in data["list"]:
+        assert set(m) == {"id", "name", "avatar", "alias", "pinyin", "initials"}
+        assert "wxid" not in m  # 脱敏：wxid 一律不下发
+        assert m["alias"]  # 未解析/已解析都有稳定别名
+
+
+def test_members_api_unresolved_name_has_empty_pinyin(client, app, group_conv):
+    """昵称未解析（仍是 wxid 原文）：name=None，拼音为空，前端用别名兜底展示。"""
+    _member(wxid="wxid_ghost", nickname="wxid_ghost")
+
+    data = client.get(f"/api/conversations/{group_conv.id}/members").get_json()["data"]
+
+    row = data["list"][0]
+    assert row["name"] is None
+    assert row["pinyin"] == ""
+    assert row["initials"] == ""
+    assert row["alias"]
+
+
+def test_members_api_scoped_to_room(client, app, group_conv):
+    """只返回本群、未删除的成员：跨群/软删的行不能串进来。"""
+    from datetime import datetime
+
+    _member(wxid="wxid_a", nickname="本群成员")
+    _member(wxid="wxid_b", nickname="别群成员", room="456@chatroom")
+    gone = _member(wxid="wxid_c", nickname="已删除")
+    gone.deleted_at = datetime(2026, 10, 1, 0, 0, 0)
+    db.session.commit()
+
+    data = client.get(f"/api/conversations/{group_conv.id}/members").get_json()["data"]
+
+    assert data["total"] == 1
+    assert data["list"][0]["name"] == "本群成员"
+
+
+def test_members_api_single_chat_returns_empty(client, app):
+    """单聊没有名册：返回空列表而不是报错（前端据此不弹选择层）。"""
+    conv = Conversation(openid="dev01", wxid="wxid_customer", chat_type=1, name="张师傅")
+    db.session.add(conv)
+    db.session.commit()
+
+    data = client.get(f"/api/conversations/{conv.id}/members").get_json()["data"]
+
+    assert data == {"list": [], "total": 0}
+
+
+def test_members_api_not_found(client, app):
+    """跨账号/不存在的会话：404，与消息接口口径一致。"""
+    resp = client.get("/api/conversations/999/members")
+    assert resp.status_code == 404
+    assert resp.get_json()["code"] == 404

@@ -113,7 +113,8 @@ def send_message(conversation_id, msg_type, content, payload, operator=None):
         msg_type=msg_type,
         direction=Message.DIR_OUT,
         content=_display_content(msg_type, content, payload),
-        payload=payload,
+        # ats 是中间方协议字段，里面是 wxid 明文：只用于下发参数，不落库、不回前端
+        payload={k: v for k, v in payload.items() if k != "ats"},
         status=Message.ST_SENDING,
         operator_id=operator.id if operator is not None else None,
         operator_name=operator.name if operator is not None else None,
