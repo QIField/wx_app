@@ -13,7 +13,11 @@ def _devices_of(user_id):
     """某账号关联设备的 openid 列表（按关联顺序）。"""
     from backend.models.user_device import UserDevice
 
-    rows = UserDevice.query.filter_by(user_id=user_id).order_by(UserDevice.id).all()
+    rows = (
+        UserDevice.query.filter_by(user_id=user_id, deleted_at=None)
+        .order_by(UserDevice.id)
+        .all()
+    )
     return [r.openid for r in rows]
 
 
@@ -278,6 +282,40 @@ def test_bind_devices_multiple_in_order(client, app):
     assert ok2.status_code == 200
     db.session.expire_all()
     assert _devices_of(target.id) == ["D1", "D3", "D4"]
+
+
+def test_unbind_then_rebind_restores_same_row(client, app):
+    """解除关联是软删除；再次关联时复活同一行，不产生重复数据。"""
+    from backend.models.user_device import UserDevice
+
+    _dev()
+    make_user(username="cs15", name="客服十五", role=ROLE_AGENT)
+    dev = User.query.filter_by(username="dev").one()
+    target = User.query.filter_by(username="cs15").one()
+    d1, d2 = _device("R1"), _device("R2")
+
+    client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
+               json={"name": "客服十五", "device_ids": [d1.id, d2.id]})
+    db.session.expire_all()
+    row_d2 = UserDevice.query.filter_by(user_id=target.id, device_id=d2.id).one()
+    row_id = row_d2.id
+
+    # 全部解除：行保留，只打 deleted_at
+    client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
+               json={"name": "客服十五", "device_ids": []})
+    db.session.expire_all()
+    assert UserDevice.query.filter_by(user_id=target.id).count() == 2
+    assert all(r.deleted_at is not None for r in UserDevice.query.filter_by(user_id=target.id).all())
+    assert _devices_of(target.id) == []
+
+    # 重新关联 R2：复活原行（id 不变），没有新增重复行
+    client.put(f"/api/accounts/{target.id}", headers=login_headers(dev),
+               json={"name": "客服十五", "device_ids": [d2.id]})
+    db.session.expire_all()
+    assert _devices_of(target.id) == ["R2"]
+    restored = UserDevice.query.filter_by(user_id=target.id, device_id=d2.id).one()
+    assert restored.id == row_id
+    assert UserDevice.query.filter_by(user_id=target.id).count() == 2
 
 
 def test_bind_devices_unknown_device_rejected(client, app):

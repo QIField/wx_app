@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf } from '../utils/format'
 import { msgTextOf } from '../utils/message'
-import { mediaUrlOf } from '../utils/media'
+import { IMG_BIG, mediaUrlOf } from '../utils/media'
 import { copyImageFromUrl, copyText } from '../utils/clipboard'
 import { buildTimeline } from '../utils/timeline'
 import MessageRow from './MessageRow.vue'
@@ -93,7 +93,7 @@ async function onMenuSelect(key) {
   if (!m || key !== 'copy') return
   try {
     if (m.msg_type === 2) {
-      await copyImageFromUrl(mediaUrlOf(m, 1))
+      await copyImageFromUrl(mediaUrlOf(m, IMG_BIG)) // 复制走最清档（后端按像素排名后的 1）
       ElMessage.success('已复制图片')
     } else {
       await copyText(msgTextOf(m))

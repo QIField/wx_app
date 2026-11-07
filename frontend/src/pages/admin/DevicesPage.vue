@@ -7,6 +7,7 @@ import {
   deleteAdminDevice,
   fetchAdminDevices,
   fetchOrgs,
+  restoreAdminDevice,
   updateAdminDevice,
 } from '../../api'
 import { matchKeyword } from '../../utils/format'
@@ -28,9 +29,14 @@ const ONLINE_CLS = { 1: 'on', 0: 'off', '-1': 'unknown' }
 const orgFilter = ref('')
 const onlineFilter = ref('')
 const keyword = ref('')
+const trashMode = ref(false) // 回收站：只看软删除设备，可恢复
+
+/** 在用设备（统计口径始终排除已删除，避免回收站数据污染看板）。 */
+const activeList = computed(() => list.value.filter((d) => !d.deleted_at))
 
 const filtered = computed(() =>
   list.value.filter((d) => {
+    if (trashMode.value ? !d.deleted_at : !!d.deleted_at) return false
     if (orgFilter.value && d.org_id !== Number(orgFilter.value)) return false
     if (onlineFilter.value && String(d.online) !== onlineFilter.value) return false
     return matchKeyword(
@@ -39,17 +45,23 @@ const filtered = computed(() =>
     )
   }))
 
-const stats = computed(() => ({
-  total: list.value.length,
-  on: list.value.filter((d) => d.online === 1).length,
-  off: list.value.filter((d) => d.online === 0).length,
-  free: list.value.filter((d) => !(d.bound_users || []).length).length,
-}))
+const stats = computed(() => {
+  const rows = activeList.value
+  return {
+    total: rows.length,
+    on: rows.filter((d) => d.online === 1).length,
+    off: rows.filter((d) => d.online === 0).length,
+    free: rows.filter((d) => !(d.bound_users || []).length).length,
+  }
+})
 
 async function load() {
   loading.value = true
   try {
-    const [devices, orgList] = await Promise.all([fetchAdminDevices(), fetchOrgs()])
+    const [devices, orgList] = await Promise.all([
+      fetchAdminDevices(trashMode.value ? { include_deleted: 1 } : undefined),
+      fetchOrgs(),
+    ])
     list.value = devices
     orgs.value = orgList
   } catch (ex) {
@@ -58,6 +70,12 @@ async function load() {
   loading.value = false
 }
 onMounted(load)
+
+/** 切换在用 / 回收站：后端默认只返回未删除，回收站需 include_deleted=1。 */
+async function toggleTrash() {
+  trashMode.value = !trashMode.value
+  await load()
+}
 
 /* ===== 关联账号 chips ===== */
 const boundUsers = (d) => d.bound_users || []
@@ -106,13 +124,24 @@ async function remove(d) {
     emit('toast', { msg: `「${d.name || d.openid}」仍被 ${boundUsers(d).length} 个账号关联，请先解除关联`, type: 'danger' })
     return
   }
-  if (!window.confirm(`确认删除设备「${d.name || d.openid}」（${d.openid}）？\n删除后不可恢复。`)) return
+  if (!window.confirm(`确认删除设备「${d.name || d.openid}」（${d.openid}）？\n删除后进入回收站，可随时恢复。`)) return
   try {
     await deleteAdminDevice(d.id)
-    emit('toast', { msg: `已删除设备「${d.name || d.openid}」` })
+    emit('toast', { msg: `已删除设备「${d.name || d.openid}」，可在回收站恢复` })
     await load()
   } catch (ex) {
     emit('toast', { msg: ex.message || '删除失败', type: 'danger' })
+  }
+}
+
+/** 从回收站恢复：只把 deleted_at 置回 NULL，原 id 与关联保持不变。 */
+async function restore(d) {
+  try {
+    await restoreAdminDevice(d.id)
+    emit('toast', { msg: `已恢复设备「${d.name || d.openid}」` })
+    await load()
+  } catch (ex) {
+    emit('toast', { msg: ex.message || '恢复失败', type: 'danger' })
   }
 }
 </script>
@@ -122,7 +151,7 @@ async function remove(d) {
     <div class="page-head rise">
       <div>
         <h1>设备管理</h1>
-        <div class="desc">微信设备先入库，再到账号管理中关联给账号
+        <div class="desc">微信设备先入库，再到账号管理中关联给账号；删除为软删除，可在回收站恢复
           <span v-if="!canManage" class="tag tag-warn" style="margin-left:8px;">设备增删改仅开发者可操作</span>
         </div>
       </div>
@@ -174,6 +203,11 @@ async function remove(d) {
         <span class="ic"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
         <input v-model="keyword" type="text" placeholder="搜索设备 ID / 名称 / 关联账号">
       </div>
+      <span style="flex:1"></span>
+      <button type="button" class="btn" :class="trashMode ? 'btn-primary' : 'btn-ghost'" @click="toggleTrash">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        {{ trashMode ? '返回在用设备' : '回收站' }}
+      </button>
     </div>
 
     <!-- 设备列表 -->
@@ -209,7 +243,11 @@ async function remove(d) {
                 <span v-else class="tag tag-gray" title="迁移遗留未分配，编辑时可补选">未分配</span>
               </td>
               <td>
-                <div style="display:flex;align-items:center;gap:6px;">
+                <template v-if="d.deleted_at">
+                  <span class="tag tag-gray">已删除</span>
+                  <div class="cell-sub num" style="margin-top:4px;">{{ d.deleted_at }}</div>
+                </template>
+                <div v-else style="display:flex;align-items:center;gap:6px;">
                   <span class="online-dot" :class="ONLINE_CLS[d.online]"></span>
                   <span>{{ ONLINE_TEXT[d.online] }}</span>
                 </div>
@@ -228,11 +266,16 @@ async function remove(d) {
               <td class="num">{{ d.created_at }}</td>
               <td>
                 <div class="ops" style="justify-content:flex-end;">
-                  <template v-if="canManage">
+                  <template v-if="canManage && d.deleted_at">
+                    <button type="button" class="icon-btn" title="恢复设备（deleted_at 置回 NULL）" @click="restore(d)">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                    </button>
+                  </template>
+                  <template v-else-if="canManage">
                     <button type="button" class="icon-btn" title="编辑设备名称与所属组织" @click="openModal(d)">
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7 21l-4 1 1-4L17 3z"/></svg>
                     </button>
-                    <button type="button" class="icon-btn" title="删除设备（被关联时不可删除）" @click="remove(d)">
+                    <button type="button" class="icon-btn" title="删除设备（软删除，可在回收站恢复；被关联时不可删除）" @click="remove(d)">
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
                     </button>
                   </template>

@@ -5,10 +5,10 @@
 才建，通讯录要收录没聊过天的联系人，所以单独建表。
 """
 from backend.extensions import db
-from backend.models.base import BigIntPK
+from backend.models.base import BigIntPK, SoftDeleteMixin
 
 
-class Contact(db.Model):
+class Contact(db.Model, SoftDeleteMixin):
     TYPE_FRIEND = 1  # 好友
     TYPE_GROUP = 2   # 群聊
     TYPE_GH = 3      # 公众号（同步时跳过，不入库）

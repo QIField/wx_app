@@ -154,7 +154,6 @@ def init_scheduler(app: Flask):
 
     from backend.config import DEVICE_CHECK_INTERVAL_SECONDS
     from backend.services import middle_log
-    from backend.services.audit import clean_expired_logs
     from backend.services.devices import refresh_all_device_online
     from backend.sync.confirm_worker import confirm_once
     from backend.sync.message_sync import sync_once
@@ -215,13 +214,11 @@ def init_scheduler(app: Flask):
 
 
 def _cleanup_logs(app: Flask):
+    """日志清理唯一入口：保留期与清理审计都收敛在 services/retention.py。"""
     with app.app_context():
-        from backend.services.access_log import clean_expired as clean_access_logs
-        from backend.services.middle_log import clean_expired as clean_middle_logs
+        from backend.services.retention import purge_expired
 
-        clean_expired_logs(days=180)  # audit_log 保留 180 天
-        clean_access_logs(days=90)
-        clean_middle_logs(days=90)
+        purge_expired()
 
 
 app = create_app()

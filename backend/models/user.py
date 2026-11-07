@@ -72,7 +72,11 @@ class User(db.Model):
         if with_devices:
             from backend.models.user_device import UserDevice
 
-            rows = UserDevice.query.filter_by(user_id=self.id).order_by(UserDevice.id).all()
+            rows = (
+                UserDevice.query.filter_by(user_id=self.id, deleted_at=None)
+                .order_by(UserDevice.id)
+                .all()
+            )
             devices = []
             device_ids = []
             for row in rows:

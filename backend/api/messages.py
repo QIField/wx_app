@@ -12,6 +12,7 @@ from backend.adapter import sender as middle_sender
 from backend.config import SEND_ENABLED
 from backend.extensions import db
 from backend.models.conversation import Conversation
+from backend.models.group_member import GroupMember
 from backend.models.message import Message
 from backend.services.auth import must_change_guard, request_user
 from backend.services.devices import user_openids
@@ -66,6 +67,19 @@ def send_message_api(conversation_id):
     if conv is None:
         return jsonify(code=404, msg="会话不存在"), 404
 
+    # @提及：前端只传成员行号（脱敏契约），这里换算出中间方要的 ats=wxid 串。
+    # ats 只活在本次请求内存里，落库前会被 send_service 剔除，不会回到前端。
+    at_ids = payload.get("at_ids")
+    if at_ids is not None:
+        if msg_type != Message.MSG_TEXT:
+            return jsonify(code=400, msg="仅文本消息支持 @提醒"), 400
+        if conv.chat_type != Conversation.CHAT_GROUP:
+            return jsonify(code=400, msg="单聊不支持 @提醒"), 400
+        ats = _resolve_ats(conv, at_ids)
+        if ats is None:
+            return jsonify(code=400, msg="at_ids 含无效群成员"), 400
+        payload = {**payload, "ats": ats}
+
     try:
         msg = send_message(conversation_id, msg_type, body.get("content", ""), payload,
                            operator=user)
@@ -77,6 +91,38 @@ def send_message_api(conversation_id):
         msg="success",
         data={"message_id": msg.id, "status": msg.status},
     )
+
+
+_AT_LIMIT = 50  # 一次最多提醒 50 人：防止异常 payload 放大 SQL 与下发体积
+
+
+def _resolve_ats(conv, at_ids):
+    """成员行号 → wxid 逗号串；含非法/越权 id 返回 None（整单拒绝，不做部分降级）。
+
+    只认本群名册（openid + chatroom_wxid 双条件），防止拿别群的成员 id 拼 ats。
+    """
+    if not isinstance(at_ids, list) or not at_ids or len(at_ids) > _AT_LIMIT:
+        return None
+    ids = []
+    for raw in at_ids:
+        if isinstance(raw, bool):  # bool 是 int 子类，得先挡掉
+            return None
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            return None
+    ids = list(dict.fromkeys(ids))  # 去重：同一个人被 @ 两次不该下发两次
+    rows = GroupMember.query.filter(
+        GroupMember.id.in_(ids),
+        GroupMember.openid == conv.openid,
+        GroupMember.chatroom_wxid == conv.wxid,
+        GroupMember.deleted_at.is_(None),
+    ).all()
+    if len(rows) != len(ids):
+        return None
+    order = {rid: i for i, rid in enumerate(ids)}  # 保持前端选择顺序
+    rows.sort(key=lambda r: order[r.id])
+    return ",".join(r.wxid for r in rows if r.wxid)
 
 
 @bp.post("/api/messages/<int:message_id>/revoke")

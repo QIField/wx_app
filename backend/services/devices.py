@@ -10,11 +10,18 @@
 from backend.extensions import db
 
 
-def user_devices(user_id):
-    """某账号的关联设备列表，按关联顺序（id 升序）。"""
+def user_devices(user_id, include_deleted=False):
+    """某账号的关联设备列表，按关联顺序（id 升序）。
+
+    include_deleted=True 用于账号编辑：命中已软删的关联行时“复活”，
+    避免解除关联后重新关联产生重复行。
+    """
     from backend.models.user_device import UserDevice
 
-    return UserDevice.query.filter_by(user_id=user_id).order_by(UserDevice.id).all()
+    q = UserDevice.query.filter_by(user_id=user_id)
+    if not include_deleted:
+        q = q.filter(UserDevice.deleted_at.is_(None))
+    return q.order_by(UserDevice.id).all()
 
 
 def user_openids(user_id):
@@ -32,7 +39,11 @@ def _linked_device_query():
         db.session.query(Device)
         .join(UserDevice, UserDevice.device_id == Device.id)
         .join(User, UserDevice.user_id == User.id)
-        .filter(User.status == 1)
+        .filter(
+            User.status == 1,
+            Device.deleted_at.is_(None),
+            UserDevice.deleted_at.is_(None),
+        )
         .distinct()
     )
 
@@ -114,7 +125,7 @@ def refresh_all_device_online(app):
             return
         try:
             for openid in openids:
-                device = Device.query.filter_by(openid=openid).first()
+                device = Device.query.filter_by(openid=openid, deleted_at=None).first()
                 if device is not None:
                     device.online = check_device_online(openid)
             db.session.commit()

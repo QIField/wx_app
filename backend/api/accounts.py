@@ -246,7 +246,8 @@ def _sync_devices(user, body, me):
                    result=AuditLog.RESULT_FAIL, detail="设备列表内有重复")
         return jsonify(code=400, msg="设备列表内有重复"), 400
 
-    current = {d.device_id: d for d in user_devices(user.id)}
+    all_rows = {d.device_id: d for d in user_devices(user.id, include_deleted=True)}
+    current = {k: v for k, v in all_rows.items() if k is not None and not v.is_deleted}
     if ids != [k for k in current if k is not None] and me.role != ROLE_DEVELOPER:
         log_action(AuditModule.ACCOUNT, "关联设备", _target(user),
                    result=AuditLog.RESULT_FAIL, detail="设备关联仅开发者可配置")
@@ -254,7 +255,7 @@ def _sync_devices(user, body, me):
 
     found = {}
     if ids:
-        for row in Device.query.filter(Device.id.in_(ids)).all():
+        for row in Device.query.filter(Device.id.in_(ids), Device.deleted_at.is_(None)).all():
             found[row.id] = row
     missing = [i for i in ids if i not in found]
     if missing:
@@ -263,12 +264,17 @@ def _sync_devices(user, body, me):
         return jsonify(code=400, msg="关联的设备不存在，请刷新后重试"), 400
 
     for did, row in current.items():
-        if did not in ids:  # 列表里没有 = 解除关联
-            db.session.delete(row)
+        if did not in ids:  # 列表里没有 = 解除关联（软删除，重新关联时复活同一行）
+            row.soft_delete()
     for did in ids:  # 已有关联保持顺序，新增按传入顺序追加
         if did not in current:
             device = found[did]
-            # openid 冗余自设备字典（device.openid 录入后不可改且关联中不可删，不失步）
-            db.session.add(UserDevice(user_id=user.id, device_id=device.id,
-                                      openid=device.openid))
+            old = all_rows.get(did)
+            if old is not None:  # 曾被解除关联：复活旧行，避免重复数据
+                old.restore()
+                old.openid = device.openid
+            else:
+                # openid 冗余自设备字典（device.openid 录入后不可改且关联中不可删，不失步）
+                db.session.add(UserDevice(user_id=user.id, device_id=device.id,
+                                          openid=device.openid))
     return None

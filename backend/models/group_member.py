@@ -4,10 +4,10 @@
 关联本表实时解析昵称与头像——存库不回刷，成员改名立即生效。
 """
 from backend.extensions import db
-from backend.models.base import BigIntPK
+from backend.models.base import BigIntPK, SoftDeleteMixin
 
 
-class GroupMember(db.Model):
+class GroupMember(db.Model, SoftDeleteMixin):
     __tablename__ = "group_member"
 
     id = db.Column(BigIntPK, primary_key=True, autoincrement=True)

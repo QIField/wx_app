@@ -8,6 +8,7 @@
 import { computed, ref } from 'vue'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
 import { renderEmojiHtml } from '../utils/emoji'
+import { renderMessageHtml } from '../utils/mention'
 import { mediaUrlOf, IMG_BIG, IMG_THUMB } from '../utils/media'
 import { displayNameOf } from '../utils/format'
 import AnonAvatar from './AnonAvatar.vue'
@@ -48,8 +49,10 @@ function picOf(m) {
   return props.conv?.avatar || null
 }
 function nameOf(m) {
-  // 出方向显示操作人快照（谁发的这条消息），历史数据回退"客服"
-  if (m.direction === 2) return m.operator_name || m.sender_name || '客服'
+  // 出方向：业务端发送显示操作人快照；手机端发的没有操作人，标「手机端」区分来源
+  if (m.direction === 2) {
+    return m.operator_name || `${m.sender_name || '手机'}（手机端）`
+  }
   return props.conv?.chat_type === 2 ? (m.sender_name || '成员') : displayNameOf(props.conv)
 }
 
@@ -88,8 +91,8 @@ const transferTo = computed(() =>
 /* 引用消息：新消息读 payload.quote；历史按链接入库的数据解析 XML 兜底 */
 const quote = computed(() => quoteInfoOf(props.msg))
 
-/* 文本消息渲染：[微笑] 等微信表情码 → 内联表情图（先转义防 XSS，未识别码原样显示） */
-const contentHtml = computed(() => renderEmojiHtml(props.msg.content))
+/* 文本消息渲染：先过表情（内部已转义），再把 @昵称 标蓝——微信同款提醒样式 */
+const contentHtml = computed(() => renderMessageHtml(props.msg.content))
 /* 引用块文本同样走表情渲染（被引用的原消息常含表情码） */
 const quoteHtml = computed(() =>
   renderEmojiHtml((quote.value?.name ? `${quote.value.name}：` : '') + (quote.value?.text || '[原消息]'))
@@ -127,8 +130,6 @@ const qBox = computed(() => fitBox(quote.value?.w, quote.value?.h, 180, 120))
 
 /* 媒体加载状态：加载前 shimmer 占位块，加载完淡入（组件按消息 id 复用，状态不串行） */
 const loaded = ref(false)
-/* 清晰图层（type=2）就绪标记：就绪后交叉淡入盖住缩略图层，无空框 */
-const sharpOk = ref(false)
 /* @load/@error 共用：坏图也撤占位，避免永远闪 shimmer；并通知父组件重新锚定底部 */
 function onMediaOk() {
   if (!loaded.value) {
@@ -161,8 +162,8 @@ function onMenu(e) {
     <div class="body">
       <div class="name">{{ nameOf(msg) }}</div>
       <div class="bubble" :class="{ tight: isTight }" :title="msg.create_time" @contextmenu.prevent="onMenu">
-        <!-- 两层渐进加载：缩略图（type=3，小图且多已预下载走本地缓存）先画出盖住 shimmer；
-             清晰图（type=2）就绪后绝对定位盖上来交叉淡入。全程只有"尺寸框 → 图"两段，无空框 -->
+        <!-- 气泡只渲染缩略图（清晰度名次 3，多已预下载走本地缓存），不再叠加大图，
+             避免聊天流加载原图；点开预览才换最清档 -->
         <span v-if="msg.msg_type === 2" class="ph ph-img" :class="{ on: loaded }" :style="imgBox">
           <img
             class="media img"
@@ -175,16 +176,6 @@ function onMenu(e) {
             @load="onMediaOk"
             @error="onMediaOk"
             @click="emit('preview', localMedia || mediaUrlOf(msg, IMG_BIG))"
-          />
-          <img
-            v-if="!localMedia"
-            class="layer-sharp fade"
-            :class="{ ok: sharpOk }"
-            :src="mediaUrlOf(msg)"
-            alt=""
-            referrerpolicy="no-referrer"
-            decoding="async"
-            @load="sharpOk = true"
           />
         </span>
         <audio v-else-if="msg.msg_type === 6" class="media audio" :src="mediaUrlOf(msg)" controls preload="none"></audio>
@@ -327,8 +318,6 @@ function onMenu(e) {
 /* 媒体消息：图片/表情/语音/视频直接渲染 */
 .media { display: block; }
 .media.img { display: block; max-width: 200px; max-height: 200px; border-radius: var(--r-sm); cursor: zoom-in; }
-/* 清晰图层：绝对定位盖在缩略图上交叉淡入（比例一致不会变形），不拦截点击 */
-.layer-sharp { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .media.emoji { width: 120px; }
 .media.audio { width: 240px; height: 36px; }
 .media.video { max-width: 240px; border-radius: var(--r-sm); }
@@ -381,6 +370,8 @@ function onMenu(e) {
 .lc-host .host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .content { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+/* 气泡正文走 v-html，拿不到 scoped 属性，@昵称高亮必须用 :deep */
+.content :deep(.msg-mention) { color: var(--c-primary); font-weight: 600; }
 .type-label { color: var(--c-primary); }
 
 /* 引用块：微信同款灰底 + 左侧竖线（仅文字引用用；图片引用走 .q-ph 骨架屏） */

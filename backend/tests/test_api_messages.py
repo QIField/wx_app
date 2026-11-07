@@ -180,3 +180,86 @@ def test_revoke_middle_fail(client, conversation, monkeypatch):
 
     assert resp.status_code == 502
     assert "请求超时" in resp.get_json()["msg"]
+
+
+# ---------- @提醒（at_ids → ats） ----------
+
+def make_group_conv(wxid="123@chatroom", **over):
+    """造一个群会话（openid 用 dev01，与登录夹具绑定的设备一致）。"""
+    from backend.models.conversation import Conversation
+
+    conv = Conversation(openid="dev01", wxid=wxid, chat_type=2, name="报价群", **over)
+    db.session.add(conv)
+    db.session.commit()
+    return conv
+
+
+def add_member(conv, wxid, nickname):
+    from backend.models.group_member import GroupMember
+
+    row = GroupMember(openid=conv.openid, chatroom_wxid=conv.wxid, wxid=wxid, nickname=nickname)
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+def test_send_at_ids_translated_to_ats(client, monkeypatch):
+    """@提醒：前端只传成员行号，服务端换算 ats=wxid 逗号串（按前端选择顺序）。"""
+    monkeypatch.setattr("backend.api.messages.SEND_ENABLED", True)
+    conv = make_group_conv()
+    a = add_member(conv, "wxid_a", "张三")
+    b = add_member(conv, "wxid_b", "李四")
+    captured = {}
+    monkeypatch.setattr(
+        send_service.middle_sender, "post_text",
+        lambda **kw: captured.update(kw) or {"code": 0, "msg": "success"},
+    )
+
+    resp = client.post(
+        f"/api/conversations/{conv.id}/messages",
+        json={"msg_type": 1, "content": "@李四\u2005你好", "payload": {"at_ids": [b.id, a.id]}},
+    )
+
+    assert resp.status_code == 200
+    assert captured["ats"] == "wxid_b,wxid_a"
+    assert captured["content"] == "@李四\u2005你好"  # 分隔符原样下发（trim 掉对方收不到提醒）
+    msg = Message.query.one()
+    assert "ats" not in (msg.payload or {})  # 中间方协议字段不落库（wxid 不回前端）
+
+
+def test_send_at_ids_invalid_member(client, monkeypatch):
+    """行号不属于本群：整单拒绝，不落库（防止拿别群 id 拼 ats）。"""
+    monkeypatch.setattr("backend.api.messages.SEND_ENABLED", True)
+    conv = make_group_conv()
+    other = make_group_conv(wxid="456@chatroom")
+    add_member(other, "wxid_x", "别群成员")
+
+    resp = client.post(
+        f"/api/conversations/{conv.id}/messages",
+        json={"msg_type": 1, "content": "@某人", "payload": {"at_ids": [other.id + 1]}},
+    )
+
+    assert resp.status_code == 400
+    assert Message.query.count() == 0
+
+
+def test_send_at_ids_single_chat_rejected(client, conversation, monkeypatch):
+    """单聊没有 @提醒语义：带 at_ids 直接 400。"""
+    monkeypatch.setattr("backend.api.messages.SEND_ENABLED", True)
+    resp = client.post(
+        f"/api/conversations/{conversation.id}/messages",
+        json={"msg_type": 1, "content": "@张三", "payload": {"at_ids": [1]}},
+    )
+    assert resp.status_code == 400
+
+
+def test_send_at_ids_non_text_rejected(client, monkeypatch):
+    """只有文本消息能带 at_ids（图片/文件没有 @ 概念）。"""
+    monkeypatch.setattr("backend.api.messages.SEND_ENABLED", True)
+    conv = make_group_conv()
+    add_member(conv, "wxid_a", "张三")
+    resp = client.post(
+        f"/api/conversations/{conv.id}/messages",
+        json={"msg_type": 2, "payload": {"at_ids": [1], "img_url": "http://a/x.jpg"}},
+    )
+    assert resp.status_code == 400

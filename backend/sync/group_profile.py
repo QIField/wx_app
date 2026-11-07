@@ -42,7 +42,7 @@ def missing_profile(conv):
 
     has_members = (
         db.session.query(GroupMember.id)
-        .filter_by(openid=conv.openid, chatroom_wxid=conv.wxid)
+        .filter_by(openid=conv.openid, chatroom_wxid=conv.wxid, deleted_at=None)
         .first()
         is not None
     )
@@ -167,6 +167,7 @@ def _members_missing_groups(limit, openid=None):
             db.and_(
                 GroupMember.openid == Conversation.openid,
                 GroupMember.chatroom_wxid == Conversation.wxid,
+                GroupMember.deleted_at.is_(None),
             ),
         )
         .filter(*filters)

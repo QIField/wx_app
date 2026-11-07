@@ -95,5 +95,5 @@ PROD_DATABASE_URL = mysql+pymysql://用户:密码@生产库地址/库名?charset
 - 没画完流程图不写业务代码
 - 一个文件一个职责，超 400 行拆分；函数超 80 行考虑拆分
 - 每 2-3 个功能做一次重构；核心业务必须写单测
-- 删除一律软删除（deleted_at 标记），不执行真删除，详见 [docs/database.md](docs/database.md)
+- 删除一律软删除（写 deleted_at，不执行真删除）；唯一例外是三张日志表的过期清理，只能走 `backend/services/retention.py`。新增表必须按必检清单登记，详见 [docs/database.md](docs/database.md) 第三节《软删除规范》
 - 提交规范：`feat:` 新功能 / `fix:` 修 Bug / `refactor:` 重构（重构必须单独提交）
