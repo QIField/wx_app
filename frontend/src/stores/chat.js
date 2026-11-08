@@ -14,6 +14,27 @@ import { notifyIncoming, setNotifyBlockedHandler } from '../utils/notify'
 /** 群成员名册在途请求：连打两次 @ 只发一条请求（Pinia 状态不适合放 Promise） */
 const membersInflight = new Map()
 
+/** WS 只允许建一条：页面重复挂载（路由切换/热更新）时避免多个连接把同一条消息推多次。 */
+let wsStarted = false
+
+/** 消息唯一键：优先 id（统一转字符串，防数字/字符串混用导致去重失效）；无 id 时用
+ *  「类型|发送人|时间|内容」指纹兜底，保证同一条消息无论推几次都只保留一条。 */
+function msgKey(m) {
+  if (m.id != null) return `id:${m.id}`
+  return `f:${m.msg_type || ''}|${m.sender_wxid || ''}|${m.create_time || ''}|${m.content || ''}`
+}
+
+/** 消息列表去重（同一会话内按 msgKey 合并，保留先出现的那条）。 */
+function dedupeMessages(list) {
+  const seen = new Set()
+  return list.filter((m) => {
+    const key = msgKey(m)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 /** 本地时间戳（与后端 last_msg_at 同格式），发消息后用于即时重排。 */
 function nowStamp() {
   const d = new Date()
@@ -175,7 +196,7 @@ export const useChatStore = defineStore('chat', {
         const data = await fetchMessages(id)
         const apiMs = performance.now() - tApi
         if (seq !== msgListSeq || this.currentId !== id) return
-        this.currentMessages = data.messages
+        this.currentMessages = dedupeMessages(data.messages)
         this.hasMore = !!data.next_before_id
         convCachePut(this.activeOpenid, id, this.currentMessages, this.hasMore) // A方案：刷新快照
         prewarmThumbs(data.messages) // B方案：后台预取缩略图（fire-and-forget）
@@ -243,7 +264,7 @@ export const useChatStore = defineStore('chat', {
         const data = await fetchMessages(convId, oldest)
         // 等待期间切了会话：旧会话的翻页不得前插进新会话
         if (this.currentId !== convId) return
-        this.currentMessages = [...data.messages, ...this.currentMessages]
+        this.currentMessages = dedupeMessages([...data.messages, ...this.currentMessages])
         this.hasMore = !!data.next_before_id
       } finally {
         this.loadingMore = false
@@ -332,6 +353,7 @@ export const useChatStore = defineStore('chat', {
 
     /** 连接 WebSocket 并按 data.openid 分发推送。 */
     connect() {
+      if (wsStarted) return // 已建连：重复挂载不再新建（旧连接断线会自动重连，无需重开）
       // 提示音被浏览器音频策略拦截时给一次性提示（utils/notify 只回调一次）
       setNotifyBlockedHandler(() => ElMessage.info('提示音被浏览器音频策略拦截，点击页面任意处即可恢复'))
       // 断线重连成功后补拉一次：后端重启/网络闪断期间错过的推送（未读红点、
@@ -390,14 +412,12 @@ export const useChatStore = defineStore('chat', {
       const isViewing = d.conversation_id === this.currentId
       if (isViewing) {
         // WS 推送字段是 message_id，必须映射成 id：否则 v-for 的 :key 全是 undefined，
-        // Vue 复用 DOM 会让图片气泡错位/被文本行顶替；id 缺失时兜底生成唯一 key
-        const incoming = {
-          ...d,
-          id: d.message_id ?? d.id ?? `ws-${Date.now()}-${this.currentMessages.length}`,
-          direction: d.direction,
-          status: 1,
-        }
-        const exist = this.currentMessages.find((m) => m.id === incoming.id)
+        // Vue 复用 DOM 会让图片气泡错位/被文本行顶替。无 id 时用「类型|发送人|时间|内容」
+        // 指纹做稳定 key，保证同一条消息重复推送也只会合并成一条，而不是越推越多。
+        const incoming = { ...d, direction: d.direction, status: 1 }
+        incoming.id = d.message_id ?? d.id ?? msgKey(incoming)
+        const key = msgKey(incoming)
+        const exist = this.currentMessages.find((m) => msgKey(m) === key)
         if (exist) Object.assign(exist, incoming)
         else this.currentMessages.push(incoming)
       }

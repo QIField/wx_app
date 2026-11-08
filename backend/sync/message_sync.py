@@ -221,6 +221,9 @@ def _save_message(openid, item, revokes=None):
 
     msg = _build_message(fields, conv)
     db.session.add(msg)
+    # 立即 flush 拿到自增 id：不 flush 时 msg.id 为 None，广播出去的 message_id
+    # 就是 null，前端无法按 id 幂等去重，同一条消息会被重复追加成多个气泡
+    db.session.flush()
 
     # 维护会话：最后一条消息冗余；只有收到的才计未读
     if fields["direction"] == Message.DIR_IN:

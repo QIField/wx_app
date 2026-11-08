@@ -2,8 +2,8 @@
 
 背景（2026-10-31 日志复盘）：原先前端打开会话才按需下载，页面几十个
 媒体同时并发，撞中间方「该微信正在下载的任务已达上限」限流。
-改为后台单线程串行下载：图片按 1/2/3 三档全部下载后比较像素、按清晰度
-重新排名落盘（q1 最清、q3 缩略图），其余媒体拉单个文件。
+改为后台单线程串行下载：图片按 1→2→3 档降级，成功即停，每条只存一张；
+其余媒体拉单个文件。
 
 2026-11-07 调整：原先在 sync_once 里同步调用，单轮预算 30 秒且图片单张
 要 2~5 秒，会把收消息轮询整轮卡住（延迟从 2 秒变成 30+ 秒）。
@@ -82,7 +82,7 @@ def predownload_ids(message_ids):
         if time.monotonic() > deadline:  # 预算用完，剩余的下批靠缓存查重续传
             return
         try:
-            # 图片内部会下载 1/2/3 三档并像素排序（rank 传 1 取最清档路径）
-            media_fetch.fetch_and_cache(msg, 1)
+            # 图片按 1→2→3 档降级，成功即停（每条只存一张）
+            media_fetch.fetch_and_cache(msg)
         except MiddleApiError as exc:
             current_app.logger.warning("媒体预下载失败 消息 %s：%s", msg.id, exc)

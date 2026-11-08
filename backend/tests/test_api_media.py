@@ -83,8 +83,8 @@ def test_media_image_demo_placeholder_and_cache(app, client, conv, media_dir, mo
     first = client.get(f"/api/messages/{msg.id}/media")
     assert first.status_code == 200
     assert first.headers["Content-Type"].startswith("image/png")
-    files = list(cache_dir(media_dir, msg).glob(f"{msg.id}_q*.*"))  # 图片缓存带 _q{清晰度名次} 后缀
-    assert len(files) == 3  # 三档全部下载并按清晰度排名落盘
+    files = list(cache_dir(media_dir, msg).glob(f"{msg.id}*.*"))
+    assert len(files) == 1  # 降级到第一个成功档后即停，每条只落一张
 
     def must_not_call(*a, **k):  # 缓存命中就不该再碰中间方
         raise AssertionError("cache hit should not call middle platform")
@@ -127,59 +127,55 @@ def test_media_emoji_md5_from_xml(app, client, conv, media_dir, monkeypatch):
     assert captured["params"] == {"emoji_md5": "abc123"}
 
 
-def test_media_image_img_type_variants(app, client, conv, media_dir, monkeypatch):
-    """图片：img_type 是清晰度名次（默认 3）；首次无论取哪档都会先备齐 1/2/3。"""
+def test_media_image_falls_back_to_second_tier(app, client, conv, media_dir, monkeypatch):
+    """1 档高清失败自动降级 2 档常规，成功即停：只请求 [1,2]，只落一张。"""
+    from backend.adapter.client import MiddleApiError
+
     msg = make_message(conv.id, Message.MSG_IMAGE, "<msg><img aeskey=\"k\" /></msg>")
     calls = []
 
     def fake(module, action, params=None, openid=""):
-        calls.append(dict(params))
+        tier = params["img_type"]
+        calls.append(tier)
+        if tier == 1:
+            raise MiddleApiError("高清档不可用")
         return b"MEDIABYTES", "image/png", ""
 
     monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", fake)
 
     assert client.get(f"/api/messages/{msg.id}/media").status_code == 200
-    assert [c["img_type"] for c in calls] == [1, 2, 3]  # 三档全部请求
-    assert len(list(cache_dir(media_dir, msg).glob(f"{msg.id}_q*.*"))) == 3
+    assert calls == [1, 2]  # 2 档成功就不再试 3 档
+    assert len(list(cache_dir(media_dir, msg).glob(f"{msg.id}*.*"))) == 1
 
-    assert client.get(f"/api/messages/{msg.id}/media?img_type=9").status_code == 200
-    assert client.get(f"/api/messages/{msg.id}/media?img_type=1").status_code == 200
-    assert len(calls) == 3  # 缓存齐全后不再重复下载
+    # 已缓存后无论带不带旧的 img_type 参数都不再回源
+    for query in ("", "?img_type=1", "?img_type=3"):
+        assert client.get(f"/api/messages/{msg.id}/media{query}").status_code == 200
+    assert calls == [1, 2]
 
 
-def test_image_tiers_ranked_by_pixels(app, client, conv, media_dir, monkeypatch):
-    """三档按实际像素排名：故意让 2 档最大、1 档最小，q1 仍必须是像素最大的那份。"""
-    import io
+def test_media_image_falls_back_to_third_tier(app, client, conv, media_dir, monkeypatch):
+    """1、2 档都失败才降级 3 档缩略图；只落这一张。"""
+    from backend.adapter.client import MiddleApiError
 
-    from PIL import Image
-
-    def png(size, color):
-        buf = io.BytesIO()
-        Image.new("RGB", (size, size), color).save(buf, format="PNG")
-        return buf.getvalue()
-
-    payloads = {1: png(10, "red"), 2: png(40, "green"), 3: png(20, "blue")}
+    msg = make_message(conv.id, Message.MSG_IMAGE, "<msg><img aeskey=\"k\" /></msg>")
     calls = []
 
     def fake(module, action, params=None, openid=""):
-        calls.append(params["img_type"])
-        return payloads[params["img_type"]], "image/png", ""
+        tier = params["img_type"]
+        calls.append(tier)
+        if tier in (1, 2):
+            raise MiddleApiError(f"{tier} 档不可用")
+        return b"\x89PNG\r\n\x1a\nDATA", "image/png", ""
 
     monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", fake)
-    msg = make_message(conv.id, Message.MSG_IMAGE, "<msg><img aeskey=\"k\" /></msg>")
 
-    resp = client.get(f"/api/messages/{msg.id}/media?img_type=3")  # 请求缩略图也要先备齐三档
+    resp = client.get(f"/api/messages/{msg.id}/media")
+
     assert resp.status_code == 200
-    assert sorted(calls) == [1, 2, 3]
-
-    for rank, side in ((1, 40), (2, 20), (3, 10)):
-        with Image.open(media_fetch.cached_path(msg, rank)) as im:
-            assert im.size == (side, side)
-
-    big = client.get(f"/api/messages/{msg.id}/media?img_type=1")
-    assert big.status_code == 200
-    with Image.open(io.BytesIO(big.data)) as im:
-        assert im.size == (40, 40)  # 最清档来自原始 2 档
+    assert calls == [1, 2, 3]
+    files = list(cache_dir(media_dir, msg).glob(f"{msg.id}*.*"))
+    assert len(files) == 1
+    assert files[0].suffix == ".png"
 
 
 def test_media_text_type_rejected(app, client, conv):
@@ -201,7 +197,7 @@ def test_media_sniff_real_type(app, client, conv, media_dir, monkeypatch):
 
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("image/jpeg")
-    assert len(list(cache_dir(media_dir, msg).glob(f"{msg.id}_q*.jpg"))) == 3
+    assert len(list(cache_dir(media_dir, msg).glob(f"{msg.id}*.jpg"))) == 1
 
 
 def test_media_cross_device_isolated(app, client, conv, media_dir, monkeypatch):
@@ -281,4 +277,4 @@ def test_download_serialized_per_device(app, conv, media_dir, monkeypatch):
         t.join()
 
     assert inflight["max"] == 1  # 全程从未并发
-    assert len(list(cache_dir(media_dir, msgs[0]).glob("*"))) == 12  # 每条图 3 档
+    assert len(list(cache_dir(media_dir, msgs[0]).glob("*"))) == 4  # 每条图只落 1 张，4 条 = 4 个文件

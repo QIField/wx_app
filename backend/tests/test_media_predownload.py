@@ -62,18 +62,40 @@ def mock_download(monkeypatch, data=b"MEDIABYTES", content_type="image/png"):
     return calls
 
 
-def test_predownload_image_all_tiers(app, conv, tmp_path, monkeypatch):
-    """图片预下载三档全部拉取，比较像素后按 q1/q2/q3 落盘。"""
+def test_predownload_image_returns_first_tier(app, conv, tmp_path, monkeypatch):
+    """图片预下载：1 档高清成功即停，每条只落一张。"""
     monkeypatch.setattr(media_fetch, "MEDIA_DIR", tmp_path)
     msg = make_media_msg(conv.id, Message.MSG_IMAGE, '<msg><img aeskey="k" /></msg>')
     calls = mock_download(monkeypatch)
 
     media_predownload.predownload_media(make_pushed(msg))
 
-    assert [c["params"]["img_type"] for c in calls] == [1, 2, 3]
+    assert [c["params"]["img_type"] for c in calls] == [1]  # 成功就不再请求 2、3 档
     assert all(c["action"] == "get_download_image" for c in calls)
-    assert dict(calls[0])["openid"] == "dev01"
-    assert len(list(media_fetch.cache_dir_for(msg).glob(f"{msg.id}_q*.png"))) == 3
+    assert calls[0]["openid"] == "dev01"
+    assert len(list(media_fetch.cache_dir_for(msg).glob(f"{msg.id}*.*"))) == 1
+
+
+def test_predownload_image_falls_back_to_next_tier(app, conv, tmp_path, monkeypatch):
+    """1 档失败自动降级 2 档：按 1→2 顺序请求，2 档成功即停。"""
+    from backend.adapter.client import MiddleApiError
+
+    monkeypatch.setattr(media_fetch, "MEDIA_DIR", tmp_path)
+    msg = make_media_msg(conv.id, Message.MSG_IMAGE, '<msg><img aeskey="k" /></msg>')
+    calls = []
+
+    def fake(module, action, params=None, openid=""):
+        calls.append(params["img_type"])
+        if params["img_type"] == 1:
+            raise MiddleApiError("高清档不可用")
+        return b"\x89PNG\r\n\x1a\nDATA", "image/png", ""
+
+    monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", fake)
+
+    media_predownload.predownload_media(make_pushed(msg))
+
+    assert calls == [1, 2]
+    assert len(list(media_fetch.cache_dir_for(msg).glob(f"{msg.id}*.*"))) == 1
 
 
 def test_predownload_skips_text_and_cached(app, conv, tmp_path, monkeypatch):
@@ -83,8 +105,7 @@ def test_predownload_skips_text_and_cached(app, conv, tmp_path, monkeypatch):
     cached = make_media_msg(conv.id, Message.MSG_IMAGE, '<msg><img aeskey="k" /></msg>')
     cached_dir = media_fetch.cache_dir_for(cached)
     cached_dir.mkdir(parents=True, exist_ok=True)
-    for rank in (1, 2, 3):  # 三档齐全才算已缓存
-        (cached_dir / f"{cached.id}_q{rank}.png").write_bytes(b"OLD")
+    (cached_dir / f"{cached.id}_q1.png").write_bytes(b"OLD")  # 旧版按档位拆分的文件也算已缓存
     calls = mock_download(monkeypatch)
 
     media_predownload.predownload_media(make_pushed(text) + make_pushed(cached))

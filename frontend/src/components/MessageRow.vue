@@ -9,7 +9,7 @@ import { computed, ref } from 'vue'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
 import { renderEmojiHtml } from '../utils/emoji'
 import { renderMessageHtml } from '../utils/mention'
-import { mediaUrlOf, IMG_BIG, IMG_THUMB } from '../utils/media'
+import { mediaUrlOf } from '../utils/media'
 import { displayNameOf } from '../utils/format'
 import AnonAvatar from './AnonAvatar.vue'
 import TransferCard from './TransferCard.vue'
@@ -102,10 +102,10 @@ const quoteHtml = computed(() =>
  * 找不到原消息时回退 [图片] 标签 */
 const quoteImg = computed(() => {
   const id = quote.value?.media_id
-  return id ? mediaUrlOf({ id }, IMG_THUMB) : null
+  return id ? mediaUrlOf({ id }) : null
 })
 function quoteFullUrl() {
-  return mediaUrlOf({ id: quote.value.media_id }, IMG_BIG)
+  return mediaUrlOf({ id: quote.value.media_id })
 }
 
 /* 自己刚发的媒体：payload.path 是本服务上传文件的相对地址，直接用它预览。
@@ -168,14 +168,14 @@ function onMenu(e) {
           <img
             class="media img"
             :style="imgBox"
-            :src="localMedia || mediaUrlOf(msg, IMG_THUMB)"
+            :src="localMedia || mediaUrlOf(msg)"
             alt="图片消息"
             title="点击查看大图"
             referrerpolicy="no-referrer"
             decoding="async"
             @load="onMediaOk"
             @error="onMediaOk"
-            @click="emit('preview', localMedia || mediaUrlOf(msg, IMG_BIG))"
+            @click="emit('preview', localMedia || mediaUrlOf(msg))"
           />
         </span>
         <audio v-else-if="msg.msg_type === 6" class="media audio" :src="mediaUrlOf(msg)" controls preload="none"></audio>
