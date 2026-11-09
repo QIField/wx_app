@@ -21,6 +21,19 @@ def app():
 
 
 @pytest.fixture(autouse=True)
+def reset_risk_state():
+    """每个用例前清空限流/登录锁定计数。
+
+    限流计数是进程级内存，用例共用同一 IP(127.0.0.1) 与账号，
+    不重置会让失败次数跨用例累积，出现莫名其妙的 429。
+    """
+    from backend.services import risk
+
+    risk.reset()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def real_middle_mode(monkeypatch):
     """默认走真实适配器路径（adapter 单测自己 mock requests）；demo 测试再显式开演示模式。"""
     from backend.adapter import client

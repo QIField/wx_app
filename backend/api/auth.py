@@ -2,6 +2,7 @@
 from flask import Blueprint, current_app, g, jsonify, request
 
 from backend.models.audit_log import AuditLog
+from backend.services import risk
 from backend.services.audit import AuditModule, log_action
 from backend.services.auth import (
     change_password,
@@ -28,10 +29,19 @@ def login():
     if not username or not password:
         return jsonify(code=400, msg="请输入账号和密码"), 400
 
+    # 失败锁定维度 = IP + 账号：锁定期间连正确密码也拒绝（防撞库）
+    lock_key = risk.login_key(username)
+    retry = risk.login_blocked(lock_key)
+    if retry:
+        return jsonify(code=429, msg=f"密码错误次数过多，请 {retry} 秒后再试",
+                       err="LOGIN_LOCKED"), 429
+
     user, err = login_user(username, password)
     if err:
+        risk.record_login_failure(lock_key)  # 只记失败；成功不计数
         return jsonify(code=401, msg=err), 401
 
+    risk.reset_login(lock_key)  # 登录成功清零，避免历史失败影响后续登录
     token, expires_in = create_token(user)
 
     # 已绑定设备则异步投递一次增量资料同步；入队失败不影响登录

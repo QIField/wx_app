@@ -59,8 +59,14 @@ def dumps_masked(payload):
     return text[:MAX_TEXT]
 
 
-def _client_ip():
-    """取客户端 IP：优先 X-Forwarded-For 第一段。"""
+def client_ip():
+    """取客户端 IP：优先 X-Forwarded-For 第一段。
+
+    全项目唯一的取 IP 实现（access_log / audit / risk 共用），
+    无请求上下文（定时任务）时兜底 127.0.0.1。
+    """
+    if not has_request_context():
+        return "127.0.0.1"
     forwarded = request.headers.get("X-Forwarded-For", "")
     return (forwarded.split(",")[0].strip() if forwarded else request.remote_addr) or "127.0.0.1"
 
@@ -104,7 +110,7 @@ def record(response):
             path=request.path[:255],
             method=request.method[:16],
             url=url,
-            ip=_client_ip()[:64],
+            ip=client_ip()[:64],
             user_agent=(request.headers.get("User-Agent") or "")[:MAX_TEXT],
             args=args,
             form=form,
@@ -135,7 +141,7 @@ def record_crash(exc):
             path=request.path[:255],
             method=request.method[:16],
             url=_URL_TOKEN_RE.sub(r"\1=***", request.url),
-            ip=_client_ip()[:64],
+            ip=client_ip()[:64],
             user_agent=(request.headers.get("User-Agent") or "")[:MAX_TEXT],
             args=dumps_masked(request.args.to_dict(flat=True)),
             form=dumps_masked(_request_payload()),

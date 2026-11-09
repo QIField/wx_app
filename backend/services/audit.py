@@ -5,10 +5,11 @@
 - 定时任务 / 系统行为在无请求上下文时自动记「系统」
 - result=fail 时 detail 必填
 """
-from flask import current_app, has_request_context, request
+from flask import current_app
 
 from backend.extensions import db
 from backend.models.audit_log import AuditLog
+from backend.services.access_log import client_ip
 from backend.services.user_snapshot import current_user, org_of
 
 
@@ -30,12 +31,6 @@ def _current_operator():
     if user is not None:
         return str(user.id), user.name, user.role, org_of(user)
     return None, "系统", "system", None
-
-
-def _client_ip():
-    if not has_request_context():
-        return "127.0.0.1"
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1").split(",")[0].strip()
 
 
 def log_action(module, action, target, result=AuditLog.RESULT_SUCCESS, detail="", operator=None):
@@ -61,7 +56,7 @@ def log_action(module, action, target, result=AuditLog.RESULT_SUCCESS, detail=""
             target=str(target)[:128],
             result=result,
             detail=str(detail)[:255] if detail else None,
-            ip=_client_ip()[:64],
+            ip=client_ip()[:64],
         ))
         db.session.commit()
     except Exception as exc:  # noqa: BLE001 日志写失败不拖垮业务

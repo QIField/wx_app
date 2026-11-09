@@ -5,7 +5,12 @@
 from flask import Flask
 from sqlalchemy.pool import StaticPool
 
-from backend.app import register_access_log_hooks, register_error_handlers, register_routes
+from backend.app import (
+    register_access_log_hooks,
+    register_error_handlers,
+    register_risk_hooks,
+    register_routes,
+)
 from backend.extensions import db
 
 
@@ -21,4 +26,5 @@ def make_test_app():
     register_routes(app)
     register_error_handlers(app)
     register_access_log_hooks(app)  # 与生产一致的入站日志钩子
+    register_risk_hooks(app)  # 与生产一致的限流钩子（用例间由 conftest 重置计数）
     return app

@@ -29,7 +29,17 @@ MIDDLE_BASE_URL = os.getenv("MIDDLE_BASE_URL", "")
 
 # 登录令牌：签名密钥与有效期（小时）；SECRET_KEY 不配则开发期用固定值，生产必须在 .env 配置
 SECRET_KEY = os.getenv("SECRET_KEY", "wxcs-dev-secret-key-change-me")
-TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "72"))
+# 有效期默认 12 小时：缩短令牌泄露后的可用窗口（够一个工作日，跨天需重新登录）
+TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "12"))
+
+# 接口限流（次/分钟，按桶分别控制；见 services/risk.py）
+API_LIMIT_PER_MINUTE = int(os.getenv("API_LIMIT_PER_MINUTE", "120"))
+MESSAGES_LIMIT_PER_MINUTE = int(os.getenv("MESSAGES_LIMIT_PER_MINUTE", "60"))
+MEDIA_LIMIT_PER_MINUTE = int(os.getenv("MEDIA_LIMIT_PER_MINUTE", "30"))
+
+# 登录失败锁定：同一 IP+账号在窗口内失败达到上限后，暂停登录
+LOGIN_MAX_FAILS = int(os.getenv("LOGIN_MAX_FAILS", "5"))
+LOGIN_WINDOW_SECONDS = int(os.getenv("LOGIN_WINDOW_SECONDS", "600"))
 
 # 发送总开关：false 时前端发送接口直接拒绝（防止联调收消息阶段误发真消息）
 SEND_ENABLED = os.getenv("SEND_ENABLED", "false").lower() in ("1", "true", "yes")

@@ -39,6 +39,7 @@ def create_app() -> Flask:
     register_frontend(app)
     register_error_handlers(app)
     register_access_log_hooks(app)
+    register_risk_hooks(app)
     return app
 
 
@@ -81,6 +82,27 @@ def register_access_log_hooks(app: Flask) -> None:
         # 兜底：未处理异常时 after_request 不会执行，补记一条 500
         if exc is not None:
             svc.record_crash(exc)
+
+
+def register_risk_hooks(app: Flask) -> None:
+    """接口限流钩子：挂在全局 before_request，业务零代码（规范见 services/risk.py）。
+
+    必须注册在 register_access_log_hooks 之后：先开计时，再判限流，
+    这样 429 响应也会被 after_request 正常记入 access_log，事后可追溯。
+    """
+    from backend.services import risk
+    from backend.services.access_log import client_ip
+
+    @app.before_request
+    def _risk_guard():
+        ok, retry = risk.check_request(request.path, request.method, client_ip())
+        if ok:
+            return None
+        return (
+            jsonify(code=429, msg=f"请求过于频繁，请 {retry} 秒后再试", err="RATE_LIMITED"),
+            429,
+            {"Retry-After": str(retry)},
+        )
 
 
 def register_routes(app: Flask) -> None:
@@ -153,7 +175,7 @@ def init_scheduler(app: Flask):
     from apscheduler.schedulers.background import BackgroundScheduler
 
     from backend.config import DEVICE_CHECK_INTERVAL_SECONDS
-    from backend.services import middle_log
+    from backend.services import middle_log, risk
     from backend.services.devices import refresh_all_device_online
     from backend.sync.confirm_worker import confirm_once
     from backend.sync.message_sync import sync_once
@@ -206,6 +228,14 @@ def init_scheduler(app: Flask):
         hour=3,
         minute=30,
         id="clean_logs",
+        max_instances=1,
+    )
+    # 限流计数清理：删掉长时间没动静的 key，防止内存随历史 IP 缓慢增长
+    sched.add_job(
+        risk.sweep,
+        "interval",
+        minutes=5,
+        id="risk_sweep",
         max_instances=1,
     )
     profile_jobs.ensure_worker(app)  # 资料同步唯一 worker，先于定时任务启动
