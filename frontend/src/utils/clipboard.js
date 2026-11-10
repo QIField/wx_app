@@ -9,6 +9,21 @@ export async function copyText(text) {
   await copyViaExecCommand(text)
 }
 
+/** 复制页面里的 img（非安全上下文兜底）：选中元素后触发系统复制，
+ *  等效浏览器原生"复制图片"，HTTP 部署下同样把位图写进剪贴板。
+ *  必须在用户手势内同步调用（execCommand 限制）；图片未就绪或失败抛错。 */
+export function copyImageElement(img) {
+  if (!img?.complete || !img.naturalWidth) throw new Error('image not ready')
+  const sel = window.getSelection()
+  const range = document.createRange()
+  range.selectNode(img)
+  sel.removeAllRanges()
+  sel.addRange(range)
+  const ok = document.execCommand('copy')
+  sel.removeAllRanges()
+  if (!ok) throw new Error('execCommand image copy failed')
+}
+
 /* execCommand 兜底：隐藏 textarea 选区复制（图片无此通道，见 copyImageFromUrl） */
 function copyViaExecCommand(text) {
   return new Promise((resolve, reject) => {

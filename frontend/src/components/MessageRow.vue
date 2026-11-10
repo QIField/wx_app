@@ -167,6 +167,7 @@ function onMenu(e) {
         <span v-if="msg.msg_type === 2" class="ph ph-img" :class="{ on: loaded }" :style="imgBox">
           <img
             class="media img"
+            :data-mid="msg.id"
             :style="imgBox"
             :src="localMedia || mediaUrlOf(msg)"
             alt="图片消息"
