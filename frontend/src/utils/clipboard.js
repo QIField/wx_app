@@ -9,10 +9,22 @@ export async function copyText(text) {
   await copyViaExecCommand(text)
 }
 
-/** 复制页面里的 img（非安全上下文兜底）：选中元素后触发系统复制，
- *  等效浏览器原生"复制图片"，HTTP 部署下同样把位图写进剪贴板。
+/** 复制图片统一入口，通道按环境自选：
+ *  - 安全上下文（localhost/https）：取图 → 非 PNG 经 canvas 转码 → ClipboardItem 写位图（可直接粘贴）
+ *  - 非安全上下文（http 局域网部署）：无 Clipboard API，回退"选中页内图片→系统复制"，
+ *    imgEl 为页内已加载完成的 <img>（data-mid 定位由组件负责）。 */
+export async function copyImage(url, imgEl) {
+  if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+    const blob = await toPngBlob(url)
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    return
+  }
+  copyImageElement(imgEl)
+}
+
+/** 选中页内 img 后触发系统复制：等效浏览器原生"复制图片"，HTTP 下同样把位图写进剪贴板。
  *  必须在用户手势内同步调用（execCommand 限制）；图片未就绪或失败抛错。 */
-export function copyImageElement(img) {
+function copyImageElement(img) {
   if (!img?.complete || !img.naturalWidth) throw new Error('image not ready')
   const sel = window.getSelection()
   const range = document.createRange()
@@ -24,7 +36,7 @@ export function copyImageElement(img) {
   if (!ok) throw new Error('execCommand image copy failed')
 }
 
-/* execCommand 兜底：隐藏 textarea 选区复制（图片无此通道，见 copyImageFromUrl） */
+/* execCommand 兜底：隐藏 textarea 选区复制（文本专用；图片无此通道，走选中复制） */
 function copyViaExecCommand(text) {
   return new Promise((resolve, reject) => {
     const ta = document.createElement('textarea')
@@ -38,16 +50,6 @@ function copyViaExecCommand(text) {
     if (ok) resolve()
     else reject(new Error('execCommand copy failed'))
   })
-}
-
-/** 复制图片：取原图 → 非 PNG 经 canvas 转码 → ClipboardItem 写入（真位图进剪贴板，可直接粘贴）。
- *  仅安全上下文可用（localhost/https），不支持时抛错提示。 */
-export async function copyImageFromUrl(url) {
-  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-    throw new Error('clipboard image unsupported')
-  }
-  const blob = await toPngBlob(url)
-  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
 }
 
 /* 剪贴板位图统一转 PNG：非 png（jpg/webp/gif）drawImage 重编码，动图会定格为首帧 */

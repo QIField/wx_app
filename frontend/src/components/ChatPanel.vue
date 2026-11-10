@@ -6,7 +6,7 @@ import { useChatStore } from '../stores/chat'
 import { displayNameOf } from '../utils/format'
 import { msgTextOf } from '../utils/message'
 import { mediaUrlOf } from '../utils/media'
-import { copyImageElement, copyImageFromUrl, copyText } from '../utils/clipboard'
+import { copyImage, copyText } from '../utils/clipboard'
 import { buildTimeline } from '../utils/timeline'
 import MessageRow from './MessageRow.vue'
 import ContextMenu from './ContextMenu.vue'
@@ -86,8 +86,7 @@ const menuItems = computed(() => {
   return [{ key: 'copy', label: '复制', disabled: !msgTextOf(m) }]
 })
 
-/* 复制：文本写文本剪贴板；图片在安全上下文走 Clipboard API 写位图，
- * http 部署无该 API，改用"选中气泡图片→系统复制"（等效原生复制图片，不受 HTTPS 限制）；
+/* 复制：文本写文本剪贴板；图片复制通道（API/选中复制）由 clipboard.copyImage 按环境自选；
  * 失败统一 toast */
 async function onMenuSelect(key) {
   const m = menu.value?.msg
@@ -95,12 +94,10 @@ async function onMenuSelect(key) {
   if (!m || key !== 'copy') return
   try {
     if (m.msg_type === 2) {
-      const secure = navigator.clipboard?.write && typeof ClipboardItem !== 'undefined'
-      if (secure) {
-        await copyImageFromUrl(mediaUrlOf(m)) // 复制与展示用同一张（服务端已按 1→2→3 降级取到的那张）
-      } else {
-        copyImageElement(document.querySelector(`img[data-mid="${m.id}"]`))
-      }
+      await copyImage(
+        mediaUrlOf(m), // 复制与展示用同一张（服务端已按 1→2→3 降级取到的那张）
+        document.querySelector(`img[data-mid="${m.id}"]`),
+      )
       ElMessage.success('已复制图片')
     } else {
       await copyText(msgTextOf(m))
