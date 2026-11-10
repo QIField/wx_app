@@ -9,7 +9,7 @@ import { computed, ref } from 'vue'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
 import { renderEmojiHtml } from '../utils/emoji'
 import { renderMessageHtml } from '../utils/mention'
-import { mediaUrlOf } from '../utils/media'
+import { mediaUrlOf, messageMediaUrlOf } from '../utils/media'
 import { displayNameOf } from '../utils/format'
 import AnonAvatar from './AnonAvatar.vue'
 import TransferCard from './TransferCard.vue'
@@ -99,34 +99,17 @@ const quoteHtml = computed(() =>
 )
 
 /* 引用块内的被引用图片：后端解析出原图片消息 id（media_id）才有，
- * 找不到原消息时回退 [图片] 标签 */
+ * 找不到原消息时回退 [图片] 标签。缩略图与预览共用这一个地址 */
 const quoteImg = computed(() => {
   const id = quote.value?.media_id
   return id ? mediaUrlOf({ id }) : null
 })
-function quoteFullUrl() {
-  return mediaUrlOf({ id: quote.value.media_id })
-}
 
-/* 自己刚发的媒体：payload.path 是本服务上传文件的相对地址，直接用它预览。
-   （媒体接口走的是中间方下载链路，只对收到的消息有 XML 参数，发出的消息拉不到） */
-const localMedia = computed(() => props.msg.payload?.path || null)
+/* 气泡内媒体的展示地址：自己刚发的取本地 path，其余走媒体接口 */
+const mediaSrc = computed(() => messageMediaUrlOf(props.msg))
 
 /* 图片/表情/视频撑满气泡：去掉内边距（微信样式） */
 const isTight = computed(() => [2, 4, 7].includes(props.msg.msg_type))
-
-/* S2 尺寸预占位：后端下发缩略图宽高（payload.w/h，与原图同比例），按显示上限
- * 换算最终盒子，占位与加载后同尺寸 → 高度零突变。历史消息无宽高返回 null，
- * 走 min 占位 + 浏览器滚动锚定兜底（S1）。 */
-function fitBox(w, h, maxW, maxH) {
-  const nw = Number(w)
-  const nh = Number(h)
-  if (!nw || !nh) return null
-  const s = Math.min(1, maxW / nw, maxH / nh)
-  return { width: `${Math.round(nw * s)}px`, height: `${Math.round(nh * s)}px` }
-}
-const imgBox = computed(() => fitBox(props.msg.payload?.w, props.msg.payload?.h, 200, 200))
-const qBox = computed(() => fitBox(quote.value?.w, quote.value?.h, 180, 120))
 
 /* 媒体加载状态：加载前 shimmer 占位块，加载完淡入（组件按消息 id 复用，状态不串行） */
 const loaded = ref(false)
@@ -137,6 +120,33 @@ function onMediaOk() {
     emit('mediaload')
   }
 }
+
+/* S2 尺寸预占位：后端下发缩略图宽高（payload.w/h，与原图同比例），按显示上限
+ * 换算最终盒子，占位与加载后同尺寸 → 高度零突变。历史消息无宽高则在 @load 后
+ * 用自然尺寸补盒子（否则骨架屏 min-height 大于图片高度，图下会露一条灰底）。 */
+function fitBox(w, h, maxW, maxH) {
+  const nw = Number(w)
+  const nh = Number(h)
+  if (!nw || !nh) return null
+  const s = Math.min(1, maxW / nw, maxH / nh)
+  return { width: `${Math.round(nw * s)}px`, height: `${Math.round(nh * s)}px` }
+}
+
+/* 图片盒子（气泡图 200×200 / 引用图 180×120 共用一套逻辑）：
+ * payload 宽高优先，缺失时靠 natural 兜底；onLoad 顺带结束 shimmer 占位。 */
+function useImgBox(sizeOf, maxW, maxH) {
+  const natural = ref(null)
+  const box = computed(() => fitBox(sizeOf()?.w, sizeOf()?.h, maxW, maxH) || natural.value)
+  function onLoad(e) {
+    if (!natural.value) {
+      natural.value = fitBox(e?.target?.naturalWidth, e?.target?.naturalHeight, maxW, maxH)
+    }
+    onMediaOk()
+  }
+  return { box, onLoad }
+}
+const { box: imgBox, onLoad: onImgLoad } = useImgBox(() => props.msg.payload, 200, 200)
+const { box: qBox, onLoad: onQuoteLoad } = useImgBox(() => quote.value, 180, 120)
 
 function onReEdit() {
   emit('reedit', props.msg.content)
@@ -164,22 +174,22 @@ function onMenu(e) {
       <div class="bubble" :class="{ tight: isTight }" :title="msg.create_time" @contextmenu.prevent="onMenu">
         <!-- 气泡只渲染缩略图（清晰度名次 3，多已预下载走本地缓存），不再叠加大图，
              避免聊天流加载原图；点开预览才换最清档 -->
-        <span v-if="msg.msg_type === 2" class="ph ph-img" :class="{ on: loaded }" :style="imgBox">
+        <span v-if="msg.msg_type === 2" class="ph ph-img" :class="{ on: loaded, sized: !!imgBox }" :style="imgBox">
           <img
             class="media img"
             :style="imgBox"
-            :src="localMedia || mediaUrlOf(msg)"
+            :src="mediaSrc"
             alt="图片消息"
             title="点击查看大图"
             referrerpolicy="no-referrer"
             decoding="async"
-            @load="onMediaOk"
+            @load="onImgLoad"
             @error="onMediaOk"
-            @click="emit('preview', localMedia || mediaUrlOf(msg))"
+            @click="emit('preview', mediaSrc)"
           />
         </span>
         <audio v-else-if="msg.msg_type === 6" class="media audio" :src="mediaUrlOf(msg)" controls preload="none"></audio>
-        <video v-else-if="msg.msg_type === 4" class="media video" :src="localMedia || mediaUrlOf(msg)" controls preload="metadata" @loadeddata="emit('mediaload')"></video>
+        <video v-else-if="msg.msg_type === 4" class="media video" :src="mediaSrc" controls preload="metadata" @loadeddata="emit('mediaload')"></video>
         <span v-else-if="msg.msg_type === 7" class="ph ph-emoji" :class="{ on: loaded }">
           <img
             class="media emoji fade"
@@ -194,7 +204,7 @@ function onMenu(e) {
         </span>
 
         <!-- 文件卡片：图标 + 文件名 + 下载 -->
-        <a v-else-if="msg.msg_type === 3" class="file-card" :href="localMedia || mediaUrlOf(msg)" :download="fileTitle">
+        <a v-else-if="msg.msg_type === 3" class="file-card" :href="mediaSrc" :download="fileTitle">
           <span class="badge">文件</span>
           <span class="fc-main">
             <span class="fc-title">{{ fileTitle }}</span>
@@ -209,7 +219,7 @@ function onMenu(e) {
           <div class="content">{{ quote.reply || '[引用]' }}</div>
           <template v-if="quoteImg">
             <span v-if="quote.name" class="q-text bare">{{ quote.name }}：</span>
-            <span class="ph q-ph" :class="{ on: loaded }" :style="qBox">
+            <span class="ph q-ph" :class="{ on: loaded, sized: !!qBox }" :style="qBox">
               <img
                 class="q-img fade"
                 :class="{ ok: loaded }"
@@ -219,9 +229,9 @@ function onMenu(e) {
                 title="点击查看大图"
                 referrerpolicy="no-referrer"
                 decoding="async"
-                @load="onMediaOk"
+                @load="onQuoteLoad"
                 @error="onMediaOk"
-                @click.stop="emit('preview', quoteFullUrl())"
+                @click.stop="emit('preview', quoteImg)"
               />
             </span>
           </template>
@@ -333,6 +343,9 @@ function onMenu(e) {
   animation: shimmer 1.1s linear infinite;
 }
 .ph.on { animation: none; } /* 图已盖住底纹，停掉动画省 CPU，背景留着当图下的底色 */
+/* 盒子已按真实比例定尺寸后撤掉最小占位，否则 min-height 大于图片实际高度时
+   图片下方会露出一条灰色底纹（宽图尤其明显） */
+.ph.on.sized { min-width: 0; min-height: 0; }
 .ph-img { min-width: 140px; min-height: 105px; }
 .ph-emoji { width: 120px; min-height: 90px; }
 @keyframes shimmer { to { background-position: -200% 0; } }

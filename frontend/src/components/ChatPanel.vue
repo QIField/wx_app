@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf } from '../utils/format'
 import { msgTextOf } from '../utils/message'
-import { mediaUrlOf } from '../utils/media'
+import { messageMediaUrlOf } from '../utils/media'
 import { copyImageFromUrl, copyText } from '../utils/clipboard'
 import { buildTimeline } from '../utils/timeline'
 import MessageRow from './MessageRow.vue'
@@ -15,7 +15,22 @@ import ChatComposer from './ChatComposer.vue'
 const chat = useChatStore()
 const scroller = ref(null)
 const composerRef = ref(null)
-const previewUrl = ref('') // 图片全屏预览地址
+
+/* ---------- 图片全屏预览：当前会话所有图片可左右切换 ---------- */
+const preview = ref(null) // { urls: string[], index: number }；null 即关闭
+
+/* 预览数据源：当前会话里的图片消息，取址与气泡一致（自己发的走本地 path）。
+   引用图/表情不进列表；点它们时按单图预览兜底。 */
+const previewUrls = computed(() =>
+  chat.currentMessages.filter((m) => m.msg_type === 2).map(messageMediaUrlOf)
+)
+
+/* 点中的图片在列表里定位下标（el-image-viewer 靠 initial-index 打开对应那张） */
+function openPreview(url) {
+  const urls = previewUrls.value
+  const index = urls.indexOf(url)
+  preview.value = index >= 0 ? { urls, index } : { urls: [url], index: 0 }
+}
 
 /* 骨架屏气泡宽度序列（错落更像真实对话） */
 const SK = [200, 128, 168, 224, 96, 176]
@@ -93,7 +108,7 @@ async function onMenuSelect(key) {
   if (!m || key !== 'copy') return
   try {
     if (m.msg_type === 2) {
-      await copyImageFromUrl(mediaUrlOf(m)) // 复制与展示用同一张（服务端已按 1→2→3 降级取到的那张）
+      await copyImageFromUrl(messageMediaUrlOf(m)) // 复制与展示同一张，自己发的也能复制
       ElMessage.success('已复制图片')
     } else {
       await copyText(msgTextOf(m))
@@ -134,7 +149,7 @@ async function onMenuSelect(key) {
             v-else
             :msg="row"
             :conv="chat.currentConv"
-            @preview="previewUrl = $event"
+            @preview="openPreview"
             @reedit="onReEdit"
             @mediaload="maybeStickBottom"
             @menu="menu = $event"
@@ -143,12 +158,13 @@ async function onMenuSelect(key) {
       </div>
     </el-scrollbar>
 
-    <!-- 图片全屏预览 -->
+    <!-- 图片全屏预览：url-list 多图时 Element 自带左右箭头/键盘方向键切换（微信式） -->
     <el-image-viewer
-      v-if="previewUrl"
-      :url-list="[previewUrl]"
+      v-if="preview"
+      :url-list="preview.urls"
+      :initial-index="preview.index"
       hide-on-click-modal
-      @close="previewUrl = ''"
+      @close="preview = null"
     />
 
     <!-- 消息右键菜单：弹层职责在 ContextMenu（定位翻转/收起生命周期） -->

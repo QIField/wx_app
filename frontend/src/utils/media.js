@@ -10,6 +10,12 @@ export function mediaUrlOf(m) {
   return `/api/messages/${m.id}/media?${token}`
 }
 
+/** 消息展示/预览统一取址：自己刚发的媒体 payload.path 是本服务上传的相对地址，
+ *  直接用它（媒体接口走中间方下载链路，发出的消息拉不到）；其余走媒体接口。 */
+export function messageMediaUrlOf(m) {
+  return m?.payload?.path || mediaUrlOf(m)
+}
+
 /** B方案：打开会话后后台预取图片（媒体接口 max-age=86400，进浏览器磁盘缓存），
  *  之后滑动历史时秒出。静默失败、fire-and-forget，不阻塞任何交互。 */
 export function prewarmThumbs(messages, limit = 30) {

@@ -56,9 +56,32 @@ function msgTypeOf(file) {
   return 3
 }
 
+/** 量本地图片的自然宽高（上传前量一次）：随 payload 落库后，气泡加载前就能按
+ *  真实比例占位，避免宽图被骨架屏的 min-height 撑出一截灰底。
+ *  用 createObjectURL 读本地文件，不需要先把图传到服务端；读失败返回 null。 */
+function imageSizeOf(file) {
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve({ w: img.naturalWidth, h: img.naturalHeight })
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(null)
+    }
+    img.src = objectUrl
+  })
+}
+
 /** 按类型组装发消息 payload：url 给中间方下载，path 给本地气泡预览。 */
-function mediaPayloadOf(type, up) {
-  if (type === 2) return { img_url: up.url, path: up.path }
+function mediaPayloadOf(type, up, size) {
+  if (type === 2) {
+    const p = { img_url: up.url, path: up.path }
+    if (size) { p.w = size.w; p.h = size.h } // 后端原样落库，前端预览当占位尺寸用
+    return p
+  }
   if (type === 4) return { video_url: up.url, thumb_url: '', video_duration: 0, path: up.path }
   return { file_url: up.url, file_name: up.file_name, path: up.path }
 }
@@ -334,9 +357,11 @@ export const useChatStore = defineStore('chat', {
     async sendFile(file) {
       if (!this.currentId) return
       if (file.size > UPLOAD_MAX_BYTES) throw new Error('文件不能超过 50MB')
-      const up = await uploadFile(file)
       const type = msgTypeOf(file)
-      await this.sendMedia(type, type === 3 ? up.file_name : '', mediaPayloadOf(type, up))
+      // 图片在浏览器本地先量宽高（不占网络）：预览侧按真实比例占位，杜绝下方灰条
+      const size = type === 2 ? await imageSizeOf(file) : null
+      const up = await uploadFile(file)
+      await this.sendMedia(type, type === 3 ? up.file_name : '', mediaPayloadOf(type, up, size))
     },
 
     /** 按后端同一规则重排：置顶优先，其余按最后消息时间倒序（无时间排最后）。 */
