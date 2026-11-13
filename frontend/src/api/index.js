@@ -157,6 +157,9 @@ export const uploadFile = (file) => {
 export const sendMediaMessage = (convId, msgType, content, payload) =>
   http.post(`/conversations/${convId}/messages`, { msg_type: msgType, content, payload })
 
+/** 撤回自己发的消息（微信限制发出 2 分钟内）：成功后 WS 广播 message_revoked 换灰条。 */
+export const revokeMessage = (messageId) => http.post(`/messages/${messageId}/revoke`)
+
 /** 通讯录：好友/群列表（type: friends | groups，keyword 可选）。 */
 export const fetchContacts = (type, keyword, openid) =>
   http.get('/contacts', {

@@ -300,7 +300,10 @@ export const useChatStore = defineStore('chat', {
         this.currentMessages.push({
           direction: 2,
           operator_name: this.operatorName || '客服',
-          create_time: new Date().toLocaleString('zh-CN', { hour12: false }),
+          // 必须复用 nowStamp()（与后端列表同格式 YYYY-MM-DD HH:MM:SS）：
+          // 此前用 toLocaleString('zh-CN') 产出 "2026/11/13 ..." 斜杠格式，
+          // Date.parse 解析失败，撤回时间窗判断与时间轴分组都会失灵
+          create_time: nowStamp(),
           ...msg,
         })
       }

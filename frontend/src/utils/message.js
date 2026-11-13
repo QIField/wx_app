@@ -101,6 +101,18 @@ export function canReEdit(m) {
   return !!m.payload?.revoked && m.direction === 2 && !!m.content && !isSystemXml(m)
 }
 
+/* 撤回时间窗：微信限制发出 2 分钟内可撤回，本地按 115s 卡口（与后端 REVOKE_WINDOW=115
+ * 一致），留 5s 余量给撤回指令经中间方到微信的链路耗时，避免压线点击被微信侧拒绝 */
+const REVOKE_WINDOW_MS = 115_000
+
+/** 自己发的消息能否撤回：方向为出、未撤回、且在 2 分钟窗口内。
+ * create_time 是服务器本地时间字符串，按本地时区解析（与浏览器同机部署）。 */
+export function canRevoke(m) {
+  if (m.direction !== 2 || m.payload?.revoked) return false
+  const t = m.create_time ? new Date(m.create_time.replace(' ', 'T')).getTime() : 0
+  return t > 0 && Date.now() - t <= REVOKE_WINDOW_MS
+}
+
 /** 链接域名：卡片页脚展示。 */
 export function hostOf(url) {
   try {

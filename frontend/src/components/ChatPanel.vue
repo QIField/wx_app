@@ -1,10 +1,11 @@
 <script setup>
 /** 中栏：聊天窗 + 输入框。消息行渲染见 MessageRow.vue（气泡/灰条/卡片），输入与发送见 ChatComposer.vue。 */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
+import { revokeMessage } from '../api'
 import { displayNameOf } from '../utils/format'
-import { msgTextOf } from '../utils/message'
+import { msgTextOf, canRevoke } from '../utils/message'
 import { messageMediaUrlOf } from '../utils/media'
 import { copyImage, copyText } from '../utils/clipboard'
 import { buildTimeline } from '../utils/timeline'
@@ -70,9 +71,14 @@ watch(
     const appended =
       !switched && msgs[msgs.length - 1]?.id !== prevMsgs?.[prevMsgs.length - 1]?.id
     if (switched || appended) {
-      if (switched) nearBottom = true
+      // 贴底判定：切会话与自己发消息（文本/图片/文件等所有发送路径统一 direction=2）
+      // 都强制贴底并标记 nearBottom（后续媒体加载撑高继续锚定）；
+      // 对方来消息维持"贴底才跟随"，翻历史时不打扰
+      const ownSent = appended && msgs[msgs.length - 1]?.direction === 2
+      const force = switched || ownSent
+      if (force) nearBottom = true
       await nextTick()
-      switched ? stickBottom() : maybeStickBottom()
+      force ? stickBottom() : maybeStickBottom()
     } else if (msgs[0]?.id !== prevMsgs?.[0]?.id) {
       const prevH = wrap.scrollHeight
       const prevTop = wrap.scrollTop
@@ -93,20 +99,42 @@ function onReEdit(content) {
 const menu = ref(null) // { msg, x, y }；null 即收起
 
 /* 菜单项随消息能力启停：图片走"复制图片"，其余文本类"复制"，
- * 语音/视频/表情暂无可复制内容（置灰），后续按需追加（转发/撤回/引用…） */
+ * 自己发的未撤回且在 2 分钟内的消息追加"撤回"（转发/引用…后续按需追加） */
 const menuItems = computed(() => {
   const m = menu.value?.msg
   if (!m) return []
-  if (m.msg_type === 2) return [{ key: 'copy', label: '复制图片' }]
-  return [{ key: 'copy', label: '复制', disabled: !msgTextOf(m) }]
+  const items = []
+  if (m.msg_type === 2) items.push({ key: 'copy', label: '复制图片' })
+  else items.push({ key: 'copy', label: '复制', disabled: !msgTextOf(m) })
+  if (canRevoke(m)) items.push({ key: 'revoke', label: '撤回' })
+  return items
 })
 
-/* 复制：文本写文本剪贴板；图片复制通道（API/选中复制）由 clipboard.copyImage 按环境自选；
- * 失败统一 toast */
+/* 撤回：调后端下发中间方，成功后复用 store 的撤回处理换灰条
+ * （WS 广播 message_revoked 也会到达，onMessageRevoked 幂等不冲突）；
+ * 失败透传后端提示（如"超过 2 分钟，无法撤回"） */
+async function revokeMsg(m) {
+  try {
+    await revokeMessage(m.id)
+    chat.onMessageRevoked({
+      message_id: m.id,
+      conversation_id: m.conversation_id ?? chat.currentId,
+      direction: 2, // 出方向：摘要文案走"你撤回了一条消息"
+    })
+    ElMessage.success('已撤回')
+  } catch (exc) {
+    ElMessage.error(exc.message || '撤回失败')
+  }
+}
+
+/* 菜单分发：撤回走 revokeMsg；复制——文本写文本剪贴板，图片复制通道
+ * （API/选中复制）由 clipboard.copyImage 按环境自选，失败统一 toast */
 async function onMenuSelect(key) {
   const m = menu.value?.msg
   menu.value = null
-  if (!m || key !== 'copy') return
+  if (!m) return
+  if (key === 'revoke') return revokeMsg(m)
+  if (key !== 'copy') return
   try {
     if (m.msg_type === 2) {
       await copyImage(

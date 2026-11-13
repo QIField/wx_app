@@ -22,7 +22,8 @@ from backend.sync.send_service import SendDispatchError, send_message
 bp = Blueprint("messages", __name__)
 
 _VALID_TYPES = {1, 2, 3, 4, 5}  # 文本/图片/文件/视频/链接卡片
-REVOKE_WINDOW = 120  # 微信限制：发出 2 分钟内可撤回
+REVOKE_WINDOW = 115  # 微信限制发出 2 分钟内可撤回；留 5s 余量给撤回指令经中间方到微信的链路耗时，
+                     # 避免压线点击时本地放行、微信侧已过窗拒绝（拒了也不出错：ret!=200 会回 502 且不打标）
 
 
 def _own_openids(user):
