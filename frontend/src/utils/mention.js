@@ -7,7 +7,7 @@
  *  - 服务端：拿 at_ids（群成员行号）换算 ats=wxid，前端始终不持有 wxid（脱敏契约）。
  */
 import { escapeHtml, renderEmojiHtml } from './emoji'
-import { displayNameOf } from './format'
+import { displayNameOf, matchPinyinToks } from './format'
 
 /** 微信 @ 分隔符：昵称后必须是 U+2005（四分空格），否则对方收不到提醒。 */
 export const AT_SEP = '\u2005'
@@ -55,7 +55,8 @@ export function textBeforeCaret(root) {
 
 /**
  * 命中打分（越小越靠前）：
- * 0 昵称前缀 → 1 全拼前缀 → 2 首字母前缀 → 3 昵称包含 → 4 全拼包含 → 5 首字母包含 → -1 不命中。
+ * 0 昵称前缀 → 1 全拼前缀 → 2 首字母前缀 → 3 昵称包含 → 4 全拼包含（字边界对齐）
+ * → 5 首字母包含 → -1 不命中。
  * 中文输入时全拼不会命中，自然走昵称规则；拼音数据由后端 pypinyin 预计算，前端零依赖。
  */
 export function scoreMember(member, query) {
@@ -67,7 +68,8 @@ export function scoreMember(member, query) {
   if (py.startsWith(query)) return 1
   if (ini.startsWith(query)) return 2
   if (name.includes(query)) return 3
-  if (py.includes(query)) return 4
+  // 全拼包含改字边界对齐：housheng 不再跨字命中 hang|zhou|sheng|chi 这类误结果
+  if (matchPinyinToks(member.pinyin_toks, query)) return 4
   if (ini.includes(query)) return 5
   return -1
 }

@@ -223,6 +223,16 @@ def test_open_conversation_fallback_conversation_row(client):
     assert resp.get_json()["data"]["id"] == conv.id
 
 
+def test_open_conversation_negative_extra_id(client):
+    """通讯录补集条目出参 id 为负（-conv.id）：发起会话按 -id 反查会话行。"""
+    conv = make_conv(wxid="wxid_legacy2", chat_type=Conversation.CHAT_SINGLE)
+
+    resp = client.post("/api/conversations", json={"contact_id": -conv.id, "chat_type": 1})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["id"] == conv.id
+
+
 def test_open_conversation_requires_roster(client):
     """contact_id 无对应联系人/会话：404 拒绝，防乱造会话。"""
     resp = client.post("/api/conversations", json={"contact_id": 99999, "chat_type": 1})

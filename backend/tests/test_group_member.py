@@ -406,7 +406,7 @@ def test_members_api_returns_roster_with_pinyin(client, app, group_conv):
     assert by_name["张三"]["initials"] == "zs"
     assert by_name["李四"]["pinyin"] == "lisi"
     for m in data["list"]:
-        assert set(m) == {"id", "name", "avatar", "alias", "pinyin", "initials"}
+        assert set(m) == {"id", "name", "avatar", "alias", "pinyin", "pinyin_toks", "initials"}
         assert "wxid" not in m  # 脱敏：wxid 一律不下发
         assert m["alias"]  # 未解析/已解析都有稳定别名
 

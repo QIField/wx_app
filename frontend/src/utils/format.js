@@ -29,6 +29,32 @@ export function matchKeyword(fields, keyword) {
   return fields.some((x) => x && String(x).toLowerCase().includes(kw))
 }
 
+/** 拼音命中（字边界对齐）：关键词必须从某个「字」的拼音开头连续拼出。
+ *  后端已预算逐字拼音 toks（张峰 → ['zhang','feng']），前端零依赖直接用。
+ *  不用全拼子串匹配的原因：hang|zhou|sheng|chi 拼接串里 housheng 跨 zhou|sheng
+ *  边界也能 includes 命中，导致「杭州圣驰汽配」混进「后生」的搜索结果。 */
+export function matchPinyinToks(toks, keyword) {
+  const kw = (keyword || '').trim().toLowerCase()
+  if (!kw || !Array.isArray(toks) || !toks.length) return false
+  for (let i = 0; i < toks.length; i++) {
+    let seg = ''
+    for (let j = i; j < toks.length; j++) {
+      seg += toks[j]
+      if (seg.length >= kw.length) {
+        // 前缀已定：相等即命中，否则再拼也不会命中
+        if (seg.startsWith(kw)) return true
+        break
+      }
+    }
+  }
+  return false
+}
+
+/** 搜索框通用命中：原文/首字母子串 + 逐字拼音边界对齐。fields 与 toks 传数据行的字段。 */
+export function matchName(fields, toks, keyword) {
+  return matchKeyword(fields, keyword) || matchPinyinToks(toks, keyword)
+}
+
 /* ==================== 匿名展示（wxid 脱敏契约） ====================
  * 出参不含 wxid；名称未解析（name 为空）时以「匿名 + 编码」代称，
  * 头像画匿名图标。编码（alias）由后端 HMAC 派生：同码同人、不可逆。

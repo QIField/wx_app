@@ -23,6 +23,7 @@ from backend.models.user_device import UserDevice
 from backend.services.audit import AuditLog, AuditModule, log_action
 from backend.services.auth import require_role
 from backend.services.devices import user_devices
+from backend.services.pinyin import full_pinyin, initials as pinyin_initials, pinyin_tokens
 
 bp = Blueprint("accounts", __name__)
 
@@ -64,7 +65,15 @@ def _resolve_org(org_id, target_role):
 @require_role(*MANAGE_ROLES)
 def list_accounts():
     rows = User.query.order_by(User.role.desc(), User.id).all()
-    return jsonify(code=0, msg="success", data=[u.to_json(with_devices=True) for u in rows])
+    data = []
+    for u in rows:
+        item = u.to_json(with_devices=True)
+        # 姓名拼音供前端搜索框匹配（输入 zhang/z 命中中文姓名），不动 to_json 本体
+        item["pinyin"] = full_pinyin(u.name)
+        item["pinyin_toks"] = pinyin_tokens(u.name)
+        item["initials"] = pinyin_initials(u.name)
+        data.append(item)
+    return jsonify(code=0, msg="success", data=data)
 
 
 @bp.post("/api/accounts")

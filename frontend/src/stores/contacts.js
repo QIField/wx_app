@@ -1,8 +1,11 @@
 /** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项、联系人档案（备注/标签）。 */
 import { defineStore } from 'pinia'
 import { fetchContacts, fetchContactProfile, saveContactProfile } from '../api'
-import { matchKeyword, displayNameOf } from '../utils/format'
+import { matchName, displayNameOf } from '../utils/format'
 import { useChatStore } from './chat'
+
+/** 通讯录条目搜索命中：展示名（含「匿名 编码」）/ 首字母子串 + 逐字拼音（字边界对齐）。 */
+const hitContact = (c, kw) => matchName([displayNameOf(c), c.initials], c.pinyin_toks, kw)
 
 export const useContactsStore = defineStore('contacts', {
   state: () => ({
@@ -19,8 +22,8 @@ export const useContactsStore = defineStore('contacts', {
     currentList: (s) => (s.tab === 'friends' ? s.friends : s.groups),
 
     filteredList(s) {
-      // 搜索只匹配展示名（含「匿名 编码」）与备注；wxid 已不在前端数据里
-      return s.currentList.filter((c) => matchKeyword([displayNameOf(c)], s.keyword))
+      // wxid 已不在前端数据里，匹配走 hitContact（展示名/首字母/拼音 token）
+      return s.currentList.filter((c) => hitContact(c, s.keyword))
     },
 
     selectedContact(s) {
@@ -33,7 +36,7 @@ export const useContactsStore = defineStore('contacts', {
     crossHintCount(s) {
       if (!s.keyword.trim()) return 0
       const other = s.tab === 'friends' ? s.groups : s.friends
-      return other.filter((c) => matchKeyword([displayNameOf(c)], s.keyword)).length
+      return other.filter((c) => hitContact(c, s.keyword)).length
     },
   },
 

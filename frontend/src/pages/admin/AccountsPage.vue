@@ -11,7 +11,7 @@ import {
   toggleAccountStatus,
   updateAccount,
 } from '../../api'
-import { matchKeyword } from '../../utils/format'
+import { matchName } from '../../utils/format'
 
 const props = defineProps({
   me: { type: Object, required: true },
@@ -30,7 +30,7 @@ const devLocked = (u) => props.me.role === 'admin' && u.role === 'developer'
 const canBind = props.me.role === 'developer'
 
 const filtered = computed(() =>
-  list.value.filter((u) => matchKeyword([u.username, u.name], keyword.value)))
+  list.value.filter((u) => matchName([u.username, u.name, u.initials], u.pinyin_toks, keyword.value)))
 
 async function load() {
   loading.value = true

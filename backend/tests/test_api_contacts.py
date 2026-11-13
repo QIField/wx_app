@@ -106,6 +106,67 @@ def test_keyword_hits_name(client):
     assert [c["name"] for c in data["list"]] == ["张师傅"]
 
 
+def test_keyword_hits_pinyin(client):
+    """拼音搜索：全拼 zhangfeng / 首字母 zf 都能命中 张峰；出参带 pinyin/initials。"""
+    make_contact(wxid="wxid_a", name="张峰")
+    make_contact(wxid="wxid_b", name="李四")
+
+    for kw in ("zhang", "zhangfeng", "zf"):
+        data = client.get(f"/api/contacts?type=friends&keyword={kw}").get_json()["data"]
+        assert [c["name"] for c in data["list"]] == ["张峰"], kw
+
+    rows = client.get("/api/contacts?type=friends").get_json()["data"]["list"]
+    row = next(c for c in rows if c["name"] == "张峰")
+    assert row["pinyin"] == "zhangfeng"
+    assert row["initials"] == "zf"
+
+
+def test_keyword_hits_remark_pinyin(client):
+    """拼音搜索命中备注：remark=张峰的客户 输入 zhang 可搜到 王老板。"""
+    make_roster("wxid_r", name="王老板")
+    db.session.add(ContactProfile(wxid="wxid_r", remark="张峰的客户", tags=[]))
+    db.session.commit()
+
+    data = client.get("/api/contacts?type=friends&keyword=zhang").get_json()["data"]
+
+    assert [c["name"] for c in data["list"]] == ["王老板"]
+
+
+def test_keyword_pinyin_respects_char_boundary(client):
+    """拼音匹配按字边界对齐：housheng 只命中 后生仔，不再跨字命中 杭|州|圣|驰。"""
+    make_contact(wxid="wxid_h", name="杭州圣驰汽配")
+    make_contact(wxid="wxid_b", name="后生仔")
+    make_contact(wxid="wxid_z", name="张峰")
+
+    data = client.get("/api/contacts?type=friends&keyword=housheng").get_json()["data"]
+    assert [c["name"] for c in data["list"]] == ["后生仔"]
+
+    # heng 在 zhang 词中间 / feng 首字母串里都不该命中 张峰
+    data = client.get("/api/contacts?type=friends&keyword=heng").get_json()["data"]
+    assert [c["name"] for c in data["list"]] == []
+
+    # 字边界内的中段拼音仍命中：sheng 从"圣"/"生"的拼音开头起
+    data = client.get("/api/contacts?type=friends&keyword=sheng").get_json()["data"]
+    assert {c["name"] for c in data["list"]} == {"杭州圣驰汽配", "后生仔"}
+
+
+def test_extras_use_negative_id_and_profile_resolve(client):
+    """补集（会话only）条目 id 取负：与 contact 表 id 隔离，档案按负 id 解析回会话行。"""
+    make_roster("wxid_roster", name="正册联系人")     # contact 表行
+    conv = make_contact(wxid="wxid_extra", name="补集联系人")  # 无 contact 行 → 补集
+
+    items = client.get("/api/contacts?type=friends").get_json()["data"]["list"]
+    by_name = {c["name"]: c for c in items}
+    extra = by_name["补集联系人"]
+
+    assert extra["id"] == -conv.id
+    assert extra["conversation_id"] == conv.id
+
+    # 负 id 反查档案：解析回会话行的 wxid（不落到同号的 contact 行上）
+    data = client.get(f"/api/contacts/{-conv.id}/profile").get_json()["data"]
+    assert data == {"remark": "", "tags": []}
+
+
 def test_keyword_ignores_wxid(client):
     """脱敏契约：wxid 不参与搜索（前端已不可见，搜 wxid 片段不应命中）。"""
     make_contact(wxid="wxid_customer", name=None)

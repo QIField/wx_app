@@ -4,7 +4,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
-import { displayNameOf, fmtTime, highlight, matchKeyword } from '../utils/format'
+import { displayNameOf, fmtTime, highlight, matchName } from '../utils/format'
 import ContextMenu from './ContextMenu.vue'
 import ContactAvatar from './ContactAvatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
@@ -13,9 +13,10 @@ const chat = useChatStore()
 
 const keyword = ref('')
 
-/** 本地过滤：命中展示名（含「匿名 编码」）才显示（wxid 已不在前端数据里）。 */
+/** 本地过滤：命中展示名（含「匿名 编码」）/ 首字母 / 逐字拼音（边界对齐）才显示。 */
 const filtered = computed(() =>
-  chat.conversations.filter((c) => matchKeyword([displayNameOf(c)], keyword.value)))
+  chat.conversations.filter((c) =>
+    matchName([displayNameOf(c), c.initials], c.pinyin_toks, keyword.value)))
 
 /* ---------- 右键菜单 ---------- */
 const menu = ref(null) // { conv, x, y }；null 即收起

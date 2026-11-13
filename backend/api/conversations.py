@@ -17,7 +17,11 @@ from backend.models.message import Message
 from backend.services import anonymize, conversations as conversation_service
 from backend.services.auth import require_role
 from backend.services.devices import active_openid_for, user_openids
-from backend.services.pinyin import full_pinyin, initials as pinyin_initials
+from backend.services.pinyin import (
+    full_pinyin,
+    initials as pinyin_initials,
+    pinyin_tokens,
+)
 from backend.services.quote_media import with_media_id
 from backend.sync import group_member
 
@@ -114,7 +118,19 @@ def open_conversation():
 
 
 def _resolve_contact_wxid(contact_id, openid, chat_type):
-    """contact_id → wxid：Contact 行优先，补集回退按会话行反查（均限当前设备）。"""
+    """条目 id → wxid：正数 Contact 行优先，负数（补集）按 -id 反查会话行（均限当前设备）。
+
+    负号约定见 contacts._conv_contact_json：两套自增 id 靠符号隔离，
+    否则 conv id 撞 contact id 时会发错人。
+    """
+    if contact_id < 0:
+        conv = Conversation.query.filter(
+            Conversation.id == -contact_id,
+            Conversation.openid == openid,
+            Conversation.chat_type == chat_type,
+            Conversation.deleted_at.is_(None),
+        ).first()
+        return conv.wxid if conv else None
     contact_type = (
         Contact.TYPE_FRIEND if chat_type == Conversation.CHAT_SINGLE else Contact.TYPE_GROUP
     )
@@ -282,6 +298,7 @@ def _member_json(m):
         "avatar": anonymize.avatar_or_none(name, m.avatar),
         "alias": anonymize.alias_of(m.wxid),
         "pinyin": full_pinyin(name),
+        "pinyin_toks": pinyin_tokens(name),
         "initials": pinyin_initials(name),
     }
 
@@ -289,7 +306,7 @@ def _member_json(m):
 def _conv_json(c):
     """会话出参（脱敏契约）：不含 wxid；名称未解析 → name=None + alias，头像一并匿名。
 
-    附 pinyin/initials 供会话搜索框拼音匹配（输入 zhang/z 命中 张峰）。
+    附 pinyin/initials/pinyin_toks 供会话搜索框拼音匹配（输入 zhang/z 命中 张峰）。
     """
     name = anonymize.resolved_name(c.name, c.wxid)
     return {
@@ -299,6 +316,7 @@ def _conv_json(c):
         "avatar": anonymize.avatar_or_none(name, c.avatar),
         "alias": anonymize.alias_of(c.wxid),
         "pinyin": full_pinyin(name),
+        "pinyin_toks": pinyin_tokens(name),
         "initials": pinyin_initials(name),
         "unread_count": c.unread_count,
         "pinned": c.pinned,
