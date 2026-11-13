@@ -106,20 +106,40 @@ const quoteImg = computed(() => {
   return id ? mediaUrlOf({ id }) : null
 })
 
-/* 气泡内媒体的展示地址：自己刚发的取本地 path，其余走媒体接口 */
-const mediaSrc = computed(() => messageMediaUrlOf(props.msg))
+/* 气泡内媒体的展示地址：自己刚发的取本地 path，其余走媒体接口。
+ * 图片加载失败重试时拼 cache-bust 参数（媒体接口 URL 已带 ?token=，
+ * 本地 path 无查询串，按有无 ? 选连接符），强制浏览器重新发请求。 */
+const mediaSrc = computed(() => {
+  const base = messageMediaUrlOf(props.msg)
+  return imgBust.value
+    ? `${base}${base.includes('?') ? '&' : '?'}rt=${imgBust.value}`
+    : base
+})
 
 /* 图片/表情/视频撑满气泡：去掉内边距（微信样式） */
 const isTight = computed(() => [2, 4, 7].includes(props.msg.msg_type))
 
 /* 媒体加载状态：加载前 shimmer 占位块，加载完淡入（组件按消息 id 复用，状态不串行） */
 const loaded = ref(false)
-/* @load/@error 共用：坏图也撤占位，避免永远闪 shimmer；并通知父组件重新锚定底部 */
+/* @load/@error 共用的收尾：坏图也撤占位，避免永远闪 shimmer；并通知父组件重新锚定底部 */
 function onMediaOk() {
   if (!loaded.value) {
     loaded.value = true
     emit('mediaload')
   }
+}
+/* 图片加载失败自动重试一次：中间方下载瞬时失败（后端 502）实测 2~3 秒内自愈，
+ * 拼个 cache-bust 参数强制浏览器重新请求，免去用户"切走再切回来"手动触发重试；
+ * 重试仍失败才撤占位进入撕裂态 */
+const imgRetried = ref(false)
+const imgBust = ref('')
+function onImgError() {
+  if (!imgRetried.value) {
+    imgRetried.value = true
+    setTimeout(() => { imgBust.value = Date.now() }, 1500)
+    return
+  }
+  onMediaOk()
 }
 
 /* S2 尺寸预占位：后端下发缩略图宽高（payload.w/h，与原图同比例），按显示上限
@@ -186,7 +206,7 @@ function onMenu(e) {
             referrerpolicy="no-referrer"
             decoding="async"
             @load="onImgLoad"
-            @error="onMediaOk"
+            @error="onImgError"
             @click="emit('preview', mediaSrc)"
           />
         </span>
@@ -233,7 +253,7 @@ function onMenu(e) {
                 referrerpolicy="no-referrer"
                 decoding="async"
                 @load="onQuoteLoad"
-                @error="onMediaOk"
+                @error="onImgError"
                 @click.stop="emit('preview', quoteImg)"
               />
             </span>

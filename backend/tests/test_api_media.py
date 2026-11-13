@@ -258,6 +258,51 @@ def test_media_image_falls_back_to_third_tier(app, client, conv, media_dir, monk
     assert files[0].suffix == ".png"
 
 
+def test_media_retry_on_transient_500(app, client, conv, media_dir, monkeypatch):
+    """中间方瞬时失败（ret=500「下载图片失败」）自动重试后成功，前端拿到 200。
+
+    实测中间方首呼经常 ret=500（其后台尚未就绪），1~3 秒后重试即成功——
+    服务端重试把失败挡在 API 之内，避免 502 裂到聊天页。"""
+    from backend.adapter.client import MiddleApiError
+
+    monkeypatch.setattr(media_fetch, "RETRY_DELAYS", (0,))  # 测试不等退避
+    calls = {"n": 0}
+
+    def flaky(module, action, params=None, openid=""):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise MiddleApiError("下载图片失败", 500)
+        return b"\x89PNG\r\n\x1a\nDATA", "image/png", ""
+
+    monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", flaky)
+    msg = make_message(conv.id, Message.MSG_IMAGE, "<msg><img aeskey=\"k\" /></msg>")
+
+    resp = client.get(f"/api/messages/{msg.id}/media")
+
+    assert resp.status_code == 200
+    assert calls["n"] == 2  # 首呼失败 + 重试成功
+
+
+def test_media_no_retry_on_permanent_error(app, client, conv, media_dir, monkeypatch):
+    """非瞬时错误（code=None，如设备离线/网络异常）不重试，立即 502。"""
+    from backend.adapter.client import MiddleApiError
+
+    monkeypatch.setattr(media_fetch, "RETRY_DELAYS", (0, 0))
+    calls = {"n": 0}
+
+    def boom(module, action, params=None, openid=""):
+        calls["n"] += 1
+        raise MiddleApiError("设备离线")
+
+    monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", boom)
+    msg = make_message(conv.id, Message.MSG_VIDEO, "<msg><videomsg aeskey=\"k\" /></msg>")
+
+    resp = client.get(f"/api/messages/{msg.id}/media")
+
+    assert resp.status_code == 502
+    assert calls["n"] == 1  # 不重试
+
+
 def test_media_text_type_rejected(app, client, conv):
     """文本消息没有媒体：400。"""
     msg = make_message(conv.id, Message.MSG_TEXT, "你好")

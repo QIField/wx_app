@@ -11,6 +11,7 @@
 """
 import mimetypes
 import threading
+import time
 import xml.etree.ElementTree as ET
 
 from flask import current_app
@@ -52,6 +53,11 @@ _MIME_BY_EXT = {v: k for k, v in _EXT_OVERRIDES.items()}
 # 下载时按此顺序逐级降级，成功即停，不做三档全下，也不比较像素排名。
 IMAGE_TIERS = (1, 2, 3)
 
+# 中间方下载首呼经常瞬时失败（实测 ret=500「下载图片失败」，1~3 秒后重试即成功——
+# 2026-11-13 middle_call_log 复盘：当天 31 次下载 13 次失败，重试后 8/8 全部成功）。
+# 设备锁内做短退避重试，把瞬时失败挡在服务端，避免 502 裂到聊天页图片气泡。
+RETRY_DELAYS = (1.5, 3.0)  # 首呼失败后依次等待的秒数；只重试 code=500 的业务失败
+
 # 中间方按设备限制并发下载任务数（实测超限报 50003「下载任务已达上限」）。
 # 同设备的所有下载——同步预下载 + 接口兜底——在此排队串行；不同设备互不影响。
 _DEVICE_LOCKS = {}
@@ -65,6 +71,19 @@ def _device_lock(openid):
         if lock is None:
             lock = _DEVICE_LOCKS[openid] = threading.Lock()
         return lock
+
+
+def _call_download_retried(action, params, openid):
+    """带短退避重试的下载调用：仅重试中间方业务失败（code=500，多为"媒体尚未就绪"），
+    网络异常 / 参数类错误（code=None 等）立即上抛不重试。每次尝试都由 client 自动记流水。"""
+    for attempt, delay in enumerate((0,) + RETRY_DELAYS):
+        if delay:
+            time.sleep(delay)
+        try:
+            return middle_client.call_download("messag_api", action, params, openid=openid)
+        except MiddleApiError as exc:
+            if exc.code != 500 or attempt >= len(RETRY_DELAYS):
+                raise
 
 
 def build_params(msg, img_type):
@@ -128,10 +147,10 @@ def fetch_and_cache(msg):
         if msg.msg_type == Message.MSG_IMAGE:
             data, content_type = _download_image(msg, openid)
         else:
-            data, content_type = middle_client.call_download(
-                "messag_api", DOWNLOAD_ACTION[msg.msg_type],
+            data, content_type = _call_download_retried(
+                DOWNLOAD_ACTION[msg.msg_type],
                 build_params(msg, 0),  # 非图片参数不含 img_type，占位值会被忽略
-                openid=openid,
+                openid,
             )
         if not data:
             raise MiddleApiError("媒体内容为空")
@@ -173,9 +192,8 @@ def _download_image(msg, openid):
     errors = []
     for tier in IMAGE_TIERS:
         try:
-            data, content_type = middle_client.call_download(
-                "messag_api", DOWNLOAD_ACTION[msg.msg_type],
-                build_params(msg, tier), openid=openid,
+            data, content_type = _call_download_retried(
+                DOWNLOAD_ACTION[msg.msg_type], build_params(msg, tier), openid
             )
         except MiddleApiError as exc:
             errors.append(f"img_type={tier}: {exc}")
