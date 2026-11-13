@@ -114,6 +114,86 @@ def test_media_voice_download_params(app, client, conv, media_dir, monkeypatch):
     assert list(cache_dir(media_dir, msg).glob(f"{msg.id}.amr"))
 
 
+def test_media_sniff_silk_with_length_header(app, client, conv, media_dir, monkeypatch):
+    """微信语音常在 SILK 魔数前多 1~2 字节长度头：仍按 .silk 落盘，不再误存 .bin。"""
+    monkeypatch.setattr(media_fetch.voice_codec, "silk_to_mp3", lambda *a, **k: None)
+    silk = b"\x02\x23#!SILK_V3" + b"SILKJUNK"
+    mock_download(monkeypatch, data=silk, content_type="application/octet-stream")
+    msg = make_message(conv.id, Message.MSG_VOICE, '<msg><voicemsg voicelength="2000" /></msg>')
+
+    resp = client.get(f"/api/messages/{msg.id}/media")
+
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith("audio/silk")
+    assert list(cache_dir(media_dir, msg).glob(f"{msg.id}.silk"))
+    assert not list(cache_dir(media_dir, msg).glob(f"{msg.id}.bin"))
+
+
+def test_media_voice_transcoded_to_mp3(app, client, conv, media_dir, monkeypatch):
+    """语音落盘 silk 后即时转码：本次与后续请求都返回 audio/mpeg，转码只做一次。"""
+    calls = []
+
+    def fake_transcode(silk, out, rate=24000):
+        from pathlib import Path
+
+        calls.append(Path(silk).name)
+        Path(out).write_bytes(b"ID3MP3DATA")
+        return Path(out)
+
+    monkeypatch.setattr(media_fetch.voice_codec, "silk_to_mp3", fake_transcode)
+    silk = b"\x02\x23#!SILK_V3" + b"SILKJUNK"
+    mock_download(monkeypatch, data=silk, content_type="application/octet-stream")
+    msg = make_message(conv.id, Message.MSG_VOICE, '<msg><voicemsg voicelength="2000" /></msg>')
+
+    first = client.get(f"/api/messages/{msg.id}/media")
+    assert first.status_code == 200
+    assert first.headers["Content-Type"].startswith("audio/mpeg")
+    assert first.data == b"ID3MP3DATA"
+    assert len(calls) == 1  # 只转一次
+
+    def must_not_call(*a, **k):
+        raise AssertionError("已有 mp3 不该回源中间方")
+
+    monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", must_not_call)
+    second = client.get(f"/api/messages/{msg.id}/media")
+
+    assert second.status_code == 200
+    assert second.headers["Content-Type"].startswith("audio/mpeg")
+    assert len(calls) == 1  # 命中 mp3 缓存，不再补转
+
+
+def test_media_voice_transcode_failure_falls_back(app, client, conv, media_dir, monkeypatch):
+    """转码失败（工具缺失/文件损坏）：降级返回原 silk，媒体链路不断。"""
+    monkeypatch.setattr(media_fetch.voice_codec, "silk_to_mp3", lambda *a, **k: None)
+    silk = b"\x02\x23#!SILK_V3" + b"SILKJUNK"
+    mock_download(monkeypatch, data=silk, content_type="application/octet-stream")
+    msg = make_message(conv.id, Message.MSG_VOICE, '<msg><voicemsg voicelength="2000" /></msg>')
+
+    resp = client.get(f"/api/messages/{msg.id}/media")
+
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith("audio/silk")
+    assert resp.data == silk
+
+
+def test_media_voice_prefers_cached_mp3(app, client, conv, media_dir, monkeypatch):
+    """本地已有转码产物 mp3：直接回文件流，不回源中间方也不补转。"""
+    msg = make_message(conv.id, Message.MSG_VOICE, '<msg><voicemsg voicelength="2000" /></msg>')
+    d = cache_dir(media_dir, msg)
+    d.mkdir(parents=True)
+    (d / f"{msg.id}.mp3").write_bytes(b"ID3MP3DATA")
+
+    def must_not_call(*a, **k):
+        raise AssertionError("mp3 缓存命中不该回源中间方")
+
+    monkeypatch.setattr(media_fetch.middle_client, "call_download_with_url", must_not_call)
+
+    resp = client.get(f"/api/messages/{msg.id}/media")
+
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith("audio/mpeg")
+
+
 def test_media_emoji_md5_from_xml(app, client, conv, media_dir, monkeypatch):
     """表情：md5 从 content xml 属性里解析，参数只传 emoji_md5。"""
     msg = make_message(conv.id, Message.MSG_EMOJI,

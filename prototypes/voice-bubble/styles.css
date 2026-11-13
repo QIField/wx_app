@@ -1,0 +1,254 @@
+/* ===== styles.css · 语音气泡原型 =====
+ * 设计契约：对齐 frontend/src/style.css 的工作台 tokens，
+ * 不引入新色彩体系，保证原型即最终 Vue 组件的视觉规格。 */
+:root {
+  --c-bg: #eef1f6;
+  --c-panel: #ffffff;
+  --c-primary: #1d5de4;
+  --c-primary-deep: #0f3da8;
+  --c-primary-soft: #e9f0ff;
+  --c-text: #17233a;
+  --c-text-sub: #6b7a93;
+  --c-border: #e3e8f0;
+  --c-danger: #e5484d;
+  --c-danger-soft: #fdecec;
+  --c-ok: #18a058;
+  --r-lg: 12px;
+  --r-md: 8px;
+  --r-sm: 4px;
+  --shadow-card: 0 1px 3px rgba(20, 38, 77, 0.08), 0 4px 16px rgba(20, 38, 77, 0.06);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(29, 93, 228, 0.07), transparent 60%),
+    var(--c-bg);
+  color: var(--c-text);
+  font: 14px/1.6 "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  padding: 48px 24px 80px;
+}
+
+.page { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+/* ===== 页头 ===== */
+.hero h1 { font-size: 22px; letter-spacing: 0.5px; }
+.hero h1 em { font-style: normal; color: var(--c-primary); }
+.hero p { color: var(--c-text-sub); margin-top: 6px; max-width: 640px; }
+
+/* ===== 通用卡片区块 ===== */
+.section {
+  background: var(--c-panel);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  padding: 24px;
+}
+.section > h2 {
+  font-size: 15px; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 4px;
+}
+.section > h2 .no {
+  width: 20px; height: 20px; border-radius: 6px;
+  background: var(--c-primary); color: #fff;
+  font-size: 11px; display: inline-flex; align-items: center; justify-content: center;
+}
+.section > .hint { font-size: 12px; color: var(--c-text-sub); margin-bottom: 18px; }
+
+/* ===== 第一区：现状 vs 优化后 ===== */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.compare .cell {
+  border: 1px dashed var(--c-border-strong, #c9d2e0);
+  border-radius: var(--r-md);
+  padding: 16px;
+  background: #fafbfd;
+}
+.compare .cell.after { border-style: solid; border-color: var(--c-border); background: #fff; }
+.compare .tag {
+  display: inline-block; font-size: 11px; font-weight: 600;
+  padding: 1px 8px; border-radius: 999px; margin-bottom: 10px;
+}
+.compare .cell.before .tag { background: var(--c-danger-soft); color: var(--c-danger); }
+.compare .cell.after .tag { background: var(--c-ok-soft, #e8f7ef); color: var(--c-ok); }
+.compare .desc { font-size: 12px; color: var(--c-text-sub); margin-top: 10px; line-height: 1.7; }
+
+/* 原生控件复刻（before 演示）：刻意还原截图里的灰条 */
+.native-replica {
+  display: flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 10px;
+  background: #eceff3; border: 1px solid #dfe3ea; border-radius: 6px;
+  color: #8b95a7; font-size: 12px; font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.native-replica .ico { width: 14px; height: 14px; border-radius: 3px; background: #b7c0cf; }
+.native-replica .bar { flex: 1; height: 4px; border-radius: 2px; background: #d7dce5; position: relative; }
+.native-replica .bar::after {
+  content: ""; position: absolute; left: 0; top: 0; width: 34%; height: 100%;
+  background: #b7c0cf; border-radius: 2px;
+}
+
+/* ===== 第二区：聊天演示流 ===== */
+.chat {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 20px;
+  background: var(--c-bg);
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-border);
+}
+.msg { display: flex; gap: 10px; max-width: 78%; }
+.msg.out { align-self: flex-end; flex-direction: row-reverse; }
+
+.avatar {
+  width: 34px; height: 34px; border-radius: 6px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600; color: #fff;
+  background: var(--c-ok);       /* 客户头像绿，对齐 .avatar.client */
+  user-select: none;
+}
+.msg.out .avatar { background: var(--c-primary); }  /* 坐席头像蓝，对齐 .avatar.agent */
+
+.body { display: flex; flex-direction: column; min-width: 0; }
+.msg.out .body { align-items: flex-end; }
+.name { font-size: 11px; color: var(--c-text-sub); margin-bottom: 2px; user-select: none; }
+.msg.out .name { color: var(--c-primary); font-weight: 600; }
+
+.bubble {
+  padding: 7px 10px;
+  border-radius: var(--r-lg);
+  background: var(--c-panel);
+  border: 1px solid var(--c-border);
+  width: fit-content;
+}
+.msg.in .bubble { border-top-left-radius: 3px; }
+.msg.out .bubble { background: var(--c-primary-soft); border-color: #c9dbff; border-top-right-radius: 3px; }
+
+/* ===== 语音气泡核心 ===== */
+.voice {
+  display: flex; align-items: center; gap: 10px;
+  height: 44px; padding: 0 12px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, transform 0.1s;
+}
+.msg.in .voice { background: #f4f6fa; }
+.msg.out .voice { background: rgba(255, 255, 255, 0.65); }
+.voice:hover { background: var(--c-primary-soft); }
+.msg.out .voice:hover { background: #fff; }
+.voice:active { transform: scale(0.98); }
+
+.v-play {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: none; flex-shrink: 0; cursor: pointer;
+  background: var(--c-primary); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, transform 0.1s;
+}
+.v-play:hover { background: var(--c-primary-deep); }
+.v-play:active { transform: scale(0.92); }
+.v-play svg { width: 12px; height: 12px; display: block; }
+.v-play .i-pause { display: none; }
+.voice.playing .v-play .i-play { display: none; }
+.voice.playing .v-play .i-pause { display: block; }
+
+/* 波形：24 根圆头竖条，进度色 + 底色双层 */
+.v-wave {
+  position: relative;
+  display: flex; align-items: center; gap: 2px;
+  height: 22px; flex: 1;
+}
+.v-wave .bars, .v-wave .bars-fill {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; gap: 2px;
+  overflow: hidden;
+}
+.v-wave .bars-fill { clip-path: inset(0 100% 0 0); transition: none; }
+.v-wave i {
+  width: 3px; border-radius: 2px;
+  background: #c3cede;
+  flex-shrink: 0;
+}
+.v-wave .bars-fill i { background: var(--c-primary); }
+/* 播放中：未读部分轻微律动，已读部分保持主色 */
+.voice.playing .v-wave .bars i:nth-child(odd) { animation: wob 0.7s ease-in-out infinite alternate; }
+@keyframes wob { from { transform: scaleY(0.72); } to { transform: scaleY(1.12); } }
+
+/* 已听完：整条转绿色实心 */
+.voice.done .v-wave .bars-fill i { background: var(--c-ok); }
+.voice.done .v-wave .bars-fill { clip-path: inset(0 0 0 0); }
+
+/* 时长：tabular 数字防抖动 */
+.v-dur {
+  font-size: 12px; color: var(--c-text-sub);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0; min-width: 26px; text-align: right;
+}
+.msg.out .v-dur { color: var(--c-primary-deep); }
+
+/* 未读红点：仅收方向且未听完 */
+.v-unread {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--c-danger);
+  flex-shrink: 0; margin-left: -2px;
+}
+.voice.done .v-unread, .voice.playing .v-unread { visibility: hidden; }
+
+/* 过期态：降饱和 + 虚线，绝不伪装成可播 */
+.voice.expired {
+  cursor: not-allowed;
+  background: #f2f3f6;
+  border: 1px dashed var(--c-border);
+  color: var(--c-text-sub);
+}
+.voice.expired:hover { background: #f2f3f6; }
+.v-exp-icon {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  background: #dde1e9; color: #8b95a7;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+}
+.v-exp-text { font-size: 12px; line-height: 1.4; }
+.v-exp-text small { display: block; font-size: 11px; color: #9aa4b5; }
+
+/* 每条 mock 的注释行 */
+.note { font-size: 11px; color: #9aa4b5; margin: 2px 4px 0; }
+
+/* ===== 第三区：状态规格 ===== */
+.spec-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.spec {
+  border: 1px solid var(--c-border); border-radius: var(--r-md);
+  padding: 12px; background: #fafbfd;
+}
+.spec .swatch { margin-bottom: 10px; }
+.spec h3 { font-size: 13px; margin-bottom: 4px; }
+.spec p { font-size: 11px; color: var(--c-text-sub); line-height: 1.7; }
+.spec .scope { display: inline-block; margin-top: 8px; font-size: 10px; color: var(--c-primary); background: var(--c-primary-soft); border-radius: 3px; padding: 1px 6px; }
+
+/* ===== 第四区：技术链路 ===== */
+.flow { display: flex; flex-direction: column; gap: 0; }
+.flow .step {
+  display: flex; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--c-border);
+}
+.flow .step:last-child { border-bottom: none; }
+.flow .n {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  background: var(--c-navy, #14264d); color: #fff;
+  font-size: 11px; display: flex; align-items: center; justify-content: center;
+}
+.flow b { font-size: 13px; }
+.flow p { font-size: 12px; color: var(--c-text-sub); margin-top: 2px; }
+.flow code {
+  font: 11px/1.6 Consolas, "Courier New", monospace;
+  background: var(--c-primary-soft); color: var(--c-primary-deep);
+  border-radius: 3px; padding: 0 4px;
+}
+
+@media (max-width: 720px) {
+  .compare, .spec-grid { grid-template-columns: 1fr; }
+  .msg { max-width: 92%; }
+}

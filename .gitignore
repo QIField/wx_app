@@ -25,6 +25,10 @@ backups/
 # 媒体缓存：中间方下载接口拉回的图片/文件/视频/语音落盘
 backend/media/
 
+# 本地转码工具与导出的媒体文件（二进制，体积大不入库）
+tools/
+downloads/
+
 # ===== 前端 Vue3 / Node =====
 node_modules/
 frontend/dist/

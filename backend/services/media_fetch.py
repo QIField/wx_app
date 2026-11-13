@@ -13,12 +13,15 @@ import mimetypes
 import threading
 import xml.etree.ElementTree as ET
 
+from flask import current_app
+
 from backend.adapter import client as middle_client
 from backend.adapter.client import MiddleApiError
 from backend.config import MEDIA_DIR
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.message import Message
+from backend.services import voice_codec
 
 # msg_type → 中间方下载接口（V2 新增，无 uuid；返回 JSON+CDN 地址，client 内部做二次 GET）
 DOWNLOAD_ACTION = {
@@ -86,12 +89,15 @@ def cached_path(msg):
 
     图片兼容历史缓存：旧的 {id}_q1/_t1 等按档位拆分的文件存在也视为已下载
     （旧版三档内容相同，任取一份即可）。
+    语音优先 mp3：转码产物已存在时直接返回，silk 原件不再回源。
     """
     cache_dir = cache_dir_for(msg)
     if not cache_dir.is_dir():
         return None
     if msg.msg_type == Message.MSG_IMAGE:
         patterns = (f"{msg.id}.*", f"{msg.id}_q*.*", f"{msg.id}_t*.*")
+    elif msg.msg_type == Message.MSG_VOICE:
+        patterns = (f"{msg.id}.mp3", f"{msg.id}.*")  # mp3 在前：转码产物优先于 silk 原件
     else:
         patterns = (f"{msg.id}.*",)
     for pattern in patterns:
@@ -105,18 +111,19 @@ def fetch_and_cache(msg):
     """媒体缓存统一入口：已缓存直接返回；否则下载并落盘后返回缓存路径。
 
     - 图片按 1→2→3 档逐级降级，成功即停，每条消息只落一张。
+    - 语音落盘 silk 后即时转码 mp3（浏览器播不了 silk），失败降级返回原 silk。
     - 失败抛 MiddleApiError；同设备下载由设备锁排队，锁内二次查缓存避免重复下载。
     """
     cached = cached_path(msg)
     if cached is not None:
-        return cached
+        return _voice_served(msg, cached)
 
     openid = _openid_of(msg)
     with _device_lock(openid):
         # 排到队首再查一次：等锁期间可能已被前面排队的请求下载好
         cached = cached_path(msg)
         if cached is not None:
-            return cached
+            return _voice_served(msg, cached)
 
         if msg.msg_type == Message.MSG_IMAGE:
             data, content_type = _download_image(msg, openid)
@@ -129,7 +136,7 @@ def fetch_and_cache(msg):
         if not data:
             raise MiddleApiError("媒体内容为空")
 
-        content_type, ext = sniff_type(data, content_type)
+        _, ext = sniff_type(data, content_type)  # 按魔数定扩展名；content_type 后续不再使用
         if ext == ".json":
             # 实测错误报文会被当文件拉回（如「下载任务已达上限」），
             # 落盘会冒充媒体在页面裂图，直接按失败处理
@@ -137,6 +144,23 @@ def fetch_and_cache(msg):
         path = cache_path(msg, ext)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+    return _voice_served(msg, path)
+
+
+def _voice_served(msg, path):
+    """语音消息的出口：优先返回转码后的 mp3；只有 silk 原件时补转一次。
+
+    - mp3 已在手（缓存或刚转完）直接返回。
+    - 只有 silk：调 voice_codec 转出 {id}.mp3；工具缺失/转码失败降级返回原 silk
+      （浏览器播不了 silk，但至少文件链路不断，装好工具后下次请求自动补转）。
+    - 非语音消息原样透传（此函数对其他类型是直通阀）。
+    """
+    if msg.msg_type != Message.MSG_VOICE or path.suffix == ".mp3":
+        return path
+    mp3 = voice_codec.silk_to_mp3(path, cache_path(msg, ".mp3"))
+    if mp3 is not None:
+        return mp3
+    current_app.logger.warning("语音 %s 转码失败，降级返回原始 silk", msg.id)
     return path
 
 
@@ -197,9 +221,10 @@ def sniff_type(data, fallback):
         return "image/gif", ".gif"
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "image/webp", ".webp"
-    if data.startswith(b"#!SILK_V3"):
+    if b"#!SILK_V3" in data[:16]:
+        # 微信语音常在魔数前多 1~2 字节长度头（如 02 23），startswith 会漏判成 .bin
         return "audio/silk", ".silk"
-    if data.startswith(b"#!AMR"):
+    if b"#!AMR" in data[:16]:
         return "audio/amr", ".amr"
     if len(data) > 12 and data[4:8] == b"ftyp":
         return "video/mp4", ".mp4"

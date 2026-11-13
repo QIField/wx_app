@@ -13,6 +13,7 @@ import { mediaUrlOf, messageMediaUrlOf } from '../utils/media'
 import { displayNameOf } from '../utils/format'
 import AnonAvatar from './AnonAvatar.vue'
 import TransferCard from './TransferCard.vue'
+import VoiceBubble from './VoiceBubble.vue'
 
 const props = defineProps({
   msg: { type: Object, required: true }, // timeline 展开后的单条消息
@@ -189,7 +190,8 @@ function onMenu(e) {
             @click="emit('preview', mediaSrc)"
           />
         </span>
-        <audio v-else-if="msg.msg_type === 6" class="media audio" :src="mediaUrlOf(msg)" controls preload="none"></audio>
+        <!-- 语音：自绘气泡（后端转码 mp3 后可真正出声；原生 audio 解不了 SILK） -->
+        <VoiceBubble v-else-if="msg.msg_type === 6" :msg="msg" />
         <video v-else-if="msg.msg_type === 4" class="media video" :src="mediaSrc" controls preload="metadata" @loadeddata="emit('mediaload')"></video>
         <span v-else-if="msg.msg_type === 7" class="ph ph-emoji" :class="{ on: loaded }">
           <img
@@ -330,7 +332,6 @@ function onMenu(e) {
 .media { display: block; }
 .media.img { display: block; max-width: 200px; max-height: 200px; border-radius: var(--r-sm); cursor: zoom-in; }
 .media.emoji { width: 120px; }
-.media.audio { width: 240px; height: 36px; }
 .media.video { max-width: 240px; border-radius: var(--r-sm); }
 
 /* 媒体占位：shimmer 常驻底层不撤（图片画出来盖住它），全程没有"空尺寸框"阶段 */

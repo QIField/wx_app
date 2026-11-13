@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>语音气泡优化方案 · 微信客服聊天系统</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+
+    <!-- 页头 -->
+    <header class="hero">
+      <h1>语音消息气泡 · <em>从「0 秒假控件」到「会响的微信式语音」</em></h1>
+      <p>根因：微信语音是 SILK 编码，浏览器解不了，原生 &lt;audio&gt; 只能显示 0:00/0:00。
+         方案 = 后端转码 mp3 + 前端自绘气泡。下面第二区的第一条是<b>真实转码产物</b>，点击即可听到声音。</p>
+    </header>
+
+    <!-- 一、现状 vs 优化后 -->
+    <section class="section">
+      <h2><span class="no">1</span>现状 vs 优化后</h2>
+      <p class="hint">左：截图里的原生控件（Chrome 拒绝解码 SILK）。右：自绘语音气泡。</p>
+      <div class="compare">
+        <div class="cell before">
+          <span class="tag">现状 · 不可播</span>
+          <div class="native-replica">
+            <span class="ico"></span><span>0:00 / 0:00</span><span class="bar"></span><span>───</span>
+          </div>
+          <p class="desc">原生 &lt;audio controls&gt;：样式与工作台割裂、时长恒为 0、下载失败的语音也照样渲染成可播假象。</p>
+        </div>
+        <div class="cell after">
+          <span class="tag">优化后 · 可播</span>
+          <div class="msg in" style="max-width:100%">
+            <div class="body" style="align-items:stretch">
+              <div class="bubble">
+                <div class="voice" data-id="1" style="width:200px">
+                  <button class="v-play" aria-label="播放">
+                    <svg class="i-play" viewBox="0 0 12 12"><path d="M3 1.5v9l7-4.5z" fill="currentColor"/></svg>
+                    <svg class="i-pause" viewBox="0 0 12 12"><path d="M2.5 1.5h2.6v9H2.5zM6.9 1.5h2.6v9H6.9z" fill="currentColor"/></svg>
+                  </button>
+                  <div class="v-wave"><div class="bars"></div><div class="bars-fill"></div></div>
+                  <span class="v-dur">5″</span>
+                  <span class="v-unread"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="desc">播放钮 + 波形 + 时长 + 未读点，四态可感知；样式取自工作台同一套 tokens。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 二、交互演示 -->
+    <section class="section">
+      <h2><span class="no">2</span>交互演示（第一条为真实转码语音）</h2>
+      <p class="hint">点击气泡或圆钮播放；再次点击暂停；播放新的一条会自动停掉上一条；听完自动标记「已听完」并点亮绿波形。</p>
+      <div class="chat" id="chat"></div>
+    </section>
+
+    <!-- 三、状态规格 -->
+    <section class="section">
+      <h2><span class="no">3</span>气泡四态规格</h2>
+      <p class="hint">每个状态给出「视觉 → 数据 → 交互」约定，Vue 组件按此实现。</p>
+      <div class="spec-grid">
+        <div class="spec">
+          <div class="swatch">
+            <div class="voice" style="width:150px" data-static="ready">
+              <button class="v-play" tabindex="-1"><svg class="i-play" viewBox="0 0 12 12"><path d="M3 1.5v9l7-4.5z" fill="currentColor"/></svg><svg class="i-pause" viewBox="0 0 12 12"><path d="M2.5 1.5h2.6v9H2.5zM6.9 1.5h2.6v9H6.9z" fill="currentColor"/></svg></button>
+              <div class="v-wave"><div class="bars"></div><div class="bars-fill" style="clip-path:inset(0 100% 0 0)"></div></div>
+              <span class="v-dur">8″</span><span class="v-unread"></span>
+            </div>
+          </div>
+          <h3>待播 ready</h3>
+          <p>灰波形 + 红色未读点 + 蓝色圆钮；宽度按时长 90~260px 线性映射。</p>
+          <span class="scope">payload.voicelength</span>
+        </div>
+        <div class="spec">
+          <div class="swatch">
+            <div class="voice playing" style="width:150px" data-static="playing">
+              <button class="v-play" tabindex="-1"><svg class="i-play" viewBox="0 0 12 12"><path d="M3 1.5v9l7-4.5z" fill="currentColor"/></svg><svg class="i-pause" viewBox="0 0 12 12"><path d="M2.5 1.5h2.6v9H2.5zM6.9 1.5h2.6v9H6.9z" fill="currentColor"/></svg></button>
+              <div class="v-wave"><div class="bars"></div><div class="bars-fill" style="clip-path:inset(0 62% 0 0)"></div></div>
+              <span class="v-dur">8″</span><span class="v-unread"></span>
+            </div>
+          </div>
+          <h3>播放中 playing</h3>
+          <p>钮变暂停；主色进度随 timeupdate 扫过波形；未读部分奇数条轻微律动。</p>
+          <span class="scope">audio.currentTime</span>
+        </div>
+        <div class="spec">
+          <div class="swatch">
+            <div class="voice done" style="width:150px" data-static="done">
+              <button class="v-play" tabindex="-1"><svg class="i-play" viewBox="0 0 12 12"><path d="M3 1.5v9l7-4.5z" fill="currentColor"/></svg><svg class="i-pause" viewBox="0 0 12 12"><path d="M2.5 1.5h2.6v9H2.5zM6.9 1.5h2.6v9H6.9z" fill="currentColor"/></svg></button>
+              <div class="v-wave"><div class="bars"></div><div class="bars-fill"></div></div>
+              <span class="v-dur">8″</span><span class="v-unread"></span>
+            </div>
+          </div>
+          <h3>已听完 done</h3>
+          <p>波形整体转绿（对齐 --c-ok 语义色）、未读点熄灭；点击可复听。</p>
+          <span class="scope">ended 事件</span>
+        </div>
+        <div class="spec">
+          <div class="swatch">
+            <div class="voice expired" style="width:150px" data-static="expired">
+              <span class="v-exp-icon">✕</span>
+              <span class="v-exp-text">语音已过期</span>
+            </div>
+          </div>
+          <h3>已过期 expired</h3>
+          <p>中间方 ret=-2 / 下载失败时的诚实态：虚线灰卡，明确告知不可恢复。</p>
+          <span class="scope">media 接口错误</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 四、技术链路 -->
+    <section class="section">
+      <h2><span class="no">4</span>让语音「响起来」的技术链路</h2>
+      <p class="hint">三层改动，缺一层就还是 0 秒。</p>
+      <div class="flow">
+        <div class="step">
+          <span class="n">1</span>
+          <div>
+            <b>收得下 —— 即时预下载（已有，保持）</b>
+            <p>微信语音在服务端只留几天，<code>sync/media_predownload.py</code> 收到消息即拉回缓存；历史上没抢到的 32 条已永久过期，无法挽回。</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="n">2</span>
+          <div>
+            <b>解得开 —— 后端转码 SILK → mp3（核心新增）</b>
+            <p>复用已装好的 <code>tools/decoder.exe</code> + <code>tools/ffmpeg.exe</code>（即 <code>scripts/silk_to_mp3.py</code> 的两步逻辑）：
+            <code>fetch_and_cache()</code> 落盘 silk 后立刻转出 <code>{id}.mp3</code>，转码失败降级返回原 silk；部署机需随包携带 tools 或装 ffmpeg。</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="n">3</span>
+          <div>
+            <b>播得出 —— 前端自绘气泡组件（本原型）</b>
+            <p><code>MessageRow.vue</code> 的 <code>&lt;audio controls&gt;</code> 换成 VoiceBubble 组件：播放地址仍走
+            <code>/api/messages/{id}/media?token=</code>（返回 audio/mpeg），时长取 <code>payload.voicelength</code>，四态按第三区规格实现，单实例播放互斥。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script>
+    /* ===== 交互逻辑（原型桩）：渲染气泡 + 单实例播放 ===== */
+    const chat = document.getElementById("chat");
+    const BAR_COUNT = 24;
+    // 波形用确定性伪随机（同一 id 每次渲染形状一致，避免重排跳变）
+    function barsFor(id, i) {
+      const x = Math.sin(id * 37.7 + i * 5.3) * 0.5 + 0.5;
+      return 6 + Math.round(x * 14); // 6~20px
+    }
+    function waveHtml(id) {
+      let bars = "", fill = "";
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const h = barsFor(id, i);
+        bars += `<i style="height:${h}px"></i>`;
+        fill += `<i style="height:${h}px"></i>`;
+      }
+      return `<div class="v-wave"><div class="bars">${bars}</div><div class="bars-fill">${fill}</div></div>`;
+    }
+    function fmt(sec) { return Math.round(sec) + "″"; }
+
+    function bubbleHtml(m) {
+      if (m.state === "expired") {
+        return `<div class="bubble"><div class="voice expired">
+          <span class="v-exp-icon">✕</span>
+          <span class="v-exp-text">语音已过期</span>
+        </div></div>`;
+      }
+      const w = Math.min(260, 90 + m.duration * 12);
+      return `<div class="bubble"><div class="voice" data-id="${m.id}" style="width:${w}px">
+        <button class="v-play" aria-label="播放语音">
+          <svg class="i-play" viewBox="0 0 12 12"><path d="M3 1.5v9l7-4.5z" fill="currentColor"/></svg>
+          <svg class="i-pause" viewBox="0 0 12 12"><path d="M2.5 1.5h2.6v9H2.5zM6.9 1.5h2.6v9H6.9z" fill="currentColor"/></svg>
+        </button>
+        ${waveHtml(m.id)}
+        <span class="v-dur">${fmt(m.duration)}</span>
+        <span class="v-unread"></span>
+      </div></div>`;
+    }
+
+    function render() {
+      chat.innerHTML = window.MOCK_VOICES.map((m) => `
+        <div class="msg ${m.dir}">
+          <div class="avatar">${m.avatarText}</div>
+          <div class="body">
+            <span class="name">${m.sender}</span>
+            ${bubbleHtml(m)}
+            <span class="note">${m.note}</span>
+          </div>
+        </div>`).join("");
+
+      // 组装真实音频 + 交互
+      let current = null; // 单实例：同一时刻只有一条在响
+      chat.querySelectorAll(".voice[data-id]").forEach((el) => {
+        const m = window.MOCK_VOICES.find((x) => x.id === Number(el.dataset.id));
+        const fill = el.querySelector(".bars-fill");
+        const audio = m.audio ? new Audio(window.VoiceApi.getVoiceUrl(m)) : null;
+        if (audio) audio.preload = "metadata";
+
+        const setProgress = (p) => {
+          fill.style.clipPath = `inset(0 ${100 - p * 100}% 0 0)`;
+        };
+
+        function toggle() {
+          if (!audio) { // 无真实音频的 mock：走模拟进度演示交互
+            simulate();
+            return;
+          }
+          // 单实例互斥：stop() 统一收敛两种播放器（真实 audio / 模拟进度）
+          if (current && current.stop) current.stop();
+          if (el.classList.contains("playing")) return; // 刚才正在响，本次点击=暂停
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+          el.classList.add("playing");
+          current = { stop() { audio.pause(); el.classList.remove("playing"); } };
+        }
+
+        // 无真实文件的条目：定时器模拟进度，纯演示四态交互
+        function simulate() {
+          if (el.dataset.simulating) { // 二次点击=暂停
+            if (current && current.stop) current.stop();
+            return;
+          }
+          if (current && current.stop) current.stop();
+          el.classList.add("playing");
+          let t = 0;
+          const step = 50 / (m.duration * 1000);
+          const timer = setInterval(() => {
+            t += step;
+            setProgress(Math.min(1, t));
+            if (t >= 1) {
+              clearInterval(timer);
+              delete el.dataset.simulating;
+              el.classList.remove("playing");
+              el.classList.add("done");
+              el.querySelector(".v-unread").style.visibility = "hidden";
+              setProgress(1);
+              if (current && current.stop === stopSim) current = null;
+            }
+          }, 50);
+          const stopSim = () => {
+            clearInterval(timer);
+            delete el.dataset.simulating;
+            el.classList.remove("playing");
+            if (current && current.stop === stopSim) current = null;
+          };
+          el.dataset.simulating = "1";
+          current = { stop: stopSim };
+        }
+
+        el.addEventListener("click", toggle);
+        if (audio) {
+          audio.addEventListener("timeupdate", () => {
+            // mp3 元数据未加载时 duration 可能是 Infinity/NaN，退回 mock 时长兜底
+            const dur = audio.duration && isFinite(audio.duration) ? audio.duration : m.duration;
+            setProgress(dur > 0 ? audio.currentTime / dur : 0);
+          });
+          audio.addEventListener("ended", () => {
+            el.classList.remove("playing");
+            el.classList.add("done"); // 听完标记：波形转绿、未读点熄灭
+            setProgress(1);
+            current = null;
+          });
+        }
+      });
+    }
+
+    render();
+
+    // 静态规格卡里的小样也补上波形条（bars 与 bars-fill 同 seed：两层高度一致）
+    document.querySelectorAll("[data-static]").forEach((el) => {
+      const id = { ready: 11, playing: 22, done: 33, expired: 44 }[el.dataset.static] || 1;
+      [el.querySelector(".bars"), el.querySelector(".bars-fill")].forEach((layer) => {
+        if (!layer) return;
+        let html = "";
+        for (let i = 0; i < BAR_COUNT; i++) html += `<i style="height:${barsFor(id, i)}px"></i>`;
+        layer.innerHTML = html;
+      });
+    });
+  </script>
+</body>
+</html>
