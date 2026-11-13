@@ -11,13 +11,20 @@ export function mediaUrlOf(m) {
 }
 
 /** 消息展示/预览统一取址：自己刚发的媒体 payload.path 是本服务上传的相对地址，
- *  直接用它（媒体接口走中间方下载链路，发出的消息拉不到）；其余走媒体接口。 */
+ *  直接用它（媒体接口走中间方下载链路，发出的消息拉不到）；其余走媒体接口。
+ *  例外：微信内置表情偶发以纯 URL 形式入库成图片消息（如
+ *  wxa.wxs.qq.com/wxad-design/emojis/smiley_1.png），中间方按 XML 下载永远
+ *  解析失败——这类消息直接用公网 URL 渲染。 */
 export function messageMediaUrlOf(m) {
-  return m?.payload?.path || mediaUrlOf(m)
+  if (m?.payload?.path) return m.payload.path
+  if (m?.msg_type === 2 && /^https?:\/\/\S+$/.test(m?.content || "")) return m.content
+  return mediaUrlOf(m)
 }
 
 /** B方案：打开会话后后台预取图片（媒体接口 max-age=86400，进浏览器磁盘缓存），
- *  之后滑动历史时秒出。静默失败、fire-and-forget，不阻塞任何交互。 */
+ *  之后滑动历史时秒出。静默失败、fire-and-forget，不阻塞任何交互。
+ *  统一走 messageMediaUrlOf：刚发的本地图与纯 URL 表情也一并预热，
+ *  避免预热请求打到媒体接口白白触发中间方下载。 */
 export function prewarmThumbs(messages, limit = 30) {
   if (!Array.isArray(messages)) return
   messages
@@ -25,6 +32,6 @@ export function prewarmThumbs(messages, limit = 30) {
     .slice(0, limit)
     .forEach((m) => {
       const img = new Image()
-      img.src = mediaUrlOf(m)
+      img.src = messageMediaUrlOf(m)
     })
 }

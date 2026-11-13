@@ -8,7 +8,7 @@ import sys
 # 宝塔等面板以脚本方式直接运行本文件时，backend 包不在搜索路径里，补上项目根目录
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
@@ -180,6 +180,7 @@ def init_scheduler(app: Flask):
     from backend.sync.confirm_worker import confirm_once
     from backend.sync.message_sync import sync_once
     from backend.sync import profile_jobs
+    from backend.sync.media_predownload import sweep_missing_media
 
     def scheduled(name, fn):
         """包装定时任务：给出站日志标记触发来源。"""
@@ -237,6 +238,16 @@ def init_scheduler(app: Flask):
         minutes=5,
         id="risk_sweep",
         max_instances=1,
+    )
+    # 媒体预下载兜底扫描：待下载队列在进程内存里（重启即丢），定时补下载
+    # 近 24 小时入库但还没缓存的消息，保证前端打开会话尽量命中缓存
+    sched.add_job(
+        scheduled("media_sweep", sweep_missing_media),
+        "interval",
+        minutes=10,
+        id="media_predownload_sweep",
+        max_instances=1,
+        next_run_time=datetime.now() + timedelta(seconds=30),
     )
     profile_jobs.ensure_worker(app)  # 资料同步唯一 worker，先于定时任务启动
     sched.start()

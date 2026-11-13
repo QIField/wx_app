@@ -12,6 +12,7 @@
 """
 import threading
 import time
+from datetime import datetime, timedelta
 
 from flask import current_app
 
@@ -86,3 +87,33 @@ def predownload_ids(message_ids):
             media_fetch.fetch_and_cache(msg)
         except MiddleApiError as exc:
             current_app.logger.warning("媒体预下载失败 消息 %s：%s", msg.id, exc)
+
+
+# 兜底扫描窗口与单轮上限：待下载队列放在进程内存里（重启即丢），漏网的消息
+# 靠定时扫描"最近入库但还没落盘缓存"的媒体补下载，自愈不依赖队列存活
+SWEEP_WINDOW_HOURS = 24
+SWEEP_LIMIT = 500
+
+
+def sweep_missing_media(app):
+    """定时兜底：补下载最近入库但尚未落盘缓存的媒体。
+
+    每轮预算沿用 BUDGET_SECONDS（超出的留给下一轮，缓存查重保证不重复下载），
+    与入队 worker 并发时由设备锁 + 锁内二次查缓存兜住，不会重复下载。
+    """
+    since = datetime.now() - timedelta(hours=SWEEP_WINDOW_HOURS)
+    with app.app_context():
+        rows = (
+            Message.query.filter(
+                Message.msg_type.in_(media_fetch.DOWNLOAD_ACTION),
+                Message.deleted_at.is_(None),
+                Message.create_time >= since,
+            )
+            .order_by(Message.id.desc())
+            .limit(SWEEP_LIMIT)
+            .all()
+        )
+        todo = [m.id for m in rows if media_fetch.cached_path(m) is None]
+        if todo:
+            current_app.logger.info("媒体兜底扫描：补下载 %d 条（近 %d 小时入库）", len(todo), SWEEP_WINDOW_HOURS)
+            predownload_ids(todo)

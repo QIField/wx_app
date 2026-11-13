@@ -33,9 +33,11 @@ SECRET_KEY = os.getenv("SECRET_KEY", "wxcs-dev-secret-key-change-me")
 TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "12"))
 
 # 接口限流（次/分钟，按桶分别控制；见 services/risk.py）
+# 媒体桶不能低于「打开会话的合法突发」：一次打开最多并发 30 张图（可见气泡 +
+# 预热请求，URL 去重），切几个会话就轻松破百——30 会把正常浏览当刷接口拦成 429
 API_LIMIT_PER_MINUTE = int(os.getenv("API_LIMIT_PER_MINUTE", "120"))
 MESSAGES_LIMIT_PER_MINUTE = int(os.getenv("MESSAGES_LIMIT_PER_MINUTE", "60"))
-MEDIA_LIMIT_PER_MINUTE = int(os.getenv("MEDIA_LIMIT_PER_MINUTE", "30"))
+MEDIA_LIMIT_PER_MINUTE = int(os.getenv("MEDIA_LIMIT_PER_MINUTE", "120"))
 
 # 登录失败锁定：同一 IP+账号在窗口内失败达到上限后，暂停登录
 LOGIN_MAX_FAILS = int(os.getenv("LOGIN_MAX_FAILS", "5"))
