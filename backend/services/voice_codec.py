@@ -9,6 +9,8 @@ decoder（silk-v3-decoder）把 silk 解成裸 PCM → ffmpeg 按 s16le/单声�
 任一缺失或转码失败都返回 None（不抛错）：调用方降级返回原始 silk，
 保证「工具没装」只影响能不能播，不影响媒体链路本身。
 """
+from __future__ import annotations
+
 import os
 import shutil
 import subprocess
