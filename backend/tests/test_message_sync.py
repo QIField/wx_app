@@ -169,6 +169,7 @@ def test_sync_broadcast_masks_wxid(app, monkeypatch):
     assert "sender_wxid" not in ev
     assert ev["sender_name"].startswith("匿名 ")  # 存库快照是 wxid 原文，推送前必须匿名化
     assert ev["sender_avatar"] is None            # 无昵称 → 头像一并匿名
+    assert ev["sender_anon"] is True              # 真匿名显式标记（WS 与 HTTP 出参同口径）
     assert ev["sender_alias"]
 
 

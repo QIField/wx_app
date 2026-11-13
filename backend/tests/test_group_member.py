@@ -21,9 +21,11 @@ def clean_profile_state():
     """清掉群资料模块的全局任务登记，避免用例间互相污染 _pending/_fail_counts。"""
     group_profile._pending.clear()
     group_profile._fail_counts.clear()
+    group_member.reset_avatar_fails()
     yield
     group_profile._pending.clear()
     group_profile._fail_counts.clear()
+    group_member.reset_avatar_fails()
 
 
 @pytest.fixture
@@ -214,6 +216,60 @@ def test_refresh_avatars_no_missing_skips_query(app, monkeypatch):
     assert group_member.refresh_avatars_of_device("o1") is False
 
 
+def test_refresh_avatars_chunks_by_20(app, monkeypatch):
+    """补拉按 brief_info 单次上限 20 分批下发，不再一次塞 40 个超限。"""
+    for i in range(40):
+        _member(wxid=f"wxid_m{i:02d}", nickname=f"成员{i}", avatar=None)
+    calls = []
+    monkeypatch.setattr(
+        group_member, "query_brief_infos",
+        lambda wxids, openid="": calls.append(list(wxids)) or {},
+    )
+
+    group_member.refresh_avatars_of_device("dev01")
+
+    assert len(calls) == 2                       # 40 个成员 → 恰好两批
+    assert all(len(c) <= group_member.BRIEF_BATCH for c in calls)
+    assert sorted(calls[0] + calls[1]) == sorted(f"wxid_m{i:02d}" for i in range(40))
+
+
+def test_refresh_avatars_skips_permanently_failed(app, monkeypatch):
+    """连续补不到头像的成员达到失败上限后跳过：队列头不被死名额卡住（饥饿根因回归）。"""
+    for i in range(3):
+        _member(wxid=f"wxid_dead{i}", nickname=f"死名额{i}", avatar=None)
+    calls = []
+
+    def fake_brief(wxids, openid=""):
+        calls.append(list(wxids))
+        # 死名额成员中间方永远不给头像；活成员正常返回（模拟普通 wxid）
+        return {
+            "wxid_alive": {"nickname": "活成员", "head_img_url": "http://a/ok.jpg"},
+        }
+
+    monkeypatch.setattr(group_member, "query_brief_infos", fake_brief)
+    for _ in range(group_member.MAX_AVATAR_FAILS):
+        group_member.refresh_avatars_of_device("dev01")
+        db.session.commit()
+    assert all(
+        group_member._avatar_fails[("dev01", f"wxid_dead{i}")] == group_member.MAX_AVATAR_FAILS
+        for i in range(3)
+    )
+
+    # 5 轮失败后新收割一个普通成员（id 更大，排在死名额后面）
+    _member(wxid="wxid_alive", nickname="活成员", avatar=None)
+    assert group_member.refresh_avatars_of_device("dev01") is True
+    db.session.commit()
+
+    # 死名额成员不再进批次（让位给后面补得到的成员），活成员成功补到
+    assert calls[-1] == ["wxid_alive"]
+    row = GroupMember.query.filter_by(wxid="wxid_alive").one()
+    assert row.avatar == "http://a/ok.jpg"
+    # 死名额成员仍保留缺额（跳过 ≠ 删除），进程重启计数清零后会再尝试
+    assert GroupMember.query.filter(
+        GroupMember.wxid.like("wxid_dead%"), GroupMember.avatar.is_(None)
+    ).count() == 3
+
+
 # ---------- 消息触发路径：收割后立即补头像 ----------
 
 def test_refresh_groups_now_fills_avatars_immediately(app, group_conv, monkeypatch):
@@ -270,6 +326,7 @@ def test_refresh_groups_now_avatar_failure_not_blocking(app, group_conv, monkeyp
 def test_group_messages_api_resolves_sender(client, app, group_conv):
     """群消息 API：sender_name/sender_avatar 实时关联群成员名册。"""
     _member(wxid="wxid_a", nickname="成员甲", avatar="http://a/a.jpg")
+    _member(wxid="wxid_openim", nickname="卢冲", avatar=None)  # @openim：有名字没头像
     db.session.add(Message(
         conversation_id=group_conv.id, msg_type=Message.MSG_TEXT,
         direction=Message.DIR_IN, sender_wxid="wxid_a", sender_name="wxid_a",
@@ -279,6 +336,11 @@ def test_group_messages_api_resolves_sender(client, app, group_conv):
         conversation_id=group_conv.id, msg_type=Message.MSG_TEXT,
         direction=Message.DIR_IN, sender_wxid="wxid_ghost", sender_name="wxid_ghost",
         content="不在名册", create_time=datetime_now(),
+    ))
+    db.session.add(Message(
+        conversation_id=group_conv.id, msg_type=Message.MSG_TEXT,
+        direction=Message.DIR_IN, sender_wxid="wxid_openim", sender_name="wxid_openim",
+        content="我有名字", create_time=datetime_now(),
     ))
     db.session.commit()
 
@@ -290,10 +352,16 @@ def test_group_messages_api_resolves_sender(client, app, group_conv):
     known = by_content["各位看过来"]
     assert known["sender_name"] == "成员甲"      # 名册里的成员 → 昵称
     assert known["sender_avatar"] == "http://a/a.jpg"
+    assert known["sender_anon"] is False
     ghost = by_content["不在名册"]
     assert ghost["sender_name"].startswith("匿名 ")  # 不在名册 → 匿名编码兜底（脱敏契约）
     assert ghost["sender_avatar"] is None
+    assert ghost["sender_anon"] is True          # 真匿名显式标记，前端据此画匿名图标
     assert ghost["sender_alias"]
+    named = by_content["我有名字"]
+    assert named["sender_name"] == "卢冲"
+    assert named["sender_avatar"] is None        # @openim 数据源无头像
+    assert named["sender_anon"] is False         # 但有名字 → 不算匿名，前端走首字兜底
 
 
 def test_single_messages_api_unaffected(client, app):

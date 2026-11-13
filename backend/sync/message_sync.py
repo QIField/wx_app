@@ -116,7 +116,6 @@ def broadcast_messages(pushed, openid=""):
     if not pushed:
         return
     from backend.models.conversation import Conversation
-    from backend.services import anonymize
     from backend.services.quote_media import with_media_id
     from backend.sync import group_member
     from backend.ws import hub
@@ -130,9 +129,6 @@ def broadcast_messages(pushed, openid=""):
 
     for saved in pushed:
         info = sender_maps.get(saved["conversation_id"], {}).get(saved["sender_wxid"] or "")
-        nickname = anonymize.resolved_name(
-            (info or {}).get("nickname"), saved["sender_wxid"])
-        snapshot = anonymize.resolved_name(saved["sender_name"], saved["sender_wxid"])
         hub.broadcast("new_message", {
             "message_id": saved["message_id"],
             "conversation_id": saved["conversation_id"],
@@ -142,9 +138,7 @@ def broadcast_messages(pushed, openid=""):
             "content": saved["content"],
             "payload": with_media_id(saved.get("payload") or {}, saved.get("content")),  # 引用图片带 media_id
             "summary": saved.get("summary") or "",  # 会话列表摘要：后端算好的，前端直接用
-            "sender_name": nickname or snapshot or anonymize.anon_label(saved["sender_wxid"]),
-            "sender_avatar": (info or {}).get("avatar") if nickname else None,
-            "sender_alias": anonymize.alias_of(saved["sender_wxid"]),
+            **group_member.sender_view(saved["sender_wxid"], info, saved["sender_name"]),
             "create_time": saved["create_time"].strftime("%Y-%m-%d %H:%M:%S"),
         })
 

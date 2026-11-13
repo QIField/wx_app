@@ -7,7 +7,6 @@
 import time
 
 from flask import Blueprint, current_app, g, jsonify, request
-from pypinyin import Style, lazy_pinyin
 from sqlalchemy import select
 
 from backend.extensions import db
@@ -18,7 +17,9 @@ from backend.models.message import Message
 from backend.services import anonymize, conversations as conversation_service
 from backend.services.auth import require_role
 from backend.services.devices import active_openid_for, user_openids
+from backend.services.pinyin import full_pinyin, initials as pinyin_initials
 from backend.services.quote_media import with_media_id
+from backend.sync import group_member
 
 bp = Blueprint("conversations", __name__)
 
@@ -229,8 +230,6 @@ def list_messages(conversation_id):
     rows.reverse()  # 库里倒序取最新一页，翻转成正序给前端
 
     # 群消息发言人资料：存库是 wxid 原文，展示时实时关联群成员名册（单聊返回空映射）
-    from backend.sync import group_member
-
     sender_map = group_member.sender_map_for(conv, [m.sender_wxid for m in rows])
 
     has_more = len(rows) == page_size
@@ -277,20 +276,21 @@ def list_members(conversation_id):
 def _member_json(m):
     """群成员出参：昵称/头像走现有脱敏规则，附全拼与首字母供 @ 搜索。"""
     name = anonymize.resolved_name(m.nickname, m.wxid)
-    pinyin = "".join(lazy_pinyin(name)) if name else ""
-    initials = "".join(lazy_pinyin(name, style=Style.FIRST_LETTER)) if name else ""
     return {
         "id": m.id,
         "name": name,
         "avatar": anonymize.avatar_or_none(name, m.avatar),
         "alias": anonymize.alias_of(m.wxid),
-        "pinyin": pinyin.lower(),
-        "initials": initials.lower(),
+        "pinyin": full_pinyin(name),
+        "initials": pinyin_initials(name),
     }
 
 
 def _conv_json(c):
-    """会话出参（脱敏契约）：不含 wxid；名称未解析 → name=None + alias，头像一并匿名。"""
+    """会话出参（脱敏契约）：不含 wxid；名称未解析 → name=None + alias，头像一并匿名。
+
+    附 pinyin/initials 供会话搜索框拼音匹配（输入 zhang/z 命中 张峰）。
+    """
     name = anonymize.resolved_name(c.name, c.wxid)
     return {
         "id": c.id,
@@ -298,6 +298,8 @@ def _conv_json(c):
         "name": name,
         "avatar": anonymize.avatar_or_none(name, c.avatar),
         "alias": anonymize.alias_of(c.wxid),
+        "pinyin": full_pinyin(name),
+        "initials": pinyin_initials(name),
         "unread_count": c.unread_count,
         "pinned": c.pinned,
         "muted": c.muted,
@@ -307,18 +309,14 @@ def _conv_json(c):
 
 
 def _msg_json(m, sender_map=None):
-    """消息出参（脱敏契约）：不含 sender_wxid；发言人无可用名称 → 匿名编码，头像随之匿名。"""
+    """消息出参（脱敏契约）：不含 sender_wxid；发言人展示字段走
+    group_member.sender_view 唯一拼装点（与 WS 广播同口径，防两处漂移）。"""
     info = (sender_map or {}).get(m.sender_wxid or "") or {}
-    nickname = anonymize.resolved_name(info.get("nickname"), m.sender_wxid)
-    snapshot = anonymize.resolved_name(m.sender_name, m.sender_wxid)  # 出方向操作人/客服快照
-    sender_name = nickname or snapshot or anonymize.anon_label(m.sender_wxid)
     return {
         "id": m.id,
         "msg_type": m.msg_type,
         "direction": m.direction,
-        "sender_name": sender_name,
-        "sender_avatar": info.get("avatar") if nickname else None,
-        "sender_alias": anonymize.alias_of(m.sender_wxid),  # 匿名头像色相/标识用
+        **group_member.sender_view(m.sender_wxid, info, m.sender_name),
         "content": m.content,
         "payload": with_media_id(m.payload, m.content),  # 引用图片注入 media_id，前端渲染缩略图
         "operator_name": m.operator_name or "",  # 发出消息的操作人快照（气泡徽章）

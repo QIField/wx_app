@@ -25,10 +25,11 @@ const STATUS_LABEL = { 0: '发送中', 1: '已发送', 2: '失败' }
 
 /* ---------- 头像三态：真实图 / 匿名图标（脱敏契约）/ 首字 ---------- */
 
-/* 入方向是否走匿名图标：单聊会话名未解析，或群发言人无头像（后端已随昵称一并置空） */
+/* 入方向是否走匿名图标：单聊会话名未解析，或群发言人真匿名（后端 sender_anon
+ * 显式标记；@openim 等"有名字没头像"的成员不算匿名，走首字兜底，与 @选择器口径一致） */
 function isAnon(m) {
   if (m.direction === 2) return false
-  if (props.conv?.chat_type === 2) return !m.sender_avatar
+  if (props.conv?.chat_type === 2) return !!m.sender_anon
   return !props.conv?.name
 }
 /* 匿名头像编码：群消息用发言人 alias，单聊用会话 alias */
