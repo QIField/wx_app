@@ -3,7 +3,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
-import { revokeMessage } from '../api'
+import { forwardMessages, revokeMessage } from '../api'
 import { displayNameOf } from '../utils/format'
 import { msgTextOf, canRevoke } from '../utils/message'
 import { messageMediaUrlOf } from '../utils/media'
@@ -12,6 +12,8 @@ import { buildTimeline } from '../utils/timeline'
 import MessageRow from './MessageRow.vue'
 import ContextMenu from './ContextMenu.vue'
 import ChatComposer from './ChatComposer.vue'
+import ForwardPicker from './ForwardPicker.vue'
+import ForwardRecord from './ForwardRecord.vue'
 
 const chat = useChatStore()
 const scroller = ref(null)
@@ -160,18 +162,24 @@ function onReEdit(content) {
   composerRef.value?.fillAndFocus(content)
 }
 
+/* 切会话/换账号必须退出多选：勾选集合按会话隔离，跨会话残留会转发错消息 */
+watch(() => [chat.currentId, chat.activeOpenid], () => exitMulti())
+
 /* ---------- 消息右键菜单 ---------- */
 const menu = ref(null) // { msg, x, y }；null 即收起
 
 /* 菜单项随消息能力启停：图片走"复制图片"，其余文本类"复制"，
- * 自己发的未撤回且在 2 分钟内的消息追加"撤回"（转发/引用…后续按需追加） */
+ * 自己发的未撤回且在 2 分钟内的消息追加"撤回"；转发/多选常驻（收藏后续追加） */
 const menuItems = computed(() => {
   const m = menu.value?.msg
   if (!m) return []
+  if (multi.value) return [] // 多选模式里右键菜单收口，避免两套选中状态互相打架
   const items = []
   if (m.msg_type === 2) items.push({ key: 'copy', label: '复制图片' })
   else items.push({ key: 'copy', label: '复制', disabled: !msgTextOf(m) })
-  if (canRevoke(m)) items.push({ key: 'revoke', label: '撤回' })
+  items.push({ key: 'forward', label: '转发', sepBefore: true })
+  items.push({ key: 'multi', label: '多选' })
+  if (canRevoke(m)) items.push({ key: 'revoke', label: '撤回', sepBefore: true })
   return items
 })
 
@@ -199,6 +207,8 @@ async function onMenuSelect(key) {
   menu.value = null
   if (!m) return
   if (key === 'revoke') return revokeMsg(m)
+  if (key === 'forward') return startForward({ convId: chat.currentId, msgIds: [m.id] })
+  if (key === 'multi') return enterMulti()
   if (key !== 'copy') return
   try {
     if (m.msg_type === 2) {
@@ -214,6 +224,75 @@ async function onMenuSelect(key) {
   } catch {
     ElMessage.error('复制失败，可放大图片右键复制')
   }
+}
+
+/* ---------- 多选与转发 ---------- */
+/* 交互规则（产品定稿）：中间方暂无合并卡片发送接口，转发统一按逐条真实下发
+ * （普通气泡直达微信）；转发方式不再提供选择。合并卡片 API 保留在服务端，
+ * 中间方补上原生接口后前端可随时恢复入口（方式确认弹窗 + modeDlg 编排）。
+ * 现状、保留资产与恢复步骤全文见 docs/message-forward.md。 */
+const multi = ref(false)          // 多选模式
+const pickedIds = ref(new Set())  // 当前会话勾选的消息 id
+const pickerVisible = ref(false)  // 转发目标选择器
+const pending = ref(null)         // { convId, msgIds } 待转发的任务
+const recordMsgId = ref(null)     // 回看中的合并卡片消息 id（历史卡片）
+
+function enterMulti() {
+  multi.value = true
+  pickedIds.value = new Set()
+}
+
+function exitMulti() {
+  multi.value = false
+  pickedIds.value = new Set()
+}
+
+function togglePick(id) {
+  const next = new Set(pickedIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  pickedIds.value = next
+}
+
+/* 多选底栏「转发」/单条菜单「转发」→ 打开选择器 */
+function startForward(task) {
+  pending.value = task
+  pickerVisible.value = true
+}
+
+/* 选择器确认目标：统一逐条真实下发 */
+function onPickerConfirm(targetIds) {
+  pickerVisible.value = false
+  doForward(targetIds)
+}
+
+/* 调转发接口：乐观交互——点确认立刻关选择器、退多选并提示"转发中"，
+ * 后台继续等响应；完成/失败再补最终提示。
+ * 原因：后端逐条串行调中间方（保序不能并行），N 条消息 N 次往返天然耗时，
+ * 不该让多选界面跟着挂住。失败时消息仍在会话里，可重新转发。 */
+function doForward(targetIds) {
+  const task = pending.value
+  pending.value = null
+  if (!task || !targetIds?.length) return
+  exitMulti()
+  const loading = ElMessage({ message: '正在转发…', type: 'info', duration: 0 })
+  forwardMessages({
+    conv_id: task.convId,
+    msg_ids: task.msgIds,
+    target_ids: targetIds,
+    mode: 'single',
+  })
+    .then((data) => {
+      loading.close()
+      ElMessage.success(
+        data.skipped
+          ? `已逐条转发 ${data.sent} 条，${data.skipped} 条类型不支持已跳过`
+          : `已逐条转发 ${data.sent} 条`,
+      )
+    })
+    .catch((exc) => {
+      loading.close()
+      ElMessage.error(exc.message || '转发失败')
+    })
 }
 </script>
 
@@ -249,10 +328,14 @@ async function onMenuSelect(key) {
             v-else
             :msg="row"
             :conv="chat.currentConv"
+            :selectable="multi"
+            :picked="pickedIds.has(row.id)"
             @preview="openPreview"
             @reedit="onReEdit"
             @mediaload="maybeStickBottom"
             @menu="menu = $event"
+            @toggle="togglePick"
+            @openrecord="recordMsgId = $event.id"
           />
         </template>
       </div>
@@ -270,8 +353,33 @@ async function onMenuSelect(key) {
     <!-- 消息右键菜单：弹层职责在 ContextMenu（定位翻转/收起生命周期） -->
     <ContextMenu :pos="menu" :items="menuItems" @select="onMenuSelect" @close="menu = null" />
 
-    <!-- 输入与发送（可拖高、Enter 发送），重新编辑经 ref 回填 -->
-    <ChatComposer ref="composerRef" />
+    <!-- 多选模式底栏：只有「取消/转发」（评审定稿，不放删除）；替代输入框 -->
+    <div v-if="multi" class="multi-bar">
+      <span class="mb-count">已选 {{ pickedIds.size }} 条</span>
+      <span class="mb-hint">选择要转发的消息</span>
+      <span class="mb-space"></span>
+      <el-button size="small" @click="exitMulti">取消</el-button>
+      <el-button
+        size="small"
+        type="primary"
+        :disabled="!pickedIds.size"
+        @click="startForward({ convId: chat.currentId, msgIds: [...pickedIds] })"
+      >转发</el-button>
+    </div>
+    <!-- 输入与发送（可拖高、Enter 发送），重新编辑经 ref 回填；多选时隐藏 -->
+    <ChatComposer v-show="!multi" ref="composerRef" />
+
+    <!-- 转发目标选择器：确认后统一逐条真实下发 -->
+    <ForwardPicker
+      v-if="pickerVisible"
+      @confirm="onPickerConfirm"
+      @close="pickerVisible = false"
+    />
+    <!-- 合并卡片回看：历史卡片仍可回看（拉 forward_snapshot 快照） -->
+    <ForwardRecord
+      :msg-id="recordMsgId"
+      @close="recordMsgId = null"
+    />
   </div>
 </template>
 
@@ -319,4 +427,15 @@ async function onMenuSelect(key) {
 /* 数据到位后容器整体淡入（:key 切会话重挂载触发）；之后单条新消息仍走 .msg 的 pop */
 .msgs { padding: 4px 16px 16px; animation: list-in 0.18s ease-out; }
 @keyframes list-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 多选底栏：替代输入框，与输入区同款顶边框；计数加粗主色 */
+.multi-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-panel);
+}
+.mb-count { font-size: 13px; font-weight: 600; color: var(--c-primary); user-select: none; }
+.mb-hint { font-size: 11px; color: var(--c-text-sub); user-select: none; }
+.mb-space { flex: 1; }
 </style>

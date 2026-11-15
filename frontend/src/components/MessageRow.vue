@@ -18,8 +18,10 @@ import VoiceBubble from './VoiceBubble.vue'
 const props = defineProps({
   msg: { type: Object, required: true }, // timeline 展开后的单条消息
   conv: { type: Object, default: null }, // 当前会话（头像/昵称取值用）
+  selectable: { type: Boolean, default: false }, // 多选模式：行首出勾选圈，点击行切换
+  picked: { type: Boolean, default: false },     // 本行是否已被勾选
 })
-const emit = defineEmits(['preview', 'reedit', 'mediaload', 'menu'])
+const emit = defineEmits(['preview', 'reedit', 'mediaload', 'menu', 'toggle', 'openrecord'])
 
 const STATUS_LABEL = { 0: '发送中', 1: '已发送', 2: '失败' }
 
@@ -187,7 +189,15 @@ function onMenu(e) {
     <a v-if="showReEdit" class="re-edit" href="#" @click.prevent="onReEdit">重新编辑</a>
   </div>
 
-  <div v-else class="msg" :class="msg.direction === 2 ? 'out' : 'in'">
+  <div
+    v-else
+    class="msg"
+    :class="[{ out: msg.direction === 2, in: msg.direction !== 2, selectable }]"
+    @click="selectable && emit('toggle', props.msg.id)"
+  >
+    <span v-if="selectable" class="pick" :class="{ on: picked }">
+      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3.4"><path d="M20 6 9 17l-5-5"/></svg>
+    </span>
     <img v-if="picOf(msg)" class="avatar img" :src="picOf(msg)" alt="" referrerpolicy="no-referrer" />
     <AnonAvatar v-else-if="isAnon(msg)" :alias="anonAlias(msg)" class="avatar" />
     <span v-else class="avatar" :class="msg.direction === 2 ? 'agent' : 'client'">{{ avatarOf(msg) }}</span>
@@ -273,6 +283,23 @@ function onMenu(e) {
           :to-name="transferTo"
         />
 
+        <!-- 合并转发卡片（msg_type=9，业务端本地消息）：标题 + 前两条预览 + 页脚，
+             点开拉快照回看（ForwardRecord）。原消息删除不影响快照内容。 -->
+        <button
+          v-else-if="msg.msg_type === 9"
+          class="fwd-card"
+          type="button"
+          :title="selectable ? '' : '点击查看聊天记录'"
+          @click.stop="selectable ? emit('toggle', msg.id) : emit('openrecord', msg)"
+        >
+          <span class="fwd-title">{{ msg.payload?.title || msg.content || '聊天记录' }}</span>
+          <span v-for="(p, i) in (msg.payload?.preview || []).slice(0, 2)" :key="i" class="fwd-line">{{ p }}</span>
+          <span class="fwd-foot">
+            <span class="badge">聊天记录</span>
+            <span class="fwd-cnt">{{ msg.payload?.count ?? '' }}条消息</span>
+          </span>
+        </button>
+
         <!-- 链接卡片：标题 + 摘要 + 域名 -->
         <a
           v-else-if="msg.msg_type === 5 && app.url"
@@ -316,6 +343,17 @@ function onMenu(e) {
   to { opacity: 1; transform: none; }
 }
 .msg.out { flex-direction: row-reverse; }
+/* 多选模式：整行可点、勾选圈在头像外侧（out 方向自动靠右） */
+.msg.selectable { cursor: pointer; }
+.pick {
+  width: 17px; height: 17px; flex-shrink: 0; align-self: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--c-border-strong);
+  display: flex; align-items: center; justify-content: center;
+  user-select: none;
+  transition: all 0.12s;
+}
+.pick.on { background: var(--c-primary); border-color: var(--c-primary); }
 
 .avatar {
   width: 30px; height: 30px; flex-shrink: 0;
@@ -404,6 +442,33 @@ function onMenu(e) {
 }
 .lc-host { font-size: 11px; color: var(--c-text-sub); display: flex; align-items: center; gap: 6px; min-width: 0; }
 .lc-host .host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 合并转发卡片：白底窄卡，观感与微信「聊天记录」卡片一致 */
+.fwd-card {
+  display: flex; flex-direction: column; gap: 3px;
+  width: 210px; padding: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+.fwd-card:hover { border-color: var(--c-primary); }
+.fwd-title {
+  font-size: 13px; font-weight: 600; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fwd-line {
+  font-size: 12px; color: var(--c-text-sub); line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fwd-foot {
+  margin-top: 5px; padding-top: 6px;
+  border-top: 1px solid var(--c-border);
+  display: flex; align-items: center; gap: 6px;
+}
+.fwd-cnt { font-size: 11px; color: var(--c-text-sub); }
 
 .content { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
 /* 气泡正文走 v-html，拿不到 scoped 属性，@昵称高亮必须用 :deep */

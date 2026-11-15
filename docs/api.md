@@ -106,6 +106,23 @@ multipart 字段 `file`，任意类型，默认上限 50MB。登录鉴权。
 
 后端用该消息的 middle_msg_id / new_msg_id / create_time 调中间方撤回接口。
 
+### POST /api/messages/forward — 转发消息（逐条真实下发）
+
+body：`{ "conv_id": 源会话, "msg_ids": [消息id≤100], "target_ids": [目标会话id≤20], "mode": "single" }`
+
+- 产品定稿（2026-11-15）：中间方无合并卡片发送接口，前端只走 `single` 逐条真实下发；`mode: "merge"` 服务端保留但无前端入口（升级预案见 docs/message-forward.md）
+- 文本按原文直达（不带发送者前缀）；图片/视频 payload 无 url 时后端经媒体缓存取回文件、挂到 `/media/uploads/` 地址后重发；语音/表情/引用等无发送通道的类型计入 `skipped` 跳过
+- 逐条下发受 SEND_ENABLED 开关约束（与发消息一致）；限流按 `/messages` 档（60 次/分钟）
+- 返回 data：`{ "sent": 2, "failed": 0, "skipped": 1 }`；成功后广播 `conv_updated` 刷新目标会话摘要
+
+### GET /api/messages/{id}/forward-snapshot — 合并转发卡片回看（只读遗留）
+
+仅 msg_type=9 的卡片消息可查；按 `forward_msg_id` 读 forward_snapshot 快照（软删过滤），返回 `{ title, count, items:[{seq, sender_name, sender_avatar, content, create_time}] }`。发送者昵称/头像在转发时刻经名册解析冻结，原消息删除不影响回看。新转发不再产生快照。
+
+### GET /api/forwards/recent — 最近转发目标（转发选择器置顶区）
+
+当前操作人最近发出的合并卡片所在会话，去重取前 8：`{ items:[{conversation_id, name, chat_type}] }`。
+
 ### GET /api/messages/{id}/media — 拉媒体文件（图片/文件/视频/语音/表情）
 
 - `<img>/<audio>/<video>` 带不了 Authorization 头，允许 `?token=` 传登录令牌兜底

@@ -19,6 +19,7 @@ class Message(db.Model, SoftDeleteMixin):
     MSG_VOICE = 6   # 只收不发（无对应发送接口）
     MSG_EMOJI = 7   # 只收不发
     MSG_QUOTE = 8   # 只收不发（引用消息，appmsg 57）
+    MSG_FORWARD = 9  # 只发不收（业务端合并转发卡片，本地渲染+快照回看，不经中间方下发）
 
     DIR_IN = 1   # 收到
     DIR_OUT = 2  # 发出

@@ -160,6 +160,17 @@ export const sendMediaMessage = (convId, msgType, content, payload) =>
 /** 撤回自己发的消息（微信限制发出 2 分钟内）：成功后 WS 广播 message_revoked 换灰条。 */
 export const revokeMessage = (messageId) => http.post(`/messages/${messageId}/revoke`)
 
+/** 转发消息：{conv_id 源会话, msg_ids, target_ids, mode: 'single'|'merge'}。
+ *  single=逐条真实下发（普通气泡，非本人消息带原发送者前缀）；
+ *  merge=合并转发（目标会话各落一张本地卡片 msg_type=9 + 快照回看）。 */
+export const forwardMessages = (payload) => http.post('/messages/forward', payload)
+
+/** 合并转发卡片回看：{title, count, items:[{seq, sender_name, content, create_time}]}。 */
+export const fetchForwardSnapshot = (messageId) => http.get(`/messages/${messageId}/forward-snapshot`)
+
+/** 最近转发目标（选择器置顶区）：[{conversation_id, name, chat_type}]。 */
+export const fetchForwardRecent = () => http.get('/forwards/recent')
+
 /** 通讯录：好友/群列表（type: friends | groups，keyword 可选）。 */
 export const fetchContacts = (type, keyword, openid) =>
   http.get('/contacts', {

@@ -90,3 +90,8 @@ def revoke(to_wxid, msg_id, new_msg_id, create_time, uuid=None, openid=""):
 def get_result(action, uuid, openid=""):
     """查下发结果：action 传 post_xxx，自动加 get_ 前缀。"""
     return client.call("send_api", "get_" + action, {}, uuid=uuid, openid=openid)
+
+
+# 升级预留位：中间方提供微信原生「聊天记录」卡片（appmsg type 19）发送接口后，
+# 在此处加 post_record(to_wxid, xml, ...)，并在 services/forward.py::forward_merge
+# 里接入真实下发。步骤全文见 docs/message-forward.md 第三节「升级预案」。

@@ -18,6 +18,8 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE middle_call_log ADD COLUMN org_name VARCHAR(64)")
     # 2026-11-03 会话右键菜单：消息免打扰标记
     _try_alter("ALTER TABLE conversation ADD COLUMN muted SMALLINT NOT NULL DEFAULT 0")
+    # 2026-11-15 消息转发：快照表补头像列（create_all 只对新库生效，存量表人工补）
+    _try_alter("ALTER TABLE forward_snapshot ADD COLUMN sender_avatar VARCHAR(512) NULL")
     _backfill_user_devices()
     _try_drop_user_openid()
     # 2026-11-05 设备字典重构：user_device 由手填 openid 改为引用 device.id

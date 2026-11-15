@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>转发与收藏 · 聊天交互原型</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ===== 顶栏（与企业微信工作台同一套藏青视觉） ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3z" fill="none" stroke="currentColor" stroke-width="1.6" />
+        <path d="M13 13h8v8h-8z" fill="currentColor" />
+      </svg>
+      <span class="brand-name">SI 客服系统</span>
+      <span class="brand-sub">/ 工作台原型 · 转发与收藏</span>
+    </div>
+    <div class="topbar-right">
+      <span class="dev-chip"><i class="dot"></i>wx_kf01 · 在线</span>
+      <span class="user-chip"><span class="u-ava">林</span>林悦<em>客服</em></span>
+    </div>
+  </header>
+
+  <main class="workbench">
+
+    <!-- ===== 左栏：会话 / 收藏 双 Tab ===== -->
+    <aside class="left-col">
+      <div class="tabs" id="leftTabs">
+        <button type="button" data-tab="conv" class="on">会话</button>
+        <button type="button" data-tab="fav">收藏 <i class="tab-badge num" id="favBadge">0</i></button>
+      </div>
+
+      <!-- 会话列表 -->
+      <div class="pane" id="paneConv">
+        <div class="conv-items" id="convItems"></div>
+      </div>
+
+      <!-- 收藏列表 -->
+      <div class="pane" id="paneFav" hidden>
+        <div class="fav-chips" id="favChips"></div>
+        <div class="fav-items" id="favItems"></div>
+      </div>
+    </aside>
+
+    <!-- ===== 中栏：聊天窗 / 收藏详情 ===== -->
+    <section class="center">
+
+      <!-- 聊天窗 -->
+      <div class="chat" id="viewChat">
+        <div class="chat-head">
+          <span class="peer" id="peerName">—</span>
+          <span class="tag" id="peerTag">群聊</span>
+          <span class="peer-sub num" id="peerSub"></span>
+          <span class="head-hint">右键 / 长按消息气泡 → 转发 · 收藏</span>
+        </div>
+        <div class="msgs" id="msgs"></div>
+
+        <!-- 多选操作条（多选模式下出现） -->
+        <div class="multibar" id="multiBar" hidden>
+          <label class="mb-check"><input type="checkbox" id="mbAll" /> 全选</label>
+          <span class="mb-count num" id="mbCount">已选 0 条</span>
+          <span class="mb-spacer"></span>
+          <button type="button" class="mb-btn ghost" id="mbCancel">取消</button>
+          <button type="button" class="mb-btn" id="mbForward" disabled>转发</button>
+        </div>
+
+        <!-- 输入区（演示占位） -->
+        <div class="editor">
+          <div class="editor-row">
+            <div class="composer-ph">输入消息，Enter 发送…</div>
+            <button type="button" class="send" disabled>发送</button>
+          </div>
+          <div class="editor-tools">
+            <span class="hint">本原型聚焦转发与收藏，输入区为演示占位</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 收藏详情 -->
+      <div class="fav-detail-wrap" id="viewFav" hidden>
+        <div class="chat-head">
+          <span class="peer">收藏详情</span>
+          <span class="tag">FAVORITE</span>
+          <span class="head-hint">点击左侧收藏条目查看</span>
+        </div>
+        <div class="fav-detail" id="favDetail"></div>
+      </div>
+    </section>
+
+    <!-- ===== 右栏：交互要点（评审用） ===== -->
+    <aside class="spec">
+      <div class="col-head">
+        <span>交互要点</span><span class="count num">FWD · FAV</span>
+      </div>
+
+      <div class="spec-block">
+        <h3><i>01</i>触发</h3>
+        <p><strong>右键</strong>或<strong>长按</strong>消息气泡弹出微信同款菜单：复制 / 转发 / 收藏 / 多选 / 删除。<em class="new-badge">新</em>标记为本次新增能力。</p>
+      </div>
+
+      <div class="spec-block">
+        <h3><i>02</i>转发</h3>
+        <p>右键气泡 → 转发，弹出选择器：<strong>最近转发</strong>头像行 + <strong>三路搜索</strong>（昵称 / 全拼 / 首字母，如 <code>zw</code> → 张伟）。<strong>单条消息</strong>选完人直接发送，普通气泡送达、不包裹卡片。</p>
+      </div>
+
+      <div class="spec-block">
+        <h3><i>03</i>转发方式确认</h3>
+        <p><strong>多选消息</strong>后无论转发给几个目标，选完人点「发送」都弹出确认页：<b>合并转发</b>打包为一张聊天记录卡片（点开回看快照，原消息删除不影响）；<b>逐条转发</b>以普通气泡逐条送达，非本人消息带「原发送者：」前缀。</p>
+      </div>
+
+      <div class="spec-block">
+        <h3><i>04</i>收藏</h3>
+        <p>气泡菜单「收藏」一键入藏；左栏切换到<strong>收藏 Tab</strong>，支持分类筛选、详情查看、再次转发与删除。</p>
+      </div>
+
+      <div class="spec-block">
+        <h3><i>05</i>多选</h3>
+        <p>菜单「多选」进入勾选模式（底栏仅「取消 / 转发」），转发必须经 选择器 → 方式确认 的完整链路；逐条/合并结果形态见 03。</p>
+      </div>
+
+      <div class="spec-block">
+        <h3><i>06</i>数据与接口</h3>
+        <ul class="spec-api num">
+          <li><b>POST</b> /api/messages/forward</li>
+          <li><b>POST</b> /api/favorites</li>
+          <li><b>GET</b>&nbsp; /api/favorites?type=</li>
+          <li><b>DEL</b>&nbsp; /api/favorites/:id</li>
+          <li><b>DEL</b>&nbsp; /api/messages</li>
+          <li><b>GET</b>&nbsp; /api/forwards/recent</li>
+        </ul>
+        <p class="spec-note">全部软删除 · 接口限流复用 risk.py 分档 · 转发卡片消息需 WebSocket 按 id 幂等推送。</p>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ===== 气泡右键菜单（微信同款深色菜单） ===== -->
+  <div class="ctxmenu" id="ctxMenu" hidden></div>
+
+  <!-- ===== 转发选择器 ===== -->
+  <div class="mask" id="pickerMask" hidden>
+    <div class="fp" role="dialog" aria-label="转发给">
+      <div class="fp-head">
+        <span class="fp-title">转发给</span>
+        <button type="button" class="fp-close" id="fpClose" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="fp-search">
+        <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <input type="text" id="fpSearch" placeholder="搜索：昵称 / 全拼 / 首字母" autocomplete="off" />
+      </div>
+      <div class="fp-recent" id="fpRecent">
+        <div class="fp-recent-label">最近转发</div>
+        <div class="fp-recent-row" id="fpRecentRow"></div>
+      </div>
+      <div class="fp-list" id="fpList"></div>
+      <div class="fp-foot">
+        <div class="fp-foot-row">
+          <span class="fp-tip" id="fpTip">选好后点击发送</span>
+          <button type="button" class="btn ghost" id="fpCancel">取消</button>
+          <button type="button" class="btn primary" id="fpSend" disabled>发送(0)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 转发方式确认（微信同款：选完人再选方式） ===== -->
+  <div class="mask" id="modeMask" hidden>
+    <div class="fm" role="dialog" aria-label="选择转发方式">
+      <div class="fm-head">选择转发方式</div>
+      <div class="fm-sub num" id="fmSub"></div>
+      <div class="fm-opts">
+        <button type="button" class="fm-opt" data-mode="merge">
+          <span class="fm-opt-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 13h8M8 16.5h5"/></svg></span>
+          <span class="fm-opt-main">
+            <b>合并转发</b>
+            <i>打包为一张「聊天记录」卡片，点开可回看上下文</i>
+          </span>
+          <span class="fm-opt-check"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span>
+        </button>
+        <button type="button" class="fm-opt" data-mode="single">
+          <span class="fm-opt-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg></span>
+          <span class="fm-opt-main">
+            <b>逐条转发</b>
+            <i>每条消息独立转发，与原消息格式一致</i>
+          </span>
+          <span class="fm-opt-check"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span>
+        </button>
+      </div>
+      <div class="fm-btns">
+        <button type="button" class="btn ghost" id="fmCancel">取消</button>
+        <button type="button" class="btn primary" id="fmOk">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 聊天记录回看（合并转发快照） ===== -->
+  <div class="mask" id="viewerMask" hidden>
+    <div class="cr" role="dialog" aria-label="聊天记录">
+      <div class="cr-head">
+        <span class="cr-title" id="crTitle">聊天记录</span>
+        <button type="button" class="fp-close" id="crClose" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="cr-body" id="crBody"></div>
+      <div class="cr-foot">此为转发快照 · 原消息删除不影响查看</div>
+    </div>
+  </div>
+
+  <!-- ===== 通用确认弹窗（软删除提示） ===== -->
+  <div class="mask" id="confirmMask" hidden>
+    <div class="cf" role="alertdialog" aria-label="确认删除">
+      <div class="cf-title" id="cfTitle">确认删除？</div>
+      <div class="cf-text" id="cfText">删除后移入回收站，可在管理端恢复（软删除）。</div>
+      <div class="cf-btns">
+        <button type="button" class="btn ghost" id="cfCancel">取消</button>
+        <button type="button" class="btn danger" id="cfOk">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

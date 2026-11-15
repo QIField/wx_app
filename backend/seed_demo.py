@@ -67,7 +67,8 @@ def _ensure_demo_user():
         device = Device(openid=DEMO_OPENID, name="演示设备")
         db.session.add(device)
         db.session.flush()
-    db.session.add(UserDevice(user_id=user.id, device_id=device.id, openid=device.openid))
+    db.session.add(UserDevice(user_id=user.id, device_id=device.id,
+                              openid=device.openid, online=Device.ONLINE_UNKNOWN))
     db.session.commit()
     print("已创建演示账号 demo / 123456（关联 demo 设备）")
 
