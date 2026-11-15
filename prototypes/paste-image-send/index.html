@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>粘贴图片直接发送 · 方案原型</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 15 5-5 4 4 3-3 6 6"/></svg></span>
+      <span>SI 客服系统 · 方案原型</span>
+    </div>
+    <span class="chip">粘贴图片直接发送</span>
+  </header>
+
+  <div class="wrap">
+    <div class="hero">
+      <h1>让输入框像微信一样：Ctrl+V 截图即发送</h1>
+      <p>
+        现状：<span class="bad-old">ChatComposer 的 onPaste 只收纯文本</span>，粘贴截图时 preventDefault 后图片被静默丢弃，用户必须「截图→保存→文件按钮→选择」四步。
+        目标：<span class="good-new">参考微信桌面版</span>，粘贴图片后直接作为图片消息（msg_type=2）上行，复用现有 sendFile 上传链路，一步到位。下面是可真实操作的演示——把焦点放进输入框，直接 Ctrl+V 你的截图试试。
+      </p>
+    </div>
+
+    <section>
+      <h2>现场演示</h2>
+      <p class="sec-sub">左侧聊天窗完全可交互：真实剪贴板粘贴 / 模拟截图按钮均可触发。右侧切换发送策略、查看事件日志。</p>
+      <div class="demo">
+        <div class="chat-col">
+          <div class="chatwin">
+            <div class="chat-head"><span class="dot"></span>客户群里的小王（文件传输助手同款交互）</div>
+            <div class="msgs" id="msgs">
+              <div class="msg">
+                <div class="avatar" style="background:#8b7cf6">王</div>
+                <div class="meta">
+                  <div class="bubble">哥，这个页面的报错截图麻烦发我一下</div>
+                  <div class="time">14:02</div>
+                </div>
+              </div>
+              <div class="msg">
+                <div class="avatar" style="background:#8b7cf6">王</div>
+                <div class="meta">
+                  <div class="bubble">直接 Ctrl+V 粘贴就行，不用存文件</div>
+                  <div class="time">14:02</div>
+                </div>
+              </div>
+            </div>
+            <div class="editor">
+              <div class="tools">
+                <svg viewBox="0 0 24 24" class="ticon"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                <svg viewBox="0 0 24 24" class="ticon"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="hint">Enter 发送 · 粘贴截图直接发图</span>
+              </div>
+              <div class="input-wrap">
+                <div
+                  id="composer" class="composer" contenteditable="true"
+                  data-placeholder="输入消息，Enter 发送… 把截图直接 Ctrl+V 进来试试"
+                  spellcheck="false"
+                ></div>
+                <div class="preview-strip" id="previewStrip">
+                  <img id="pvImg" alt="待发送图片" />
+                  <div class="pv-info"><b id="pvName">截图.png</b><span id="pvSize"></span> · 确认后作为图片消息发送</div>
+                  <button class="pv-btn" id="pvCancel">取消</button>
+                  <button class="pv-btn primary" id="pvSend">发送</button>
+                </div>
+                <button class="send" id="sendBtn" disabled>发送(Enter)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ctrl-col">
+          <div class="ctrl-card">
+            <h3>发送策略（对比微信/QQ）</h3>
+            <div class="mode-row">
+              <button class="mode-btn on" id="modeDirect">微信直发</button>
+              <button class="mode-btn" id="modePreview">预览确认</button>
+            </div>
+            <p class="mode-desc" id="modeDesc">微信桌面版同款：检测到剪贴板是图片 → 不进输入框，直接走上传 → 图片气泡。最快，但误粘无法反悔。</p>
+          </div>
+          <div class="ctrl-card">
+            <h3>没有截图？造一张</h3>
+            <button class="btn" id="mockShot">📋 模拟截图到剪贴板</button>
+            <p class="ctl-note" style="margin-top:8px">用 Canvas 画一张图写入系统剪贴板（ClipboardItem）。若浏览器不支持，将直接触发演示的图片处理流程。</p>
+          </div>
+          <div class="ctrl-card">
+            <h3>事件日志</h3>
+            <div class="log" id="log"><div class="t">// 等待 paste 事件…</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>关键实现：四步链路</h2>
+      <p class="sec-sub">全部在 ChatComposer.vue 现有结构内完成，零新增依赖。</p>
+      <div class="steps">
+        <div class="step"><span class="num">1</span><h3>拦截 paste</h3><p>现有 <code>onPaste</code> 里先扫 <code>e.clipboardData.items</code>，找到 <code>type.startsWith('image/')</code> 的项。找到才 <code>preventDefault()</code>，找不到维持纯文本逻辑不变。</p></div>
+        <div class="step"><span class="num">2</span><h3>提取 File</h3><p><code>item.getAsFile()</code> 拿到真实 File 对象（含 MIME），QQ/微信截图、系统截图工具、网页复制图片统统覆盖。</p></div>
+        <div class="step"><span class="num">3</span><h3>复用 sendFile</h3><p>直接调 <code>chat.sendFile(file)</code> —— 大小校验、MIME→msg_type=2 分发、payload 组装全在 store 里现成，组件只管喂文件。</p></div>
+        <div class="step"><span class="num">4</span><h3>气泡反馈</h3><p>上传中显示转圈+百分比气泡，完成后就地替换为图片气泡（本地 blob 先展示，毫秒级感知）。</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>落地 Diff（ChatComposer.vue）</h2>
+      <p class="sec-sub">实际改动只涉及 onPaste 一处 + 一个发送中提示，其余全部复用。</p>
+      <p class="filepath">frontend/src/components/ChatComposer.vue</p>
+      <div class="diffbox"><span class="cm">/* 粘贴分发：图片 → 直接 sendFile（微信同款）；其余 → 维持纯文本插入 */</span>
+<span class="cm">function onPaste(e) {</span>
+<span class="cm">  // ① 优先找剪贴板里的图片（QQ/微信截图、系统截图、网页复制图片都走这）</span>
+<span class="del">  e.preventDefault()</span>
+<span class="del">  const text = e.clipboardData?.getData('text/plain') || ''</span>
+<span class="del">  if (text) {</span>
+<span class="del">    insertPlainTextAtCursor(composerEl.value, text)</span>
+<span class="del">    refreshDraft()</span>
+<span class="del">  }</span>
+<span class="add">  const items = e.clipboardData?.items || []</span>
+<span class="add">  const imgItem = [...items].find((it) =&gt; it.type.startsWith('image/'))</span>
+<span class="add">  if (imgItem &amp;&amp; chat.currentId) {</span>
+<span class="add">    e.preventDefault() // 图片不进编辑器，直接走文件上行</span>
+<span class="add">    const file = imgItem.getAsFile()</span>
+<span class="add">    if (file) chat.sendFile(file).catch((err) =&gt; ElMessage.error(err.message))</span>
+<span class="add">    return</span>
+<span class="add">  }</span>
+<span class="cm">  // ② 无图片：维持原有「仅收纯文本」逻辑，防富文本破坏编辑器结构</span>
+<span class="add">  e.preventDefault()</span>
+<span class="add">  const text = e.clipboardData?.getData('text/plain') || ''</span>
+<span class="add">  if (text) {</span>
+<span class="add">    insertPlainTextAtCursor(composerEl.value, text)</span>
+<span class="add">    refreshDraft()</span>
+<span class="add">  }</span>
+<span class="cm">}</span></div>
+      <p class="sec-sub" style="margin-top:12px">上传中转圈气泡由 chat store 的 sendFile 现有 _afterSend 流程承接；若想增强，可在 MessageRow 对 status==='sending' 的图片消息加转圈样式（本次改动非必需）。</p>
+    </section>
+
+    <section>
+      <h2>边界情况</h2>
+      <div class="cases">
+        <div class="case"><h3>图文混合剪贴板</h3><p>Office 复制常同时带 text/plain 和 image。策略：<b>图片优先</b>（微信同款），文本忽略；从 Excel 复制单元格得到的是纯文本，不受影响。</p></div>
+        <div class="case"><h3>多图粘贴</h3><p>循环处理所有 image 项，逐张调 sendFile 并发上行；演示中也能触发（浏览器一般只带一张）。</p></div>
+        <div class="case warn"><h3>超大文件</h3><p>不新增校验——sendFile 已有 UPLOAD_MAX_BYTES(50MB) 上限，超限直接 ElMessage 报错，链路天然闭环。</p></div>
+        <div class="case warn"><h3>未选中会话</h3><p>chat.currentId 为空时不消费 paste，图片项落到「纯文本回退」（大多数场景无剪贴板文本，等于无操作，与现状一致）。</p></div>
+        <div class="case"><h3>Linux/Wayland 截图工具</h3><p>部分截图工具把图片放 clipboard 而非 clipboardData，浏览器拿不到——微信桌面同样有此问题，不在本次范围，保持现状。</p></div>
+        <div class="case"><h3>与 @提及/表情不冲突</h3><p>图片直接上行，不进 contenteditable，serializeComposer 与 collectMentionIds 逻辑零改动。</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>落地清单（批准后按此实施）</h2>
+      <p class="sec-sub">点击可勾选，进度条跟踪实施范围。</p>
+      <div class="progressbar"><i id="ckBar"></i></div>
+      <div class="checklist" id="cklist">
+        <label class="check-item"><input type="checkbox" /><span>ChatComposer.vue：onPaste 增加图片项检测与 sendFile 分发（核心，约 10 行）</span></label>
+        <label class="check-item"><input type="checkbox" /><span>验证：QQ/微信截图 → Ctrl+V → 图片气泡出现且消息中心可见 [图片] 摘要</span></label>
+        <label class="check-item"><input type="checkbox" /><span>验证：网页右键复制图片 → Ctrl+V 同样上行</span></label>
+        <label class="check-item"><input type="checkbox" /><span>验证：从 Excel/Word 复制文字 → 仍是纯文本进输入框，无回归</span></label>
+        <label class="check-item"><input type="checkbox" /><span>验证：>50MB 粘贴 → 报错提示，无崩溃（sendFile 现有上限）</span></label>
+        <label class="check-item"><input type="checkbox" /><span>验证：单聊与群聊均生效；未选会话时粘贴不误发</span></label>
+      </div>
+    </section>
+
+    <div class="banner">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#4f8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 3 7 7 .6-5.3 4.6 1.6 6.9L12 17.3 5.7 21l1.6-6.9L2 9.6 9 9z"/></svg>
+      <div><p><b>推荐：按上方 Diff 直接落地（微信直发模式）。</b>改动集中在 onPaste 一处、复用 sendFile 全链路，约 10 行代码即可消除「截图四步走」。预览确认模式（QQ 风格）留作可选项，若客服误粘率高再切换。</p></div>
+    </div>
+  </div>
+
+  <script>
+  'use strict'
+  /* ================= 演示逻辑（与 ChatComposer.vue 落地代码一一对应） ================= */
+  const composer = document.getElementById('composer')
+  const msgs = document.getElementById('msgs')
+  const sendBtn = document.getElementById('sendBtn')
+  const logEl = document.getElementById('log')
+  const previewStrip = document.getElementById('previewStrip')
+  const pvImg = document.getElementById('pvImg')
+  const pvName = document.getElementById('pvName')
+  const pvSize = document.getElementById('pvSize')
+  const pvSend = document.getElementById('pvSend')
+  const pvCancel = document.getElementById('pvCancel')
+  const modeDirect = document.getElementById('modeDirect')
+  const modePreview = document.getElementById('modePreview')
+  const modeDesc = document.getElementById('modeDesc')
+  const mockBtn = document.getElementById('mockShot')
+
+  let mode = 'direct'       // direct=微信直发 / preview=预览确认
+  let pendingFile = null    // 预览模式下暂存的待发图片
+  let pendingUrl = null
+
+  const nowTime = () => {
+    const d = new Date()
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+  const fmtSize = (b) => b > 1024 * 1024 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB'
+
+  function log(msg, cls) {
+    const div = document.createElement('div')
+    div.className = cls || ''
+    div.innerHTML = `<span class="t">[${nowTime()}]</span> ${msg}`
+    logEl.appendChild(div)
+    logEl.scrollTop = logEl.scrollHeight
+  }
+
+  function refreshSendBtn() {
+    sendBtn.disabled = !composer.textContent.trim() && !composer.querySelector('img')
+  }
+  composer.addEventListener('input', refreshSendBtn)
+
+  /* ---------- 核心链路 ①：paste 事件分发（与落地 Diff 相同逻辑） ---------- */
+  composer.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items || []
+    const imgItem = [...items].find((it) => it.type.startsWith('image/'))
+
+    if (imgItem) {
+      e.preventDefault() // 图片不进编辑器
+      const file = imgItem.getAsFile()
+      log(`paste → 检测到图片项 <b>${imgItem.type}</b>，preventDefault()` )
+      if (!file) { log('getAsFile() 返回空，回退纯文本逻辑', 'warn'); return }
+      log(`提取 File：${file.name || 'clipboard-image'} · ${fmtSize(file.size)}`)
+      if (mode === 'direct') sendImage(file)
+      else showPreview(file)
+      return
+    }
+    // ② 无图片：维持纯文本插入（原逻辑）
+    e.preventDefault()
+    const text = e.clipboardData?.getData('text/plain') || ''
+    if (text) {
+      log(`paste → 无图片项，纯文本插入 ${text.length} 字`)
+      document.execCommand('insertText', false, text)
+      refreshSendBtn()
+    }
+  })
+
+  /* ---------- 核心链路 ③④：上传模拟 + 气泡反馈 ---------- */
+  function sendImage(file) {
+    if (pendingUrl) { URL.revokeObjectURL(pendingUrl); pendingUrl = null }
+    const previewUrl = URL.createObjectURL(file) // 本地 blob 先展示（真实项目由 sendFile 内部处理）
+
+    // 上传中气泡
+    const upMsg = document.createElement('div')
+    upMsg.className = 'msg me'
+    upMsg.innerHTML = `
+      <div class="avatar" style="background:#4f8cff">我</div>
+      <div class="meta">
+        <div class="bubble"><div class="uploading"><span class="spin"></span><span>发送中</span><span class="pct">0%</span></div></div>
+        <div class="time">${nowTime()}</div>
+      </div>`
+    msgs.appendChild(upMsg)
+    msgs.scrollTop = msgs.scrollHeight
+    log('chat.sendFile(file) → 上传中…')
+
+    // 模拟上传进度（真实项目为 axios onUploadProgress / 后端返回即成）
+    let pct = 0
+    const pctEl = upMsg.querySelector('.pct')
+    const timer = setInterval(() => {
+      pct = Math.min(100, pct + 8 + Math.random() * 20)
+      pctEl.textContent = Math.floor(pct) + '%'
+      if (pct >= 100) {
+        clearInterval(timer)
+        upMsg.querySelector('.bubble').outerHTML = `<div class="bubble img"><img src="${previewUrl}" alt="图片消息" onload="this.closest('.msgs').scrollTop=1e9"/></div>`
+        log('msg_type=2 上行成功 → 气泡替换为图片', '')
+      }
+    }, 120)
+  }
+
+  /* ---------- 预览确认模式（QQ 风格，可选项） ---------- */
+  function showPreview(file) {
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl)
+    pendingFile = file
+    pendingUrl = URL.createObjectURL(file)
+    pvImg.src = pendingUrl
+    pvName.textContent = file.name || 'clipboard-image.png'
+    pvSize.textContent = fmtSize(file.size)
+    previewStrip.classList.add('show')
+    log('预览模式 → 图片暂存待确认（不自动发送）')
+  }
+  pvSend.addEventListener('click', () => {
+    if (!pendingFile) return
+    previewStrip.classList.remove('show')
+    sendImage(pendingFile)
+    pendingFile = null
+  })
+  pvCancel.addEventListener('click', () => {
+    previewStrip.classList.remove('show')
+    if (pendingUrl) { URL.revokeObjectURL(pendingUrl); pendingUrl = null }
+    pendingFile = null
+    log('预览已取消，图片未发送', 'warn')
+  })
+
+  /* ---------- 策略切换 ---------- */
+  function setMode(m) {
+    mode = m
+    modeDirect.classList.toggle('on', m === 'direct')
+    modePreview.classList.toggle('on', m === 'preview')
+    modeDesc.textContent = m === 'direct'
+      ? '微信桌面版同款：检测到剪贴板是图片 → 不进输入框，直接走上传 → 图片气泡。最快，但误粘无法反悔。'
+      : 'QQ 风格：图片先在输入框下方出预览条，确认后才上行。稍慢一步，可反悔。'
+    log(`策略切换 → ${m === 'direct' ? '微信直发' : '预览确认'}`)
+  }
+  modeDirect.addEventListener('click', () => setMode('direct'))
+  modePreview.addEventListener('click', () => setMode('preview'))
+
+  /* ---------- 模拟截图：Canvas → 系统剪贴板 ---------- */
+  mockBtn.addEventListener('click', async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 480; canvas.height = 300
+    const ctx = canvas.getContext('2d')
+    const g = ctx.createLinearGradient(0, 0, 480, 300)
+    g.addColorStop(0, '#4f8cff'); g.addColorStop(1, '#7a5cff')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, 480, 300)
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 26px sans-serif'
+    ctx.fillText('模拟报错截图', 140, 130)
+    ctx.font = '14px sans-serif'
+    ctx.globalAlpha = 0.85
+    ctx.fillText('TypeError: cannot read properties of undefined', 90, 170)
+    ctx.globalAlpha = 1
+
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'))
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      log('示例图已写入系统剪贴板，现在到输入框按 Ctrl+V', '')
+    } catch {
+      // 剪贴板权限受限（如非 HTTPS/未授权）：直接走同一处理函数演示效果
+      log('系统剪贴板写入受限，直接触发图片处理流程演示', 'warn')
+      const file = new File([blob], '模拟截图.png', { type: 'image/png' })
+      mode === 'direct' ? sendImage(file) : showPreview(file)
+    }
+  })
+
+  /* ---------- Enter 发送（文本消息） ---------- */
+  composer.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      const text = composer.textContent.trim()
+      if (!text) return
+      const div = document.createElement('div')
+      div.className = 'msg me'
+      div.innerHTML = `
+        <div class="avatar" style="background:#4f8cff">我</div>
+        <div class="meta">
+          <div class="bubble"></div>
+          <div class="time">${nowTime()}</div>
+        </div>`
+      div.querySelector('.bubble').textContent = text
+      msgs.appendChild(div)
+      msgs.scrollTop = msgs.scrollHeight
+      composer.innerHTML = ''
+      refreshSendBtn()
+      log('sendText() → 文本消息上行')
+    }
+  })
+  sendBtn.addEventListener('click', () => {
+    composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  })
+
+  /* ---------- 落地清单进度 ---------- */
+  const boxes = document.querySelectorAll('#cklist input')
+  const bar = document.getElementById('ckBar')
+  boxes.forEach((b) => b.addEventListener('change', () => {
+    b.closest('.check-item').classList.toggle('done', b.checked)
+    const done = [...boxes].filter((x) => x.checked).length
+    bar.style.width = (done / boxes.length * 100) + '%'
+  }))
+
+  log('原型就绪：点击输入框，Ctrl+V 粘贴你的截图')
+  </script>
+</body>
+</html>

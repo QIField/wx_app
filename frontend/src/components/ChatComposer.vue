@@ -158,8 +158,28 @@ function toggleEmojiPicker() {
   closeMention()
 }
 
-/* 粘贴仅收纯文本：防富文本/图片破坏编辑器结构 */
+/* 统一 sendFile 入口：错误提示收敛一处（文件按钮与粘贴图片两个入口共用） */
+async function sendFileSafe(file) {
+  try {
+    await chat.sendFile(file)
+  } catch (err) {
+    ElMessage.error(err.message)
+  }
+}
+
+/* 粘贴分发：图片 → 直接 sendFile（微信同款）；其余 → 维持纯文本插入。
+   图片不进 contenteditable，与 @提及/表情序列化逻辑零冲突 */
 function onPaste(e) {
+  // ① 优先找剪贴板里的图片项（QQ/微信截图、系统截图工具、网页复制图片都走这）
+  const items = e.clipboardData?.items || []
+  const imgItem = [...items].find((it) => it.type.startsWith('image/'))
+  if (imgItem && chat.currentId) {
+    e.preventDefault()
+    const file = imgItem.getAsFile()
+    if (file) sendFileSafe(file)
+    return
+  }
+  // ② 无图片：仅收纯文本，防富文本破坏编辑器结构
   e.preventDefault()
   const text = e.clipboardData?.getData('text/plain') || ''
   if (text) {
@@ -194,9 +214,7 @@ async function onFilePicked(e) {
   if (!file || !chat.currentId) return
   uploading.value = true
   try {
-    await chat.sendFile(file)
-  } catch (err) {
-    ElMessage.error(err.message)
+    await sendFileSafe(file)
   } finally {
     uploading.value = false
   }
