@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>未读定位交互原型 · SI客服系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="frame">
+    <!-- 顶栏：品牌 + 演示控制 + 用户，样式对齐真实工作台 -->
+    <header class="topbar">
+      <div class="left">
+        <div class="brand">
+          <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">SI客服系统</span>
+            <span class="brand-sub num">UNREAD LOCATE · PROTOTYPE</span>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <button class="demo-btn" id="btnSimulate" title="随机给一个会话增加一条未读">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+          <span>模拟新消息</span>
+        </button>
+        <button class="demo-btn" id="btnReset" title="恢复初始未读状态">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+          <span>重置演示</span>
+        </button>
+        <div class="user-chip">
+          <div class="user-avatar">演</div>
+          <div class="user-meta">
+            <span class="user-name">演示操作员</span>
+            <span class="user-role">客服</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- 左侧：图标导航 + 会话列表（与真实 WorkbenchPage 同构） -->
+      <div class="side-unit">
+        <nav class="rail">
+          <button class="rail-btn on" id="railChat" title="会话（已在本视图时再次点击 = 定位未读）">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+            <span class="rail-badge num" id="railBadge">0</span>
+          </button>
+          <button class="rail-btn" id="railContacts" title="通讯录">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </button>
+        </nav>
+        <aside class="col-side">
+          <!-- 会话视图 -->
+          <div class="panel" id="chatView">
+            <div class="head">
+              <div class="search">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input id="searchInput" type="text" placeholder="搜索会话">
+              </div>
+            </div>
+            <div class="scroll" id="convScroll">
+              <div id="convItems"></div>
+            </div>
+          </div>
+          <!-- 通讯录视图（示意，用于演示"首次点击仅切视图"） -->
+          <div class="panel" id="contactsView" hidden>
+            <div class="head contacts-head">
+              <span class="contacts-title">通讯录（示意）</span>
+              <span class="contacts-sub num">6 位联系人</span>
+            </div>
+            <div class="scroll contact-scroll">
+              <div class="item"><div class="avatar" style="background:linear-gradient(135deg,#18a058,#0c6e3d)">林</div><div class="body"><div class="row1"><span class="name">林芳</span></div><div class="row2"><span class="preview">东莞 · 恒达五金</span></div></div></div>
+              <div class="item"><div class="avatar" style="background:linear-gradient(135deg,#f0821e,#d9531e)">郭</div><div class="body"><div class="row1"><span class="name">郭涛</span></div><div class="row2"><span class="preview">深圳 · 蓝鲸科技</span></div></div></div>
+              <div class="item"><div class="avatar" style="background:linear-gradient(135deg,#8a5cf6,#5b3fd6)">赵</div><div class="body"><div class="row1"><span class="name">赵倩</span></div><div class="row2"><span class="preview">郑州 · 广汇机械</span></div></div></div>
+              <div class="item"><div class="avatar" style="background:linear-gradient(135deg,#0ea5b7,#036e7d)">孙</div><div class="body"><div class="row1"><span class="name">孙悦</span></div><div class="row2"><span class="preview">佛山 · 悦达贸易</span></div></div></div>
+              <div class="item"><div class="avatar" style="background:linear-gradient(135deg,#2f6ff0,#6d4de0)">周</div><div class="body"><div class="row1"><span class="name">周正阳</span></div><div class="row2"><span class="preview">苏州 · 正阳精密</span></div></div></div>
+              <div class="item"><div class="avatar" style="background:linear-gradient(135deg,#e5484d,#b02540)">吴</div><div class="body"><div class="row1"><span class="name">吴一凡</span></div><div class="row2"><span class="preview">宁波 · 一凡电镀</span></div></div></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 中间：聊天区示意 -->
+      <main class="col-main">
+        <div class="chat-head">
+          <div class="chat-avatar" id="chatAvatar" hidden>聊</div>
+          <div class="chat-head-text">
+            <span class="chat-title" id="chatTitle">选择一个会话</span>
+            <span class="chat-sub num" id="chatSub">点击左侧列表中的任一会话</span>
+          </div>
+        </div>
+        <div class="chat-body">
+          <div class="bubbles" id="chatBubbles" hidden>
+            <div class="bubble from-them">您好，这款的批量价能再优惠一点吗？</div>
+            <div class="bubble from-me">可以做，500 件以上按表二价格走，交期 12 天。</div>
+          </div>
+          <div class="chat-hint" id="chatHint">进入会话即视为已读：该会话未读数清零；连续点击「会话」图标可依次定位下一条未读</div>
+        </div>
+      </main>
+
+      <!-- 右侧：交互方案说明 -->
+      <aside class="col-info">
+        <div class="info-title">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--c-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
+          <span>交互方案：再次点击「会话」定位未读</span>
+        </div>
+        <div class="rule"><span class="rule-no">1</span><div class="rule-body"><b>触发条件</b>：「会话」视图已激活时，再次点击左侧「会话」图标（连续双击的第二击）；首次点击仅切换视图。</div></div>
+        <div class="rule"><span class="rule-no">2</span><div class="rule-body"><b>定位规则</b>：每次触发定位<b>下一条</b>未读会话，最小滚动把它带进可视区域（不顶到列表最上方），Toast 提示会话名、图标回弹。</div></div>
+        <div class="rule"><span class="rule-no">3</span><div class="rule-body"><b>连续触发</b>：重复点击依次跳到下一条未读；到最后一条后回绕到第一条循环。</div></div>
+        <div class="rule"><span class="rule-no">4</span><div class="rule-body"><b>无未读时</b>：Toast「没有未读消息」。</div></div>
+        <div class="rule"><span class="rule-no">5</span><div class="rule-body"><b>边界处理</b>：搜索过滤下仅在过滤结果内定位；进入会话未读清零后重新从头开始；置顶区内的未读按排序参与循环。</div></div>
+        <div class="info-sec">
+          <h4>落地代码位置（真实前端）</h4>
+          <div class="path">WorkbenchPage.vue · rail 会话按钮<br>activeView === 'chat'<br>&nbsp;&nbsp;? convListRef.value.locateUnread()<br>&nbsp;&nbsp;: (activeView = 'chat')</div>
+          <div class="path">ConvList.vue · defineExpose({ locateUnread })<br>下一条未读 item 调用<br>scrollIntoView({ block: 'nearest' })</div>
+        </div>
+        <div class="info-sec">
+          <h4>试一试</h4>
+          <div class="rule-body dim">向下滚动列表，然后<b>连续点击左侧「会话」图标</b>：每点一次跳到下一条未读并带进可视区域；也可用顶栏按钮模拟新消息或重置演示。</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="mock.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

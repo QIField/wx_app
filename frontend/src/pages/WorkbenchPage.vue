@@ -23,6 +23,16 @@ const contacts = useContactsStore()
 const ROLE_TEXT = { developer: '开发者', admin: '管理员', agent: '客服' }
 
 const activeView = ref('chat') // chat | contacts
+const convListRef = ref(null) // ConvList 实例：用于触发未读定位
+
+/** rail 会话按钮（微信同款）：首次点击切视图；已在本视图时再次点击 → 定位下一条未读。 */
+function onChatRailClick() {
+  if (activeView.value === 'chat') {
+    convListRef.value?.locateUnread()
+  } else {
+    activeView.value = 'chat'
+  }
+}
 
 onMounted(async () => {
   chat.operatorName = props.me.name // 本地气泡直接显示操作人
@@ -73,7 +83,7 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
       <!-- 左侧：图标导航栏 + 列表，无缝拼成一块整体面板 -->
       <div class="side-unit">
         <nav class="rail">
-          <button class="rail-btn" :class="{ on: activeView === 'chat' }" title="会话" @click="activeView = 'chat'">
+          <button class="rail-btn" :class="{ on: activeView === 'chat' }" title="会话（再次点击定位下一条未读）" @click="onChatRailClick">
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
             </svg>
@@ -86,7 +96,7 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
           </button>
         </nav>
         <aside class="col-side">
-          <ConvList v-if="activeView === 'chat'" />
+          <ConvList ref="convListRef" v-if="activeView === 'chat'" />
           <ContactsPanel v-else />
         </aside>
       </div>

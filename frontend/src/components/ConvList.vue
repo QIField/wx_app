@@ -1,7 +1,7 @@
 <script setup>
 /** 左栏：会话列表（微信风格搜索框 + 紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。
  *  右键菜单：置顶⇄取消置顶 / 标为未读⇄已读 / 消息免打扰；置顶仅背景加深不显示文字。 */
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf, fmtTime, highlight, matchName } from '../utils/format'
@@ -12,11 +12,40 @@ import UnreadBadge from './UnreadBadge.vue'
 const chat = useChatStore()
 
 const keyword = ref('')
+const scrollbarRef = ref(null) // el-scrollbar 实例：经 wrapRef 拿到真实滚动容器
 
 /** 本地过滤：命中展示名（含「匿名 编码」）/ 首字母 / 逐字拼音（边界对齐）才显示。 */
 const filtered = computed(() =>
   chat.conversations.filter((c) =>
     matchName([displayNameOf(c), c.initials], c.pinyin_toks, keyword.value)))
+
+/* ---------- 未读定位（微信同款：再次点击「会话」图标依次跳到下一条未读） ---------- */
+let lastLocatedId = null // 上次定位到的会话 id；script setup 每实例独立，无需进 store
+
+/** 定位下一条未读：最小滚动带进可视区域（不顶到列表最上方），末尾后回绕循环。
+ *  由 WorkbenchPage 的 rail 按钮在 activeView 已为 'chat' 时重复点击触发（双击的第二击）。 */
+function locateUnread() {
+  const list = filtered.value
+  const unread = list.filter((c) => c.unread_count > 0)
+  if (!unread.length) {
+    lastLocatedId = null
+    ElMessage.info('没有未读消息')
+    return
+  }
+  // 从上次定位的会话之后找；找不到（已清零/被搜索过滤）时 findIndex 为 -1，自然回绕到第一条
+  // unread 由 list 派生（同一对象引用），直接 indexOf 定位即可，避免嵌套 findIndex
+  const startIdx = list.findIndex((c) => c.id === lastLocatedId)
+  const next = unread.find((c) => list.indexOf(c) > startIdx) || unread[0]
+  lastLocatedId = next.id
+  nextTick(() => {
+    const wrap = scrollbarRef.value?.wrapRef
+    wrap?.querySelector(`[data-conv-id="${next.id}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
+  ElMessage.success(`已定位到未读消息：${displayNameOf(next)}`)
+}
+
+defineExpose({ locateUnread })
 
 /* ---------- 右键菜单 ---------- */
 const menu = ref(null) // { conv, x, y }；null 即收起
@@ -65,10 +94,11 @@ async function onMenuSelect(key) {
       </div>
     </div>
 
-    <el-scrollbar class="scroll">
+    <el-scrollbar ref="scrollbarRef" class="scroll">
       <div
         v-for="(c, i) in filtered"
         :key="c.id"
+        :data-conv-id="c.id"
         class="item"
         :class="{ active: c.id === chat.currentId, pinned: c.pinned }"
         :style="{ animationDelay: i * 35 + 'ms' }"
