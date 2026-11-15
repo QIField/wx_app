@@ -80,9 +80,15 @@ const skeletonRows = computed(() => {
 
 const timeline = computed(() => buildTimeline(chat.currentMessages))
 
+/* 滚动容器唯一入口：el-scrollbar 背后真正滚动的原生 div。此前
+   scroller.value?.wrapRef 散落 4 处，收敛后判空与取值口径统一 */
+function scrollWrap() {
+  return scroller.value?.wrapRef
+}
+
 /* 置底：直接赋值 scrollTop，瞬时到位（不做平滑滚动） */
 function stickBottom() {
-  const w = scroller.value?.wrapRef
+  const w = scrollWrap()
   if (w) w.scrollTop = w.scrollHeight
 }
 
@@ -94,39 +100,56 @@ function maybeStickBottom() {
 
 function onScroll({ scrollTop }) {
   if (scrollTop === 0) chat.loadOlderMessages()
-  const w = scroller.value?.wrapRef
+  const w = scrollWrap()
   if (w) nearBottom = w.scrollHeight - scrollTop - w.clientHeight < 120
+}
+
+/* 上翻加载旧消息的高度补偿：DOM 更新前先记滚动位置，更新后把新增高度
+   补回 scrollTop，视野停在与之前相同的消息上（原生锚定的 JS 兜底路径） */
+async function compensatePrepend() {
+  const prev = scrollWrap()
+  const prevH = prev.scrollHeight
+  const prevTop = prev.scrollTop
+  await nextTick()
+  const w = scrollWrap()
+  if (w) w.scrollTop = w.scrollHeight - prevH + prevTop
 }
 
 /* 媒体加载完成由 MessageRow emit mediaload 通知，贴底锚定见 maybeStickBottom */
 
 /* 切会话→定位到最新一条；追加新消息→贴底才跟随；上翻加载旧消息→保持视野不动。
-   监听数组引用而非仅长度：切会话时新旧消息数量常相同，只看长度不会触发。
-   flush 默认 pre：DOM 更新前先量旧高度，供加载旧消息后做高度补偿。 */
+   关键陷阱：store 对 currentMessages 是原地 push（引用不变），而 Vue watch 的旧值
+   快照只存引用不存内容 —— 回调触发时新值与旧值是同一个数组，靠「新旧末条 id 对比」
+   判追加永远得到相等，自己发的消息就永远走不到强制贴底。
+   因此用闭包 seen 记录上次的会话 id / 首末条消息 id 自行比对；length 仅作触发器
+   （原地 push 不改引用，不监听长度的话 push 根本不会触发本 watch）。 */
+let seen = null // 上次处理到的 { convId, firstId, lastId }
 watch(
   () => [chat.currentId, chat.currentMessages, chat.currentMessages.length],
-  async ([id, msgs], [prevId, prevMsgs] = []) => {
-    if (!id) return
-    const wrap = scroller.value?.wrapRef
-    if (!wrap) return
-    const switched = id !== prevId
-    const appended =
-      !switched && msgs[msgs.length - 1]?.id !== prevMsgs?.[prevMsgs.length - 1]?.id
+  async ([id, msgs]) => {
+    if (!id) {
+      seen = null // 会话关闭后清状态，避免重开同一会话时被误判为「未切换」
+      return
+    }
+    const firstId = msgs[0]?.id ?? null
+    const lastId = msgs[msgs.length - 1]?.id ?? null
+    const switched = !seen || seen.convId !== id
+    const appended = !switched && lastId !== seen.lastId
+    // prepended 必须带 !switched 前置：首次打开会话时 seen 还是 null，
+    // 不加会在 seen.firstId 上空指针崩溃，导致整个贴底 watch 永久失效
+    const prepended = !switched && !appended && firstId !== seen.firstId
+    seen = { convId: id, firstId, lastId }
+    if (!scrollWrap()) return
     if (switched || appended) {
       // 贴底判定：切会话与自己发消息（文本/图片/文件等所有发送路径统一 direction=2）
       // 都强制贴底并标记 nearBottom（后续媒体加载撑高继续锚定）；
       // 对方来消息维持"贴底才跟随"，翻历史时不打扰
-      const ownSent = appended && msgs[msgs.length - 1]?.direction === 2
-      const force = switched || ownSent
+      const force = switched || (appended && msgs[msgs.length - 1]?.direction === 2)
       if (force) nearBottom = true
       await nextTick()
       force ? stickBottom() : maybeStickBottom()
-    } else if (msgs[0]?.id !== prevMsgs?.[0]?.id) {
-      const prevH = wrap.scrollHeight
-      const prevTop = wrap.scrollTop
-      await nextTick()
-      const w = scroller.value?.wrapRef
-      if (w) w.scrollTop = w.scrollHeight - prevH + prevTop
+    } else if (prepended) {
+      compensatePrepend()
     }
   },
   { immediate: true }
