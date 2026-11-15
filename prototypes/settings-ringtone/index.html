@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置 · 提示音选择 · 联信工作台</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="settings">
+<div class="frame">
+
+  <!-- ===== App Shell · 顶栏（与既有原型一致，右侧新增设置入口） ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">联</span>
+      <span class="brand-text">
+        <span class="name">联信工作台</span>
+        <span class="sub">消息中心</span>
+      </span>
+    </div>
+    <div class="right">
+      <span class="env-chip">原型 · 静态</span>
+      <span class="status"><span class="dot"></span>已连接</span>
+      <button class="top-icon-btn" id="openSettingsBtn" title="设置"></button>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="demo-card reveal">
+      <span class="demo-ic" id="demoIc"></span>
+      <div class="demo-text">
+        <b>这是聊天主界面示意</b>
+        <p>点击右上角齿轮按钮（或下方按钮）打开设置，在弹窗里试听并选择消息提示音。</p>
+      </div>
+      <button class="btn primary" id="openSettingsBtn2">打开设置</button>
+    </div>
+  </main>
+</div>
+
+<!-- ===== 设置弹窗：仅保留提示音选择 ===== -->
+<div class="modal-mask hidden" id="settingsModal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title-ic" id="modalTitleIc"></span>
+      <span>设置</span>
+      <button class="icon-btn" id="closeModalBtn" title="关闭"></button>
+    </div>
+
+    <div class="modal-body">
+      <div class="ring-head">
+        <span>消息提示音</span>
+        <button class="mini-btn ghost" id="resetRingBtn"><span class="mini-btn-ic"></span>恢复默认</button>
+      </div>
+      <ul class="ring-list" id="ringList">
+        <!-- 骨架占位，fetchSettings 返回后由 app.js 渲染 -->
+        <li class="ring-row skeleton"><span class="sk-radio"></span><span class="sk-lines"><span class="sk-line w40"></span><span class="sk-line w60"></span></span><span class="sk-play"></span></li>
+        <li class="ring-row skeleton"><span class="sk-radio"></span><span class="sk-lines"><span class="sk-line w55"></span><span class="sk-line w35"></span></span><span class="sk-play"></span></li>
+        <li class="ring-row skeleton"><span class="sk-radio"></span><span class="sk-lines"><span class="sk-line w45"></span><span class="sk-line w50"></span></span><span class="sk-play"></span></li>
+      </ul>
+      <p class="ring-tip" id="ringTip">选中即生效，用于替换客户端旧版内置提示音</p>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script src="mock.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -11,6 +11,7 @@ import ContactDetail from '../components/ContactDetail.vue'
 import DeviceCards from '../components/DeviceCards.vue'
 import InfoColumn from '../components/InfoColumn.vue'
 import UnreadBadge from '../components/UnreadBadge.vue'
+import RingtoneSettings from '../components/RingtoneSettings.vue'
 
 const props = defineProps({
   me: { type: Object, required: true },
@@ -24,6 +25,7 @@ const ROLE_TEXT = { developer: '开发者', admin: '管理员', agent: '客服' 
 
 const activeView = ref('chat') // chat | contacts
 const convListRef = ref(null) // ConvList 实例：用于触发未读定位
+const ringSettingsRef = ref(null) // 设置弹窗实例：左栏底部齿轮打开提示音选择
 
 /** rail 会话按钮（微信同款）：首次点击切视图；已在本视图时再次点击 → 定位下一条未读。 */
 function onChatRailClick() {
@@ -94,6 +96,10 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
           </button>
+          <!-- 设置入口：微信同款放左栏最底部，打开提示音选择弹窗 -->
+          <button class="rail-btn rail-settings" title="设置" aria-label="设置" @click="ringSettingsRef?.open()">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
         </nav>
         <aside class="col-side">
           <ConvList ref="convListRef" v-if="activeView === 'chat'" />
@@ -107,6 +113,9 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
       <!-- 右侧扩展栏：收起/展开与拖宽由组件自管 -->
       <InfoColumn />
     </div>
+
+    <!-- 设置弹窗（提示音选择） -->
+    <RingtoneSettings ref="ringSettingsRef" />
   </div>
 </template>
 
@@ -177,7 +186,9 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
   -webkit-text-fill-color: transparent;
 }
 .sub { font-size: 10px; color: rgba(255, 255, 255, 0.55); }
-.right { display: flex; align-items: center; gap: 12px; }
+.right { display: flex; align-items: center; gap: 12px; user-select: none; }
+/* 左栏底部设置按钮：复用 rail-btn 样式，margin-top:auto 推到 rail 最底部（微信同款） */
+.rail-settings { margin-top: auto; }
 .back-btn {
   width: auto; /* 覆盖 .icon-btn 的 28px 固定宽，让文字撑开 */
   display: inline-flex;
