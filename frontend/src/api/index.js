@@ -196,11 +196,19 @@ export const fetchContacts = (type, keyword, openid) =>
 export const fetchSendLogs = (openid) =>
   http.get('/send-logs', { params: { openid: openid || undefined } })
 
-/** 联系人档案：备注/标签（业务自建，按通讯录行 id，好友与群通用；不传 wxid）。 */
-export const fetchContactProfile = (contactId) => http.get(`/contacts/${contactId}/profile`)
+/** 统一备注配置（业务自建，按条目 id，好友→用户级/群→群级；不传 wxid）。
+ *  用户级配置私聊与所有群聊全局共用——同一目标全场景读同一行。 */
+export const fetchRemarkConfig = (contactId) => http.get(`/contacts/${contactId}/remark-config`)
 
-export const saveContactProfile = (contactId, payload) =>
-  http.put(`/contacts/${contactId}/profile`, payload)
+export const saveRemarkConfig = (contactId, payload) =>
+  http.put(`/contacts/${contactId}/remark-config`, payload)
+
+/** 群成员备注入口：定位该成员的用户级配置（与私聊/其他群同源）。 */
+export const fetchMemberRemarkConfig = (contactId, memberAlias) =>
+  http.get(`/groups/${contactId}/members/${memberAlias}/remark-config`)
+
+export const saveMemberRemarkConfig = (contactId, memberAlias, payload) =>
+  http.put(`/groups/${contactId}/members/${memberAlias}/remark-config`, payload)
 
 /** WebSocket 长连接：收到推送回调 onEvent(event, data)；断线重连成功后触发一次
  * onReopen（首次连接不触发），供调用方补拉断连期间错过的数据。 */

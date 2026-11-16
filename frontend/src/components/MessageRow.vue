@@ -22,7 +22,7 @@ const props = defineProps({
   selectable: { type: Boolean, default: false }, // 多选模式：行首出勾选圈，点击行切换
   picked: { type: Boolean, default: false },     // 本行是否已被勾选
 })
-const emit = defineEmits(['preview', 'reedit', 'mediaload', 'menu', 'toggle', 'openrecord'])
+const emit = defineEmits(['preview', 'reedit', 'mediaload', 'menu', 'toggle', 'openrecord', 'profile'])
 
 const STATUS_LABEL = { 0: '发送中', 1: '已发送', 2: '失败' }
 
@@ -38,6 +38,11 @@ function isAnon(m) {
 /* 匿名头像编码：群消息用发言人 alias，单聊用会话 alias */
 function anonAlias(m) {
   return props.conv?.chat_type === 2 ? (m.sender_alias || '') : (props.conv?.alias || '')
+}
+
+/* 入方向头像可点：上抛打开统一备注侧栏（单聊=对方，群聊=发言人） */
+function onAvatarClick() {
+  if (props.msg.direction !== 2) emit('profile', props.msg)
 }
 
 /* 首字兜底：in=客户（群消息取发言人名首字，单聊取会话名首字）；out=操作人姓名首字 */
@@ -211,9 +216,9 @@ function onTextDbl(e) {
     <span v-if="selectable" class="pick" :class="{ on: picked }">
       <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3.4"><path d="M20 6 9 17l-5-5"/></svg>
     </span>
-    <img v-if="picOf(msg)" class="avatar img" :src="picOf(msg)" alt="" referrerpolicy="no-referrer" />
-    <AnonAvatar v-else-if="isAnon(msg)" :alias="anonAlias(msg)" class="avatar" />
-    <span v-else class="avatar" :class="msg.direction === 2 ? 'agent' : 'client'">{{ avatarOf(msg) }}</span>
+    <img v-if="picOf(msg)" class="avatar img" :class="{ clk: msg.direction !== 2 }" :src="picOf(msg)" alt="" referrerpolicy="no-referrer" @click="onAvatarClick" />
+    <AnonAvatar v-else-if="isAnon(msg)" :alias="anonAlias(msg)" class="avatar" :class="{ clk: msg.direction !== 2 }" @click="onAvatarClick" />
+    <span v-else class="avatar" :class="[msg.direction === 2 ? 'agent' : 'client', { clk: msg.direction !== 2 }]" @click="onAvatarClick">{{ avatarOf(msg) }}</span>
     <div class="body">
       <div class="name">{{ nameOf(msg) }}</div>
       <div class="bubble" :class="{ tight: isTight }" :title="msg.create_time" @contextmenu.prevent="onMenu">
@@ -378,6 +383,8 @@ function onTextDbl(e) {
 }
 .avatar.client { background: var(--c-ok); }
 .avatar.agent { background: var(--c-primary); }
+.avatar.clk { cursor: pointer; }
+.avatar.clk:hover { opacity: 0.85; }
 .avatar.img { object-fit: cover; background: var(--c-surface); }
 
 .body { max-width: 72%; min-width: 0; display: flex; flex-direction: column; }

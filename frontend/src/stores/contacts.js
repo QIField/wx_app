@@ -1,6 +1,6 @@
-/** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项、联系人档案（备注/标签）。 */
+/** 通讯录状态（Pinia）：好友/群列表、搜索词、选中项。备注配置由统一编辑器直连 API。 */
 import { defineStore } from 'pinia'
-import { fetchContacts, fetchContactProfile, saveContactProfile } from '../api'
+import { fetchContacts } from '../api'
 import { matchName, displayNameOf } from '../utils/format'
 import { useChatStore } from './chat'
 
@@ -15,7 +15,6 @@ export const useContactsStore = defineStore('contacts', {
     groups: [],
     loading: false,
     selected: null,  // { type: 'friend' | 'group', id }
-    profile: null,   // 选中联系人的档案 {remark, tags}
   }),
 
   getters: {
@@ -68,17 +67,6 @@ export const useContactsStore = defineStore('contacts', {
 
     select(type, id) {
       this.selected = { type, id }
-      this.profile = null
-    },
-
-    /** 拉取选中联系人的档案（备注/标签；按通讯录行 id，不传 wxid）。 */
-    async loadProfile(contactId) {
-      this.profile = await fetchContactProfile(contactId)
-    },
-
-    /** 保存备注/标签（upsert，按通讯录行 id），成功后本地同步。 */
-    async saveProfile(contactId, payload) {
-      this.profile = await saveContactProfile(contactId, payload)
     },
   },
 })

@@ -3,7 +3,14 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
-import { forwardMessages, revokeMessage } from '../api'
+import {
+  fetchMemberRemarkConfig,
+  fetchRemarkConfig,
+  forwardMessages,
+  revokeMessage,
+  saveMemberRemarkConfig,
+  saveRemarkConfig,
+} from '../api'
 import { displayNameOf } from '../utils/format'
 import { msgTextOf, canRevoke } from '../utils/message'
 import { messageMediaUrlOf } from '../utils/media'
@@ -15,10 +22,78 @@ import ContextMenu from './ContextMenu.vue'
 import ChatComposer from './ChatComposer.vue'
 import ForwardPicker from './ForwardPicker.vue'
 import ForwardRecord from './ForwardRecord.vue'
+import ChatSidePanel from './ChatSidePanel.vue'
 
 const chat = useChatStore()
 const scroller = ref(null)
 const composerRef = ref(null)
+
+/* ---------- 右侧「客户资料」侧栏：点头像 / 顶部备注名展开，统一备注配置入口 ----------
+ * 单聊：对方头像与顶部备注名同一入口（用户级，全局生效）；
+ * 群聊：成员头像 = 该成员的用户级配置（全局生效），顶部群备注名 = 群级配置。 */
+const side = ref(null)
+const peerRemark = ref('') // 顶部标题优先显示备注名（用户级/群级），未设置回退原名
+
+watch(() => chat.currentId, async () => {
+  peerRemark.value = ''
+  // 侧栏保持展开：跟随当前会话目标（无会话则收起），避免停留在旧目标
+  if (side.value) {
+    if (chat.currentConv) openPeerSide()
+    else side.value = null
+  }
+  const c = chat.currentConv
+  if (!c) return
+  try {
+    peerRemark.value = (await fetchRemarkConfig(-c.id))?.remark_name || ''
+  } catch { /* 拉取失败回退原名显示 */ }
+})
+
+const peerLabel = computed(() => peerRemark.value || displayNameOf(chat.currentConv))
+
+function openPeerSide() {
+  const c = chat.currentConv
+  if (!c) return
+  const isGroup = c.chat_type === 2
+  side.value = {
+    key: `peer-${c.id}`,
+    apiId: -c.id, // 会话条目走负数 id 约定（脱敏契约，不传 wxid）
+    title: displayNameOf(c),
+    subtitle: c.alias ? `匿名标识：${c.alias}` : '',
+    alias: c.alias,
+    avatar: c.avatar,
+    chatType: c.chat_type,
+    scopeNote: isGroup ? '作用域：仅当前群' : '作用域：全局生效（私聊 + 所有群聊）',
+    fetch: fetchRemarkConfig,
+    save: saveRemarkConfig,
+    fromGroup: false,
+  }
+}
+
+function onRowProfile(msg) {
+  const c = chat.currentConv
+  if (!c || msg.direction === 2) return
+  if (c.chat_type !== 2) return openPeerSide() // 单聊：与顶部入口同源
+  const alias = msg.sender_alias || ''
+  if (!alias) return
+  side.value = {
+    key: `member-${alias}`,
+    apiId: -c.id,
+    title: msg.sender_name || `匿名 ${alias}`,
+    subtitle: `匿名标识：${alias}`,
+    alias,
+    avatar: msg.sender_avatar || null,
+    chatType: 1,
+    scopeNote: '作用域：全局生效（私聊 + 所有群聊）',
+    fetch: (id) => fetchMemberRemarkConfig(id, alias),
+    save: (id, payload) => saveMemberRemarkConfig(id, alias, payload),
+    fromGroup: true,
+  }
+}
+
+function onSideSaved(cfg) {
+  // 顶部标题只跟随本会话目标的配置（群成员入口不改群标题）
+  if (side.value && !side.value.fromGroup) peerRemark.value = cfg?.remark_name || ''
+}
 
 /* ---------- 图片全屏预览：当前会话所有图片可左右切换 ---------- */
 const preview = ref(null) // { urls: string[], index: number }；null 即关闭
@@ -312,9 +387,10 @@ function doForward(targetIds) {
 <template>
   <!-- 鼠标在会话窗口内任意位置按下即算已读（含标题栏、消息区、空白、输入框、拖拽条） -->
   <div class="chat" @mousedown="chat.markCurrentRead()">
+    <div class="chat-main">
     <div class="head">
       <template v-if="chat.currentConv">
-        <span class="peer">{{ displayNameOf(chat.currentConv) }}</span>
+        <span class="peer peer-link" title="点击设置备注" @click="openPeerSide">{{ peerLabel }}</span>
         <el-tag v-if="chat.currentConv.chat_type === 2" size="small" type="info" effect="plain">群聊</el-tag>
       </template>
       <span v-else>选择左侧会话</span>
@@ -349,22 +425,11 @@ function doForward(targetIds) {
             @menu="menu = $event"
             @toggle="togglePick"
             @openrecord="recordMsgId = $event.id"
+            @profile="onRowProfile"
           />
         </template>
       </div>
     </el-scrollbar>
-
-    <!-- 图片全屏预览：url-list 多图时 Element 自带左右箭头/键盘方向键切换（微信式） -->
-    <el-image-viewer
-      v-if="preview"
-      :url-list="preview.urls"
-      :initial-index="preview.index"
-      hide-on-click-modal
-      @close="preview = null"
-    />
-
-    <!-- 消息右键菜单：弹层职责在 ContextMenu（定位翻转/收起生命周期） -->
-    <ContextMenu :pos="menu" :items="menuItems" @select="onMenuSelect" @close="menu = null" />
 
     <!-- 多选模式底栏：只有「取消/转发」（评审定稿，不放删除）；替代输入框 -->
     <div v-if="multi" class="multi-bar">
@@ -381,6 +446,24 @@ function doForward(targetIds) {
     </div>
     <!-- 输入与发送（可拖高、Enter 发送），重新编辑经 ref 回填；多选时隐藏 -->
     <ChatComposer v-show="!multi" ref="composerRef" />
+    </div>
+
+    <!-- 右侧「客户资料」侧栏：宽度过渡让位，不遮挡聊天区 -->
+    <transition name="rks">
+      <ChatSidePanel v-if="side" :target="side" @close="side = null" @saved="onSideSaved" />
+    </transition>
+
+    <!-- 图片全屏预览：url-list 多图时 Element 自带左右箭头/键盘方向键切换（微信式） -->
+    <el-image-viewer
+      v-if="preview"
+      :url-list="preview.urls"
+      :initial-index="preview.index"
+      hide-on-click-modal
+      @close="preview = null"
+    />
+
+    <!-- 消息右键菜单：弹层职责在 ContextMenu（定位翻转/收起生命周期） -->
+    <ContextMenu :pos="menu" :items="menuItems" @select="onMenuSelect" @close="menu = null" />
 
     <!-- 转发目标选择器：确认后统一逐条真实下发 -->
     <ForwardPicker
@@ -397,7 +480,9 @@ function doForward(targetIds) {
 </template>
 
 <style scoped>
-.chat { display: flex; flex-direction: column; height: 100%; }
+.chat { display: flex; height: 100%; }
+/* 主聊天列：侧栏展开时 flex 让位，聊天区照常可用 */
+.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .head {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 16px;
@@ -405,6 +490,9 @@ function doForward(targetIds) {
   background: var(--c-panel);
 }
 .peer { font-weight: 600; font-size: 14px; user-select: none; }
+/* 顶部备注名可点：展开统一备注侧栏（与点头像同源） */
+.peer-link { cursor: pointer; }
+.peer-link:hover { color: var(--c-primary); }
 .scroll { flex: 1; background: var(--c-bg); }
 /* S1 滚动锚定：上方媒体加载改变高度时，浏览器原生把位移补偿回 scrollTop，
    视野不动（无宽高预占位的历史消息走此兜底；Safari 不支持时退化为现状） */
@@ -451,4 +539,8 @@ function doForward(targetIds) {
 .mb-count { font-size: 13px; font-weight: 600; color: var(--c-primary); user-select: none; }
 .mb-hint { font-size: 11px; color: var(--c-text-sub); user-select: none; }
 .mb-space { flex: 1; }
+
+/* 资料侧栏：宽度滑入/滑出（rk-side 自身 overflow:hidden，让位而非遮挡） */
+.rks-enter-active, .rks-leave-active { transition: width 0.2s ease, opacity 0.18s ease; }
+.rks-enter-from, .rks-leave-to { width: 0; opacity: 0; }
 </style>
