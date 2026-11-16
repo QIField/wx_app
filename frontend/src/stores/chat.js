@@ -258,6 +258,13 @@ export const useChatStore = defineStore('chat', {
       markConversationRead(conv.id).catch(() => {})
     },
 
+    /** 开窗即读（未读定位等场景复用）：已在窗口内只清红点，避免重拉消息闪烁；
+     *  不在窗口内则走正常切换加载（selectConversation 内部同样会清红点落库）。 */
+    async ensureOpened(id) {
+      if (this.currentId === id) { this.markCurrentRead(); return }
+      await this.selectConversation(id)
+    },
+
     /** 右键菜单会话操作：乐观更新本地 → PATCH 落库（{pinned|read|muted}）→ 按后端返回校正并重排；失败回滚并抛错由调用方提示。 */
     async patchConversation(conv, patch) {
       const snap = { pinned: conv.pinned, muted: conv.muted, unread_count: conv.unread_count }

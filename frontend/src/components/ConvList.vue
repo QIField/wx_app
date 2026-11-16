@@ -34,10 +34,8 @@ function locateUnread() {
   }
   lastLocatedId = next.id
 
-  // 先打开聊天窗口再滚动列表：selectConversation 内部 markCurrentRead 同步清红点并落库，
-  // 选中态只改背景色不改布局，不会引起滚动抖动；已在窗口内则只清红点，避免重拉消息闪烁
-  if (chat.currentId === next.id) chat.markCurrentRead()
-  else chat.selectConversation(next.id)
+  // 先开窗（红点随开即清）再滚动列表：选中态只改背景色不改布局，不会引起滚动抖动
+  chat.ensureOpened(next.id)
 
   nextTick(() => {
     const wrap = scrollbarRef.value?.wrapRef
