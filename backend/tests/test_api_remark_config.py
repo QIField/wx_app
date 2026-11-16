@@ -1,8 +1,10 @@
-"""统一备注配置接口单测：用户级全局一致 / 群成员入口 / 校验 / 软删除恢复 / 审计。"""
+"""统一备注配置接口单测：用户级全局一致 / 群成员入口 / 校验 / 软删除恢复 / 存量搬迁 / 审计。"""
+from sqlalchemy import text
+
+from backend.db_migrate import _archive_contact_profile, _backfill_remark_config
 from backend.extensions import db
 from backend.models.audit_log import AuditLog
 from backend.models.contact import Contact
-from backend.models.contact_profile import ContactProfile
 from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.conversation import Conversation
 from backend.models.group_member import GroupMember
@@ -118,14 +120,71 @@ def test_tags_limit_400(client):
     assert client.put(url, json={"tags": ["标" * 13]}).status_code == 400
 
 
-def test_legacy_profile_fallback(client):
-    """新表无记录时回退旧 contact_profile 的备注与标签（平滑过渡）。"""
+def test_tags_dedupe_trim_and_remark_alias(client):
+    """标签自动去空白、去重、去空项；remark 旧字段名兼容 remark_name。"""
     conv = make_conv("wxid_u")
-    db.session.add(ContactProfile(wxid="wxid_u", remark="旧备注", tags=["旧标签"]))
+    url = f"/api/contacts/-{conv.id}/remark-config"
+    resp = client.put(url, json={"remark": "旧字段备注", "tags": [" 月结 ", "月结", "", "奔驰"]})
+
+    assert resp.get_json()["code"] == 0
+    data = client.get(url).get_json()["data"]
+    assert data["remark_name"] == "旧字段备注"
+    assert data["tags"] == ["月结", "奔驰"]
+
+
+def test_backfill_and_archive_legacy_profile(client):
+    """存量搬迁：旧表备注按作用域搬入新表（群 ID→group），随后旧表改名归档；全程幂等。"""
+    db.session.execute(text(
+        "CREATE TABLE contact_profile ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "wxid VARCHAR(64), remark VARCHAR(100), tags JSON, deleted_at DATETIME NULL)"
+    ))
+    db.session.execute(text(
+        "INSERT INTO contact_profile (wxid, remark, tags) VALUES "
+        "('wxid_u', '旧备注', '[\"旧标签\"]'), "
+        "('1@chatroom', '群旧备注', '[]')"
+    ))
     db.session.commit()
-    data = client.get(f"/api/contacts/-{conv.id}/remark-config").get_json()["data"]
-    assert data["remark_name"] == "旧备注"
-    assert data["tags"] == ["旧标签"]
+
+    _backfill_remark_config()
+    _archive_contact_profile()
+
+    u = ContactRemarkConfig.query.filter_by(target_wxid="wxid_u").one()
+    assert u.scope_type == "user"
+    assert u.remark_name == "旧备注"
+    assert u.tags == ["旧标签"]
+    g1 = ContactRemarkConfig.query.filter_by(target_wxid="1@chatroom").one()
+    assert g1.scope_type == "group"
+    assert g1.remark_name == "群旧备注"
+
+    tables = db.session.execute(text(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%contact_profile%'"
+    )).scalars().all()
+    assert "_archived_contact_profile_20261116" in tables
+    assert "contact_profile" not in tables
+
+    # 幂等：迁移重复执行无副作用（旧表已归档，两函数直接跳过）
+    _backfill_remark_config()
+    _archive_contact_profile()
+    assert ContactRemarkConfig.query.count() == 2
+
+
+def test_backfill_skips_existing_config_rows(client):
+    """新表同键行已存在时跳过搬迁——不覆盖用户已保存的新值。"""
+    db.session.execute(text(
+        "CREATE TABLE contact_profile ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "wxid VARCHAR(64), remark VARCHAR(100), tags JSON, deleted_at DATETIME NULL)"
+    ))
+    db.session.execute(text("INSERT INTO contact_profile (wxid, remark) VALUES ('wxid_u', '旧备注')"))
+    db.session.add(ContactRemarkConfig(scope_type="user", target_wxid="wxid_u", remark_name="新备注"))
+    db.session.commit()
+
+    _backfill_remark_config()
+
+    rows = ContactRemarkConfig.query.filter_by(target_wxid="wxid_u").all()
+    assert len(rows) == 1
+    assert rows[0].remark_name == "新备注"
 
 
 def test_soft_delete_restore(client):

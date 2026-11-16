@@ -5,13 +5,12 @@
   群成员入口 → 写用户级行（私聊/其他群同源，全局生效）。
 - contact_id 允许负数（补集会话条目，出参约定 -conv.id），复用通讯录解析规则。
 - 脱敏契约：入参只收条目 id 与 alias 短码；alias 不可逆，按群名册重算匹配。
-- 平滑过渡：新表无记录时回退旧 contact_profile 的 remark/tags，首次写入后新表为唯一事实。
+- 存量 contact_profile 数据已由 db_migrate 一次性搬入新表，新表是唯一事实源。
 """
 from flask import Blueprint, g, jsonify, request
 
 from backend.extensions import db
 from backend.models.contact import Contact
-from backend.models.contact_profile import ContactProfile
 from backend.models.contact_remark_config import SCOPE_GROUP, SCOPE_USER, ContactRemarkConfig
 from backend.models.conversation import Conversation
 from backend.models.group_member import GroupMember
@@ -96,19 +95,13 @@ def _member_wxid_by_alias(openid, chatroom_wxid, member_alias):
 
 
 def _config_data(scope, wxid):
-    """读取配置；新表无记录回退旧档案 remark/tags（一次写入后新表为唯一事实）。"""
+    """读取配置；无记录返回空默认值。"""
     cfg = ContactRemarkConfig.query.filter_by(
         scope_type=scope, target_wxid=wxid, deleted_at=None,
     ).first()
     if cfg:
         return cfg.to_json()
-    legacy = ContactProfile.query.filter_by(wxid=wxid, deleted_at=None).first()
-    return {
-        "scope_type": scope,
-        "remark_name": (legacy.remark or "") if legacy else "",
-        "auto_quote_enabled": False,
-        "tags": list(legacy.tags or []) if legacy else [],
-    }
+    return {"scope_type": scope, "remark_name": "", "auto_quote_enabled": False, "tags": []}
 
 
 def _validated_payload(body):
@@ -140,12 +133,7 @@ def _save_config(scope, wxid, body):
 
     cfg = ContactRemarkConfig.query.filter_by(scope_type=scope, target_wxid=wxid).first()
     if cfg is None:
-        legacy = ContactProfile.query.filter_by(wxid=wxid, deleted_at=None).first()
-        cfg = ContactRemarkConfig(
-            scope_type=scope, target_wxid=wxid,
-            remark_name=(legacy.remark or "") if legacy else "",
-            tags=list(legacy.tags or []) if legacy else [],
-        )
+        cfg = ContactRemarkConfig(scope_type=scope, target_wxid=wxid)
         db.session.add(cfg)
     else:
         cfg.restore()

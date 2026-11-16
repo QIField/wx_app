@@ -29,11 +29,58 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE device ADD COLUMN deleted_at DATETIME NULL")
     _try_alter("ALTER TABLE user_device ADD COLUMN deleted_at DATETIME NULL")
     _try_alter("ALTER TABLE contact ADD COLUMN deleted_at DATETIME NULL")
-    _try_alter("ALTER TABLE contact_profile ADD COLUMN deleted_at DATETIME NULL")
     _try_alter("ALTER TABLE group_member ADD COLUMN deleted_at DATETIME NULL")
     _drop_user_device_openid_unique()
     _backfill_devices()
     _try_alter("ALTER TABLE device ADD INDEX idx_device_deleted (deleted_at)")
+    # 2026-11-16 备注配置重构：存量备注搬入新表后旧表改名归档
+    _backfill_remark_config()
+    _archive_contact_profile()
+
+
+def _backfill_remark_config():
+    """存量 contact_profile 备注/标签一次性搬入 contact_remark_config（幂等）。
+
+    作用域按 wxid 判定：群 ID（@chatroom 结尾）→ group，其余 → user（用户级，全局生效）。
+    新表同键行已存在则跳过——新表是唯一事实源，不覆盖用户已保存的新值。
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(db.engine)
+    if "contact_profile" not in insp.get_table_names():
+        return
+    if "contact_remark_config" not in insp.get_table_names():
+        return
+    db.session.execute(text(
+        "INSERT INTO contact_remark_config "
+        "(scope_type, target_wxid, remark_name, auto_quote_enabled, tags, updated_at) "
+        "SELECT CASE WHEN wxid LIKE '%@chatroom' THEN 'group' ELSE 'user' END, "
+        "wxid, COALESCE(remark, ''), 0, COALESCE(tags, '[]'), CURRENT_TIMESTAMP "
+        "FROM contact_profile "
+        "WHERE deleted_at IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM contact_remark_config rc "
+        "  WHERE rc.scope_type = (CASE WHEN contact_profile.wxid LIKE '%@chatroom' "
+        "    THEN 'group' ELSE 'user' END) "
+        "  AND rc.target_wxid = contact_profile.wxid)"
+    ))
+    db.session.commit()
+
+
+def _archive_contact_profile():
+    """搬迁完成后旧 contact_profile 表改名归档（可查证、可恢复，不参与业务查询）。
+
+    物理删除由观察期结束后手动执行：
+    DROP TABLE _archived_contact_profile_20261116;
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(db.engine)
+    if "contact_profile" not in insp.get_table_names():
+        return
+    db.session.execute(text(
+        "ALTER TABLE contact_profile RENAME TO _archived_contact_profile_20261116"
+    ))
+    db.session.commit()
 
 
 def _try_alter(sql):

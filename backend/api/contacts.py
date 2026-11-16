@@ -6,7 +6,7 @@ from flask import Blueprint, g, jsonify, request
 
 from backend.extensions import db
 from backend.models.contact import Contact
-from backend.models.contact_profile import ContactProfile
+from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.conversation import Conversation
 from backend.services import anonymize
 from backend.services.auth import require_role
@@ -62,11 +62,12 @@ def list_contacts():
     if keyword:
         kw = keyword.lower()
         wxids = [c.wxid for c in contacts]
+        # 备注搜索走统一配置表（用户级/群级；wxid 与作用域一一对应，无跨域撞键）
         remarks = {
-            p.wxid: (p.remark or "")
-            for p in ContactProfile.query.filter(
-                ContactProfile.wxid.in_(wxids),
-                ContactProfile.deleted_at.is_(None),
+            rc.target_wxid: (rc.remark_name or "")
+            for rc in ContactRemarkConfig.query.filter(
+                ContactRemarkConfig.target_wxid.in_(wxids),
+                ContactRemarkConfig.deleted_at.is_(None),
             ).all()
         } if wxids else {}
         contacts = [c for c in contacts if _name_kw_hit(c.name, c.wxid, remarks.get(c.wxid, ""), kw)]
@@ -173,93 +174,3 @@ def _roster_chat_type(c):
     """contact 类型 → 会话类型（无会话时前端展示用）。"""
     return Conversation.CHAT_GROUP if c.type == Contact.TYPE_GROUP else Conversation.CHAT_SINGLE
 
-
-# ---------- 联系人档案（备注/标签，业务自建，不写回微信） ----------
-
-
-def _profile_wxid(contact_id):
-    """条目 id → wxid（限当前登录人绑定设备）。
-
-    正数 = contact 行；负数 = 补集（会话行，出参约定取 -conv.id）。
-    两套自增 id 不能混查——正负号隔离，避免解析到同号的另一个联系人。
-    """
-    openids = user_openids(g.current_user.id)
-    if not openids:
-        return None
-    if contact_id < 0:
-        conv = Conversation.query.filter(
-            Conversation.id == -contact_id,
-            Conversation.openid.in_(openids),
-            Conversation.deleted_at.is_(None),
-        ).first()
-        return conv.wxid if conv else None
-    c = Contact.query.filter(
-        Contact.id == contact_id,
-        Contact.openid.in_(openids),
-        Contact.deleted_at.is_(None),
-    ).first()
-    if c:
-        return c.wxid
-    conv = Conversation.query.filter(
-        Conversation.id == contact_id,
-        Conversation.openid.in_(openids),
-        Conversation.deleted_at.is_(None),
-    ).first()
-    return conv.wxid if conv else None
-
-
-@bp.get("/api/contacts/<contact_id>/profile")
-@require_role()
-def get_profile(contact_id):
-    """联系人档案（前端只传条目 id，不传 wxid）；无记录返回默认空值。
-
-    id 允许负数（补集条目），int 转换失败按不存在处理。
-    """
-    try:
-        wxid = _profile_wxid(int(contact_id))
-    except ValueError:
-        return jsonify(code=404, msg="联系人不存在"), 404
-    if not wxid:
-        return jsonify(code=404, msg="联系人不存在"), 404
-    p = ContactProfile.query.filter_by(wxid=wxid, deleted_at=None).first()
-    return jsonify(code=0, msg="success", data=p.to_json() if p else {"remark": "", "tags": []})
-
-
-@bp.put("/api/contacts/<contact_id>/profile")
-@require_role()
-def put_profile(contact_id):
-    """保存备注/标签（upsert）。校验超限，标签去重去空。"""
-    try:
-        wxid = _profile_wxid(int(contact_id))
-    except ValueError:
-        return jsonify(code=404, msg="联系人不存在"), 404
-    if not wxid:
-        return jsonify(code=404, msg="联系人不存在"), 404
-
-    body = request.get_json(silent=True) or {}
-    remark = str(body.get("remark") or "").strip()
-
-    if len(remark) > ContactProfile.MAX_REMARK_LEN:
-        return jsonify(code=400, msg=f"备注不能超过 {ContactProfile.MAX_REMARK_LEN} 字"), 400
-
-    tags_in = body.get("tags") if isinstance(body.get("tags"), list) else []
-    tags = []
-    for t in tags_in:
-        t = str(t).strip()
-        if t and t not in tags:
-            tags.append(t)
-    if len(tags) > ContactProfile.MAX_TAGS:
-        return jsonify(code=400, msg=f"标签最多 {ContactProfile.MAX_TAGS} 个"), 400
-    if any(len(t) > ContactProfile.MAX_TAG_LEN for t in tags):
-        return jsonify(code=400, msg=f"单个标签不能超过 {ContactProfile.MAX_TAG_LEN} 字"), 400
-
-    p = ContactProfile.query.filter_by(wxid=wxid).first()  # 含已删除：命中则复活旧行
-    if p is None:
-        p = ContactProfile(wxid=wxid)
-        db.session.add(p)
-    else:
-        p.restore()
-    p.remark = remark
-    p.tags = tags
-    db.session.commit()
-    return jsonify(code=0, msg="success", data=p.to_json())

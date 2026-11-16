@@ -1,7 +1,7 @@
 """通讯录接口单测。"""
 from backend.extensions import db
 from backend.models.contact import Contact
-from backend.models.contact_profile import ContactProfile
+from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.conversation import Conversation
 
 
@@ -56,7 +56,7 @@ def test_roster_contact_with_conversation_links(client):
 def test_keyword_hits_remark(client):
     """keyword 命中业务备注（contact 表搜索包含备注）。"""
     make_roster("wxid_r", name="王老板")
-    db.session.add(ContactProfile(wxid="wxid_r", remark="月结大客户", tags=[]))
+    db.session.add(ContactRemarkConfig(scope_type="user", target_wxid="wxid_r", remark_name="月结大客户", tags=[]))
     make_roster("wxid_other", name="李四")
     db.session.commit()
 
@@ -124,7 +124,7 @@ def test_keyword_hits_pinyin(client):
 def test_keyword_hits_remark_pinyin(client):
     """拼音搜索命中备注：remark=张峰的客户 输入 zhang 可搜到 王老板。"""
     make_roster("wxid_r", name="王老板")
-    db.session.add(ContactProfile(wxid="wxid_r", remark="张峰的客户", tags=[]))
+    db.session.add(ContactRemarkConfig(scope_type="user", target_wxid="wxid_r", remark_name="张峰的客户", tags=[]))
     db.session.commit()
 
     data = client.get("/api/contacts?type=friends&keyword=zhang").get_json()["data"]
@@ -150,8 +150,8 @@ def test_keyword_pinyin_respects_char_boundary(client):
     assert {c["name"] for c in data["list"]} == {"杭州圣驰汽配", "后生仔"}
 
 
-def test_extras_use_negative_id_and_profile_resolve(client):
-    """补集（会话only）条目 id 取负：与 contact 表 id 隔离，档案按负 id 解析回会话行。"""
+def test_extras_use_negative_id_and_config_resolve(client):
+    """补集（会话only）条目 id 取负：与 contact 表 id 隔离，备注配置按负 id 解析回会话行。"""
     make_roster("wxid_roster", name="正册联系人")     # contact 表行
     conv = make_contact(wxid="wxid_extra", name="补集联系人")  # 无 contact 行 → 补集
 
@@ -162,9 +162,10 @@ def test_extras_use_negative_id_and_profile_resolve(client):
     assert extra["id"] == -conv.id
     assert extra["conversation_id"] == conv.id
 
-    # 负 id 反查档案：解析回会话行的 wxid（不落到同号的 contact 行上）
-    data = client.get(f"/api/contacts/{-conv.id}/profile").get_json()["data"]
-    assert data == {"remark": "", "tags": []}
+    # 负 id 反查备注配置：解析回会话行的 wxid（不落到同号的 contact 行上）
+    data = client.get(f"/api/contacts/{-conv.id}/remark-config").get_json()["data"]
+    assert data["scope_type"] == "user"
+    assert data["remark_name"] == ""
 
 
 def test_keyword_ignores_wxid(client):
@@ -237,66 +238,3 @@ def test_letter_pinyin_and_fallback(client):
 
     assert letters == [("B", "白云"), ("C", "陈国斌"), ("#", None)]
 
-
-# ---------- 联系人档案（备注/标签，按 contact_id 访问——脱敏契约） ----------
-
-
-def test_profile_default_empty(client):
-    """无档案记录时返回默认空值。"""
-    c = make_roster("wxid_a")
-
-    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
-
-    assert data == {"remark": "", "tags": []}
-
-
-def test_profile_put_then_get(client):
-    """PUT 创建档案后 GET 可读回。"""
-    c = make_roster("wxid_a")
-    r = client.put(f"/api/contacts/{c.id}/profile", json={"remark": "月结客户", "tags": ["奔驰超豪", "月结"]})
-
-    assert r.get_json()["code"] == 0
-    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
-
-    assert data == {"remark": "月结客户", "tags": ["奔驰超豪", "月结"]}
-
-
-def test_profile_put_updates_existing(client):
-    """重复 PUT 走更新而非新建。"""
-    c = make_roster("wxid_a")
-    client.put(f"/api/contacts/{c.id}/profile", json={"remark": "旧备注", "tags": ["a"]})
-    client.put(f"/api/contacts/{c.id}/profile", json={"remark": "新备注", "tags": ["a", "b"]})
-
-    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
-
-    assert data["remark"] == "新备注"
-    assert data["tags"] == ["a", "b"]
-
-
-def test_profile_rejects_over_limits(client):
-    """备注超 100 字 / 标签超 10 个 / 单标签超 12 字均拒绝。"""
-    ca, cb, cc = make_roster("wxid_a"), make_roster("wxid_b"), make_roster("wxid_c")
-    r1 = client.put(f"/api/contacts/{ca.id}/profile", json={"remark": "x" * 101, "tags": []})
-    r2 = client.put(f"/api/contacts/{cb.id}/profile", json={"remark": "", "tags": [f"t{i}" for i in range(11)]})
-    r3 = client.put(f"/api/contacts/{cc.id}/profile", json={"remark": "", "tags": ["x" * 13]})
-
-    assert r1.get_json()["code"] == 400
-    assert r2.get_json()["code"] == 400
-    assert r3.get_json()["code"] == 400
-
-
-def test_profile_tags_dedupe_and_trim(client):
-    """标签自动去空白、去重、去空项。"""
-    c = make_roster("wxid_a")
-    client.put(f"/api/contacts/{c.id}/profile", json={"remark": "", "tags": [" 月结 ", "月结", "", "奔驰"]})
-
-    data = client.get(f"/api/contacts/{c.id}/profile").get_json()["data"]
-
-    assert data["tags"] == ["月结", "奔驰"]
-
-
-def test_profile_contact_not_found(client):
-    """contact_id 不存在（或跨设备）：404，档案接口不按 wxid 裸查。"""
-    resp = client.get("/api/contacts/99999/profile")
-
-    assert resp.status_code == 404

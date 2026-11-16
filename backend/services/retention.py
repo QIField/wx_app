@@ -1,6 +1,6 @@
 """过期日志物理清理：全库唯一允许物理删除（DELETE）的位置。
 
-业务表（device / user_device / contact / contact_profile / group_member 等）
+业务表（device / user_device / contact / contact_remark_config / group_member 等）
 一律软删除，只写 deleted_at；只有日志表按保留期物理清理。
 保留期集中在本文件配置，清理动作本身写入审计，避免“审计被自己删掉”无痕。
 """
