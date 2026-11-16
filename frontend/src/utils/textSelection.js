@@ -36,10 +36,9 @@ export function getSelectionState() {
 }
 
 export function clearSelection() {
-  if (sel) {
-    sel = null
-    window.CSS?.highlights?.delete(HL_NAME)
-  }
+  // 无条件删高亮（幂等）：拖动中已设高亮但最终 collapsed/未形成选中时同样要清掉，防残留
+  window.CSS?.highlights?.delete(HL_NAME)
+  sel = null
 }
 
 /** 右键复制取值：选中归属该消息才返回片段文本，否则空串（调用方兜底全文） */
@@ -90,20 +89,20 @@ function boundaryOf(el, first) {
   return null
 }
 
-/* 把拖动端点约束在起始容器文本范围内：出容器则按方向取容器首/尾（实现跨气泡拖动 clamp） */
-function clampCaretInto(caret, el) {
-  if (caret && caret.node && el.contains(caret.node)) return caret
-  if (!caret || !caret.node) return boundaryOf(el, true)
-  const head = boundaryOf(el, true)
-  const tail = boundaryOf(el, false)
+/* 把拖动端点约束在起始容器文本范围内：出容器则按方向取容器首/尾（实现跨气泡拖动 clamp）。
+   首尾文本边界在 mousedown 时预计算缓存于 drag，mousemove 高频路径不再每次 TreeWalker 全遍历 */
+function clampCaretInto(caret, drag) {
+  const { head, tail } = drag
   if (!head || !tail) return null
+  if (caret && caret.node && drag.containerEl.contains(caret.node)) return caret
+  if (!caret || !caret.node) return head
   return compareCaret(caret, head) < 0 ? head : tail
 }
 
 /* 用 anchor/last 两个端点构造文档序 Range（自动处理前后向） */
-function buildRange(anchor, last, el) {
-  const a = clampCaretInto(anchor, el)
-  const b = clampCaretInto(last, el)
+function buildRange(anchor, last, drag) {
+  const a = clampCaretInto(anchor, drag)
+  const b = clampCaretInto(last, drag)
   if (!a || !b) return null
   const range = document.createRange()
   if (compareCaret(a, b) <= 0) {
@@ -122,7 +121,17 @@ export function onTextMouseDown(e, msgId) {
   const containerEl = e.currentTarget
   const anchor = caretFromPoint(e.clientX, e.clientY)
   if (!anchor || !anchor.node) return
-  drag = { msgId, containerEl, anchor, startX: e.clientX, startY: e.clientY, range: null }
+  drag = {
+    msgId,
+    containerEl,
+    anchor,
+    startX: e.clientX,
+    startY: e.clientY,
+    range: null,
+    // 容器首/尾文本边界一次预计算：拖动越界 clamp 的高频路径零遍历
+    head: boundaryOf(containerEl, true),
+    tail: boundaryOf(containerEl, false),
+  }
   document.addEventListener('mousemove', onDragMove)
   document.addEventListener('mouseup', onDragEnd)
 }
@@ -131,7 +140,7 @@ function onDragMove(e) {
   if (!drag) return
   const last = caretFromPoint(e.clientX, e.clientY)
   if (!last || !last.node) return
-  const range = buildRange(drag.anchor, last, drag.containerEl)
+  const range = buildRange(drag.anchor, last, drag)
   if (!range) return
   drag.range = range
   window.CSS.highlights.set(HL_NAME, new window.Highlight(range))
@@ -149,7 +158,7 @@ function onDragEnd(e) {
     clearSelection()
     return
   }
-  const range = d.range || buildRange(d.anchor, caretFromPoint(e.clientX, e.clientY) || d.anchor, d.containerEl)
+  const range = d.range || buildRange(d.anchor, caretFromPoint(e.clientX, e.clientY) || d.anchor, d)
   if (!range || range.collapsed) {
     clearSelection()
     return
