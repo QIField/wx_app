@@ -195,19 +195,15 @@ export function previewRingtone(id, onEnd) {
   stopPreview()
   if (isCustomId(id)) {
     if (!rt.url) return 0
+    // 播完/出错/被拦截都走同一个收尾：停试听 + 通知 UI 复位
+    const finish = () => {
+      stopPreview()
+      if (typeof onEnd === 'function') onEnd()
+    }
     customAudio = new Audio(rt.url)
-    customAudio.addEventListener('ended', () => {
-      stopPreview()
-      if (typeof onEnd === 'function') onEnd()
-    })
-    customAudio.addEventListener('error', () => {
-      stopPreview()
-      if (typeof onEnd === 'function') onEnd()
-    })
-    customAudio.play().catch(() => {
-      stopPreview()
-      if (typeof onEnd === 'function') onEnd()
-    })
+    customAudio.addEventListener('ended', finish)
+    customAudio.addEventListener('error', finish)
+    customAudio.play().catch(finish)
     return -1
   }
   if (!ctx) unlock()

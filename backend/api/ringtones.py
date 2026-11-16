@@ -68,39 +68,51 @@ def _clean_name(filename: str) -> str:
     return (stem or "自定义铃声")[:64]
 
 
+def _upload_guard(user, file):
+    """上传前置校验（顺序：缺失→格式→空→大小→魔数→数量→磁盘水位）。
+
+    校验失败时同步写审计日志（存储空间不足场景）。
+    返回 (视图返回值|None, 扩展名|None, 文件字节|None)：失败时视图返回值为 (响应, 400)。
+    """
+    if file is None or not file.filename:
+        return (jsonify(code=400, msg="缺少文件（multipart 字段 file）"), 400), None, None
+
+    ext = (file.filename.rsplit(".", 1)[-1] or "").lower()
+    if ext not in RINGTONE_ALLOWED_EXTS:
+        return (jsonify(code=400, msg=f"不支持的格式，仅支持 {_EXT_TIP}"), 400), None, None
+
+    blob = file.read()
+    if not blob:
+        return (jsonify(code=400, msg="文件内容为空"), 400), None, None
+    if len(blob) > RINGTONE_MAX_BYTES:
+        return (jsonify(code=400, msg=f"铃声文件超过 {RINGTONE_MAX_BYTES // (1024 * 1024)}MB 上限"), 400), None, None
+
+    if _sniff_ext(blob) != ext:
+        return (jsonify(code=400, msg="文件内容与扩展名不符，或不是有效音频文件"), 400), None, None
+
+    if (
+        UserRingtone.query.filter_by(user_id=user.id, deleted_at=None).count()
+        >= RINGTONE_MAX_COUNT
+    ):
+        return (jsonify(code=400, msg=f"最多上传 {RINGTONE_MAX_COUNT} 个自定义铃声"), 400), None, None
+
+    if shutil.disk_usage(MEDIA_DIR).free < RINGTONE_MIN_FREE_BYTES:
+        log_action(AuditModule.SYSTEM, "上传铃声", file.filename,
+                   result=AuditLog.RESULT_FAIL, detail="存储空间不足", operator=user)
+        return (jsonify(code=400, msg="存储空间不足，请联系管理员"), 400), None, None
+
+    return None, ext, blob
+
+
 @bp.post("/api/ringtones")
 @require_role()
 def upload_ringtone():
     """上传自定义铃声：multipart 字段 file，仅 MP3/M4A/WAV/OGG，≤5MB。"""
     user = g.current_user
     file = request.files.get("file")
-    if file is None or not file.filename:
-        return jsonify(code=400, msg="缺少文件（multipart 字段 file）"), 400
-
-    ext = (file.filename.rsplit(".", 1)[-1] or "").lower()
-    if ext not in RINGTONE_ALLOWED_EXTS:
-        return jsonify(code=400, msg=f"不支持的格式，仅支持 {_EXT_TIP}"), 400
-
-    blob = file.read()
-    if not blob:
-        return jsonify(code=400, msg="文件内容为空"), 400
-    if len(blob) > RINGTONE_MAX_BYTES:
-        return jsonify(code=400, msg=f"铃声文件超过 {RINGTONE_MAX_BYTES // (1024 * 1024)}MB 上限"), 400
-
-    sniffed = _sniff_ext(blob)
-    if sniffed != ext:
-        return jsonify(code=400, msg="文件内容与扩展名不符，或不是有效音频文件"), 400
-
-    if (
-        UserRingtone.query.filter_by(user_id=user.id, deleted_at=None).count()
-        >= RINGTONE_MAX_COUNT
-    ):
-        return jsonify(code=400, msg=f"最多上传 {RINGTONE_MAX_COUNT} 个自定义铃声"), 400
-
-    if shutil.disk_usage(MEDIA_DIR).free < RINGTONE_MIN_FREE_BYTES:
-        log_action(AuditModule.SYSTEM, "上传铃声", file.filename,
-                   result=AuditLog.RESULT_FAIL, detail="存储空间不足", operator=user)
-        return jsonify(code=400, msg="存储空间不足，请联系管理员"), 400
+    err, ext, blob = _upload_guard(user, file)
+    if err:
+        return err
 
     stored = uuid4().hex + "." + ext
     _ringtones_dir().mkdir(parents=True, exist_ok=True)
