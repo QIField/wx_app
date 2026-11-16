@@ -54,3 +54,9 @@ body {
   margin: 0 1px;
 }
 .q-text .wx-emoji { width: 18px; height: 18px; vertical-align: -4px; }
+
+/* 聊天消息区禁用浏览器原生选择，由 textSelection.js 自定义引擎接管：
+   拖选高亮走 ::highlight，右键复制片段、点击非文本区不清选（原生选区做不到） */
+.msgs, .msgs * { -webkit-user-select: none; user-select: none; }
+/* 自定义选中高亮：主色透底，入/出方向气泡与引用块通吃（仅支持文本类属性） */
+::highlight(chat-text-sel) { background-color: rgba(29, 93, 228, 0.28); }

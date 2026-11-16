@@ -9,6 +9,7 @@ import { computed, ref } from 'vue'
 import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
 import { renderEmojiHtml } from '../utils/emoji'
 import { renderMessageHtml } from '../utils/mention'
+import { onTextMouseDown, onTextDblClick } from '../utils/textSelection'
 import { mediaUrlOf, messageMediaUrlOf } from '../utils/media'
 import { displayNameOf } from '../utils/format'
 import AnonAvatar from './AnonAvatar.vue'
@@ -176,9 +177,21 @@ function onReEdit() {
   emit('reedit', props.msg.content)
 }
 
-/* 气泡右键 → 上抛给 ChatPanel 统一弹菜单（菜单状态收口在父层，行组件只报坐标与目标） */
+/* 气泡右键 → 上抛给 ChatPanel 统一弹菜单（菜单状态收口在父层，行组件只报坐标与目标）。
+ * 选中文本不再在此快照：自定义选区引擎（textSelection.js）持有单例状态，
+ * 父层用 msg.id 对比引擎归属决定复制片段或全文兜底 */
 function onMenu(e) {
   emit('menu', { msg: props.msg, x: e.clientX, y: e.clientY })
+}
+
+/* 文本容器（正文/引用块）接入自定义选区引擎：多选模式下点击行为已被勾选占用，短路不拖选 */
+function onTextDown(e) {
+  if (props.selectable) return
+  onTextMouseDown(e, props.msg.id)
+}
+function onTextDbl(e) {
+  if (props.selectable) return
+  onTextDblClick(e, props.msg.id)
 }
 </script>
 
@@ -250,7 +263,7 @@ function onMenu(e) {
              被引用的是图片且对上了原消息：不加灰底框，骨架屏占位直接渲染缩略图；
              其余情况走灰色引用块文字 -->
         <template v-else-if="quote">
-          <div class="content">{{ quote.reply || '[引用]' }}</div>
+          <div class="content" @mousedown="onTextDown" @dblclick="onTextDbl">{{ quote.reply || '[引用]' }}</div>
           <template v-if="quoteImg">
             <span v-if="quote.name" class="q-text bare">{{ quote.name }}：</span>
             <span class="ph q-ph" :class="{ on: loaded, sized: !!qBox }" :style="qBox">
@@ -270,7 +283,7 @@ function onMenu(e) {
             </span>
           </template>
           <div v-else class="quote-box">
-            <span class="q-text" v-html="quoteHtml"></span>
+            <span class="q-text" v-html="quoteHtml" @mousedown="onTextDown" @dblclick="onTextDbl"></span>
           </div>
         </template>
 
@@ -315,7 +328,7 @@ function onMenu(e) {
         <div v-else-if="msg.msg_type === 5" class="content type-label">[链接]</div>
 
         <div v-else-if="msg.msg_type !== 1" class="content type-label">[未知类型]</div>
-        <div v-else class="content" v-html="contentHtml"></div>
+        <div v-else class="content" v-html="contentHtml" @mousedown="onTextDown" @dblclick="onTextDbl"></div>
 
         <!-- 时间不再逐条显示（由时间分隔线承担），仅出方向保留发送状态；完整时间悬停气泡可见 -->
         <div v-if="msg.direction === 2" class="meta">

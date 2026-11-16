@@ -9,6 +9,7 @@ import { msgTextOf, canRevoke } from '../utils/message'
 import { messageMediaUrlOf } from '../utils/media'
 import { copyImage, copyText } from '../utils/clipboard'
 import { buildTimeline } from '../utils/timeline'
+import { attachTextSelection, detachTextSelection, clearSelection, copyFragmentOf } from '../utils/textSelection'
 import MessageRow from './MessageRow.vue'
 import ContextMenu from './ContextMenu.vue'
 import ChatComposer from './ChatComposer.vue'
@@ -46,8 +47,12 @@ onMounted(() => {
   measure()
   window.addEventListener('resize', measure)
   offResize = () => window.removeEventListener('resize', measure)
+  attachTextSelection() // 自定义文本选中引擎：Esc/失焦清选等全局监听
 })
-onUnmounted(() => offResize?.())
+onUnmounted(() => {
+  offResize?.()
+  detachTextSelection()
+})
 
 const SK_GAP = 16 // 行间距（与 CSS .sk-row margin-bottom 一致）
 const SK_TIME_H = 36 // 时间胶囊行高估算（胶囊 + 上下间距）
@@ -162,8 +167,12 @@ function onReEdit(content) {
   composerRef.value?.fillAndFocus(content)
 }
 
-/* 切会话/换账号必须退出多选：勾选集合按会话隔离，跨会话残留会转发错消息 */
-watch(() => [chat.currentId, chat.activeOpenid], () => exitMulti())
+/* 切会话/换账号必须退出多选：勾选集合按会话隔离，跨会话残留会转发错消息。
+   同时清掉自定义文本选中：.msgs 以 currentId 作 :key 全量重建，旧 Range 已失效 */
+watch(() => [chat.currentId, chat.activeOpenid], () => {
+  exitMulti()
+  clearSelection()
+})
 
 /* ---------- 消息右键菜单 ---------- */
 const menu = ref(null) // { msg, x, y }；null 即收起
@@ -200,8 +209,9 @@ async function revokeMsg(m) {
   }
 }
 
-/* 菜单分发：撤回走 revokeMsg；复制——文本写文本剪贴板，图片复制通道
- * （API/选中复制）由 clipboard.copyImage 按环境自选，失败统一 toast */
+/* 菜单分发：撤回走 revokeMsg；复制——文本写文本剪贴板（自定义选区引擎的选中片段
+ * 优先，按 msg.id 对比归属；无选中兜底全文），图片复制通道（API/选中复制）由
+ * clipboard.copyImage 按环境自选，失败统一 toast */
 async function onMenuSelect(key) {
   const m = menu.value?.msg
   menu.value = null
@@ -218,8 +228,10 @@ async function onMenuSelect(key) {
       )
       ElMessage.success('已复制图片')
     } else {
-      await copyText(msgTextOf(m))
+      const frag = copyFragmentOf(m.id) // 选中归属本气泡才返回片段，否则空串
+      await copyText(frag || msgTextOf(m))
       ElMessage.success('已复制')
+      if (frag) clearSelection() // 片段复制成功后清选（对齐原生复制后选区消失的习惯）
     }
   } catch {
     ElMessage.error('复制失败，可放大图片右键复制')
@@ -238,8 +250,9 @@ const pending = ref(null)         // { convId, msgIds } 待转发的任务
 const recordMsgId = ref(null)     // 回看中的合并卡片消息 id（历史卡片）
 
 function enterMulti() {
-  multi.value = true
+  multi.value = true // 多选模式与文本拖选互斥，进入前清掉自定义选中
   pickedIds.value = new Set()
+  clearSelection()
 }
 
 function exitMulti() {
