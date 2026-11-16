@@ -53,7 +53,6 @@ const peerLabel = computed(() => peerRemark.value || displayNameOf(chat.currentC
 function openPeerSide() {
   const c = chat.currentConv
   if (!c) return
-  const isGroup = c.chat_type === 2
   side.value = {
     key: `peer-${c.id}`,
     apiId: -c.id, // 会话条目走负数 id 约定（脱敏契约，不传 wxid）
@@ -62,7 +61,6 @@ function openPeerSide() {
     alias: c.alias,
     avatar: c.avatar,
     chatType: c.chat_type,
-    scopeNote: isGroup ? '作用域：仅当前群' : '作用域：全局生效（私聊 + 所有群聊）',
     fetch: fetchRemarkConfig,
     save: saveRemarkConfig,
     fromGroup: false,
@@ -83,7 +81,6 @@ function onRowProfile(msg) {
     alias,
     avatar: msg.sender_avatar || null,
     chatType: 1,
-    scopeNote: '作用域：全局生效（私聊 + 所有群聊）',
     fetch: (id) => fetchMemberRemarkConfig(id, alias),
     save: (id, payload) => saveMemberRemarkConfig(id, alias, payload),
     fromGroup: true,

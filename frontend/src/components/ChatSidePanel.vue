@@ -1,13 +1,13 @@
 <script setup>
 /** 聊天右侧「客户资料」侧栏：头部信息 + 统一备注编辑器。
- *  由 ChatPanel 触发展开（点头像 / 顶部备注名），收起走按钮或 Esc；
+ *  由 ChatPanel 触发展开（点头像 / 顶部备注名），收起走头部按钮或 Esc；
  *  群成员目标时展示所属群来源，配置仍为该用户的用户级（全局生效）。 */
 import { onMounted, onUnmounted } from 'vue'
 import ContactAvatar from './ContactAvatar.vue'
 import RemarkEditor from './RemarkEditor.vue'
 
 const props = defineProps({
-  /** { key, apiId, title, subtitle, alias, avatar, chatType, scopeNote, fetch, save, fromGroup } */
+  /** { key, apiId, title, subtitle, alias, avatar, chatType, fetch, save, fromGroup } */
   target: { type: Object, required: true },
 })
 const emit = defineEmits(['close', 'saved'])
@@ -40,16 +40,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     </div>
 
     <div class="rk-body">
-      <div v-if="target.fromGroup" class="rk-from">来自群聊成员 · 配置对该用户全局生效</div>
+      <div v-if="target.fromGroup" class="rk-from">来自群聊成员</div>
       <RemarkEditor
         :key="target.key"
         :fetch="target.fetch"
         :save="target.save"
         :target-key="target.apiId"
-        :scope-note="target.scopeNote"
         @saved="emit('saved', $event)"
       />
-      <button class="rk-close-bar" @click="emit('close')">收起</button>
     </div>
   </aside>
 </template>
@@ -93,7 +91,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 }
 .rk-collapse:hover { color: var(--c-primary); border-color: var(--c-primary); }
 
-.rk-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.rk-body { flex: 1; overflow-y: auto; }
 .rk-from {
   margin: 10px 16px 0;
   font-size: 11px; color: var(--c-text-sub);
@@ -101,13 +99,4 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   padding: 5px 8px;
 }
 
-.rk-close-bar {
-  margin: auto 16px 14px;
-  height: 30px;
-  border: 1px solid var(--c-border); border-radius: var(--r-sm);
-  background: #fff; color: var(--c-text-sub); cursor: pointer;
-  font-size: 12px;
-  transition: color 0.15s, border-color 0.15s;
-}
-.rk-close-bar:hover { color: var(--c-primary); border-color: var(--c-primary); }
 </style>

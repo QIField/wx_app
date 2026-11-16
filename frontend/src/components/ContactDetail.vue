@@ -68,7 +68,6 @@ async function enterChat() {
         :fetch="fetchRemarkConfig"
         :save="saveRemarkConfig"
         :target-key="contact.id"
-        :scope-note="typeName === '群聊' ? '作用域：仅当前群' : '作用域：全局生效（私聊 + 所有群聊）'"
       />
 
       <div class="d-actions">

@@ -12,8 +12,6 @@ const props = defineProps({
   save: { type: Function, required: true },
   /** 目标条目 id：变化即重载（切换联系人/群/群成员） */
   targetKey: { type: [String, Number], default: '' },
-  /** 作用域说明，如「作用域：全局生效（私聊 + 所有群聊）」 */
-  scopeNote: { type: String, default: '' },
 })
 const emit = defineEmits(['saved'])
 
@@ -101,8 +99,6 @@ async function saveEdit() {
     <div v-else-if="loadErr" class="rk-state">{{ loadErr }}</div>
 
     <template v-else-if="cfg">
-      <div class="rk-scope">{{ scopeNote }}</div>
-
       <!-- 查看态 -->
       <template v-if="!editing">
         <div class="rk-row"><span class="k">备注名称</span><span :class="{ dim: !cfg.remark_name }">{{ cfg.remark_name || '暂无备注' }}</span></div>
@@ -134,7 +130,6 @@ async function saveEdit() {
           <div class="rk-quote">
             <span class="q-label">自动报价</span>
             <el-switch v-model="draftQuote" />
-            <span class="q-hint">开启后向该客户报价时自动生成报价单</span>
           </div>
           <div class="rk-edit-row">
             <span class="tag-list">
@@ -168,14 +163,6 @@ async function saveEdit() {
 /* 纯点选/展示场景禁止划选；输入框保留可选中文本 */
 .rk { padding: 12px 16px; user-select: none; font-size: 12.5px; }
 .rk input { user-select: text; }
-
-.rk-scope {
-  margin-bottom: 8px;
-  font-size: 11px; color: var(--c-primary-deep);
-  background: var(--c-primary-soft);
-  border: 1px solid #b9d0ff; border-radius: var(--r-sm);
-  padding: 5px 8px;
-}
 
 .rk-row {
   display: flex; gap: 12px; align-items: flex-start;
@@ -221,7 +208,6 @@ async function saveEdit() {
 
 .rk-quote { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
 .q-label { font-size: 12.5px; }
-.q-hint { font-size: 11px; color: var(--c-text-sub); }
 
 .rk-state { padding: 16px 0; color: var(--c-text-sub); font-size: 12px; }
 </style>
