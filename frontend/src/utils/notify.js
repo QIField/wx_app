@@ -8,7 +8,7 @@
  *  任意 pointerdown 兜底解锁 AudioContext（浏览器自动播放策略）；
  *  响铃遇挂起先 resume 再响，仍被拦截回调 setNotifyBlockedHandler（只一次）。 */
 
-import { getRingtone, loadRingtone, saveRingtone } from './ringtones'
+import { getRingtone, isCustomId, loadRingtone, saveRingtone } from './ringtones'
 
 export const MERGE_WINDOW = 5000 // 合并窗口 ms：响铃后 5s 内的新消息合并
 export const EDGE_BUFFER = 30 // 边界提前量 ms：抵消定时器调度抖动，保证窗口到期即补响
@@ -64,7 +64,29 @@ function playSequence(rt) {
 }
 
 function play() {
-  playSequence(getRingtone(ringtoneId))
+  const rt = getRingtone(ringtoneId)
+  if (rt.url) playCustomAudio(rt)
+  else playSequence(rt)
+}
+
+/* ---------- 自定义铃声：HTML Audio 播音频文件（与合成路径互斥） ---------- */
+
+let customAudio = null // 正在播放的自定义铃声 Audio 元素
+
+/** 播放自定义铃声文件；换播前先停旧的，播放被拦截走统一上报。 */
+function playCustomAudio(rt) {
+  stopCustomAudio()
+  customAudio = new Audio(rt.url)
+  customAudio.play().catch(reportBlocked)
+}
+
+function stopCustomAudio() {
+  if (!customAudio) return
+  try {
+    customAudio.pause()
+    customAudio.currentTime = 0
+  } catch (e) { /* 已释放的元素忽略 */ }
+  customAudio = null
 }
 
 function reportBlocked() {
@@ -134,29 +156,60 @@ export function currentRingtone() {
   return ringtoneId
 }
 
-/** 换铃声：更新内存并持久化到 localStorage（ringtones.js 负责兜底校验）。 */
+/** 换铃声：更新内存并持久化到 localStorage。
+ *  系统铃声经 getRingtone 校验兜底；自定义铃声原样存 custom:<id> 前缀 id
+ *  （合法性由 loadRingtone 对照内存缓存校验，铃声被删时自动回退默认）。 */
 export function setRingtone(id) {
-  ringtoneId = getRingtone(id).id
+  ringtoneId = isCustomId(id) ? id : getRingtone(id).id
   saveRingtone(ringtoneId)
+}
+
+/** 重新按最新持久化偏好校正当前铃声（自定义铃声列表拉取后调用）：
+ *  存的自定义铃声被删 → 回退默认；存的 custom:<id> 现在合法 → 恢复生效。 */
+export function refreshRingtone() {
+  const id = loadRingtone()
+  if (id !== ringtoneId) ringtoneId = id
 }
 
 let previewNodes = [] // 试听中的振荡器（可中途停止）
 let previewTimer = null // 试听自动复位定时器
 
-/** 停止试听：清定时器 + 立即停掉全部振荡器。 */
+/** 停止试听：清定时器 + 停掉全部振荡器 + 停自定义铃声 Audio。 */
 export function stopPreview() {
   if (previewTimer) {
     clearTimeout(previewTimer)
     previewTimer = null
   }
+  stopCustomAudio()
   previewNodes.forEach((o) => { try { o.stop() } catch (e) { /* 已结束的节点忽略 */ } })
   previewNodes = []
 }
 
-/** 试听指定铃声（设置弹窗）。返回时长秒，供 UI 做动画复位。 */
-export function previewRingtone(id) {
+/** 试听指定铃声（设置弹窗）：
+ *  - 系统铃声：Web Audio 合成，返回时长秒供 UI 定时复位动画；
+ *  - 自定义铃声：HTML Audio 播文件，播完/出错回调 onEnd 复位，返回 -1（时长未知）；
+ *  - 返回 0 表示无法播放（静音环境无 AudioContext）。
+ * @param onEnd 自定义铃声播完回调（合成铃声走定时复位，不需要） */
+export function previewRingtone(id, onEnd) {
   const rt = getRingtone(id)
   stopPreview()
+  if (isCustomId(id)) {
+    if (!rt.url) return 0
+    customAudio = new Audio(rt.url)
+    customAudio.addEventListener('ended', () => {
+      stopPreview()
+      if (typeof onEnd === 'function') onEnd()
+    })
+    customAudio.addEventListener('error', () => {
+      stopPreview()
+      if (typeof onEnd === 'function') onEnd()
+    })
+    customAudio.play().catch(() => {
+      stopPreview()
+      if (typeof onEnd === 'function') onEnd()
+    })
+    return -1
+  }
   if (!ctx) unlock()
   if (!ctx) return 0
   const dur = Math.max(...rt.notes.map((n) => n.t + (n.dur ?? 0.3)))

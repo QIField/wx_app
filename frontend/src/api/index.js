@@ -153,6 +153,21 @@ export const uploadFile = (file) => {
   return http.post('/uploads', form, { timeout: 60000 }) // 大文件放宽超时
 }
 
+/* ===== 自定义铃声 ===== */
+
+/** 当前登录人的自定义铃声列表：[{id, name, file_name, url, size, fmt, created_at}]。 */
+export const fetchRingtones = () => http.get('/ringtones')
+
+/** 上传自定义铃声（MP3/M4A/WAV/OGG，≤5MB）：返回新建行的同列表结构。 */
+export const uploadRingtone = (file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return http.post('/ringtones', form, { timeout: 60000 })
+}
+
+/** 删除自定义铃声（后端软删除）；若删除的是当前铃声，前端需回退默认。 */
+export const deleteRingtone = (id) => http.delete(`/ringtones/${id}`)
+
 /** 发媒体消息：msgType 2图片 3文件 4视频 5链接卡片，payload 按类型给对应 url 字段。 */
 export const sendMediaMessage = (convId, msgType, content, payload) =>
   http.post(`/conversations/${convId}/messages`, { msg_type: msgType, content, payload })

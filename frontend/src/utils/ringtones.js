@@ -1,12 +1,35 @@
 /** 消息提示音铃声库（数据单一来源）。
- *  铃声全部用 Web Audio 序列合成，零音频文件、离线可用；
+ *  系统铃声全部用 Web Audio 序列合成，零音频文件、离线可用；
  *  序列字段：t 起始秒 | f 起始频率Hz | to 滑向频率 | dur 时长秒
  *            type 波形(sine/triangle/square) | g 音量 | h 叠八度泛音
- *  当前选择持久化到 localStorage（本地偏好，不进后端）。 */
+ *  自定义铃声由后端 /api/ringtones 上传持久化，内存缓存后并入同一套选择/播放链路。
+ *  当前选择持久化到 localStorage（本地偏好，不进后端）：
+ *  系统铃声存 id，自定义铃声存 `custom:<行id>` 前缀 id。 */
 
 const LS_KEY = 'notify.ringtone.v1'
 
 export const DEFAULT_RING = 'ding-dong' // 恢复默认的目标
+
+/** 自定义铃声 id 前缀：localStorage 里区分系统/自定义铃声。 */
+export const CUSTOM_PREFIX = 'custom:'
+
+/** 判断是否自定义铃声 id。 */
+export function isCustomId(id) {
+  return typeof id === 'string' && id.startsWith(CUSTOM_PREFIX)
+}
+
+/** 自定义铃声内存缓存（行结构 + cid 前缀 id）；列表来自 /api/ringtones。 */
+let customList = []
+
+/** 写入自定义铃声缓存：rows 为后端返回行数组（原样行 id）。 */
+export function setCustomRingtones(rows) {
+  customList = (rows || []).map((r) => ({ ...r, cid: CUSTOM_PREFIX + r.id }))
+}
+
+/** 读当前自定义铃声缓存（设置弹窗渲染用）。 */
+export function getCustomRingtones() {
+  return customList
+}
 
 /** 经典铃声库（与 prototypes/settings-ringtone 原型同源）。
  *  isDefault 仅作 UI 展示标签。 */
@@ -82,16 +105,25 @@ export const RINGTONES = [
   },
 ]
 
-/** 按铃声 id 找定义；找不到回退默认（localStorage 被手改/版本演进时兜底）。 */
+/** 按铃声 id 找定义；自定义铃声查内存缓存（url 字段为音频文件地址）；
+ *  找不到回退默认（localStorage 被手改/铃声被删/版本演进时兜底）。 */
 export function getRingtone(id) {
+  if (isCustomId(id)) {
+    return customList.find((r) => r.cid === id)
+      || RINGTONES.find((r) => r.id === DEFAULT_RING)
+  }
   return RINGTONES.find((r) => r.id === id) || RINGTONES.find((r) => r.id === DEFAULT_RING)
 }
 
-/** 读当前铃声：无存档/存档非法时回退默认。 */
+/** 读当前铃声：无存档/存档非法（含自定义铃声已被删除）时回退默认。 */
 export function loadRingtone() {
   try {
     const id = localStorage.getItem(LS_KEY)
-    if (id && RINGTONES.some((r) => r.id === id)) return id
+    if (!id) return DEFAULT_RING
+    if (isCustomId(id)) {
+      return customList.some((r) => r.cid === id) ? id : DEFAULT_RING
+    }
+    if (RINGTONES.some((r) => r.id === id)) return id
   } catch (e) { /* 无痕模式等存取失败场景忽略 */ }
   return DEFAULT_RING
 }

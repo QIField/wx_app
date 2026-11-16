@@ -36,7 +36,7 @@
 |---|---|
 | 会话列表、聊天记录、发消息 | 中间方接口（只是搬运和保存） |
 | 在线状态、群信息、通讯录 | 中间方接口 |
-| 报价处理台、客户电话/城市/标签/备注、未读数、置顶 | **业务端自建**（存自己的 MySQL，接口里没有） |
+| 账号/组织/设备字典、客户备注标签、自定义铃声、未读数、置顶 | **业务端自建**（存自己的 MySQL，接口里没有） |
 
 ## 五、目录结构（规划）
 
@@ -51,16 +51,21 @@ wx_app/
 │   ├── ws/               # WebSocket 推送
 │   ├── models/           # 数据库表定义
 │   └── tests/            # 单元测试（核心业务必须写）
-├── frontend/             # Vue3 + Element Plus + Pinia
+├── frontend/             # Vue3 + Element Plus + Pinia（构建产物 dist/ 由 Flask 直接托管）
 ├── docs/
-│   ├── database.md       # 数据库设计
-│   └── api.md            # 接口文档 + 中间方接口速查表
+│   ├── database.md       # 数据库设计（16 张表总览 + 软删除规范）
+│   ├── api.md            # 接口文档 + 中间方接口速查表
+│   ├── message-forward.md       # 合并转发设计（快照/逐条下发）
+│   ├── audit-log.md             # 审计日志规范
+│   └── interface-log.md         # 接口日志规范（入站/出站、脱敏）
 ├── .env                  # 本地密钥配置（不进 git）
 ├── .env.example          # 配置模板（进 git）
 └── requirements.txt      # Python 依赖
 ```
 
-## 六、启动步骤（后端）
+## 六、启动步骤
+
+后端（Flask，同时托管前端静态文件与定时器/WebSocket）：
 
 ```powershell
 # 1. 首次：安装依赖
@@ -69,9 +74,19 @@ pip install -r requirements.txt
 # 2. 复制配置模板，填上自己的数据库和中间方密钥
 copy .env.example .env
 
-# 3. 启动
-python backend/app.py
+# 3. 启动（务必用 -m 方式，保证定时任务与 WebSocket 完整初始化）
+python -m backend.app
 ```
+
+前端（改了前端代码才需要重新构建）：
+
+```powershell
+cd frontend
+npm install        # 首次
+npm run build      # 产物输出 frontend/dist/，Flask 启动时直接托管，无需 nginx
+```
+
+本地调前端可另开 `npm run dev`（Vite 热更新，接口代理到 5000 端口）。
 
 VS Code 里打开终端会自动激活虚拟环境（已配置好，见 `.vscode/settings.json`）。
 
@@ -96,4 +111,6 @@ PROD_DATABASE_URL = mysql+pymysql://用户:密码@生产库地址/库名?charset
 - 一个文件一个职责，超 400 行拆分；函数超 80 行考虑拆分
 - 每 2-3 个功能做一次重构；核心业务必须写单测
 - 删除一律软删除（写 deleted_at，不执行真删除）；唯一例外是三张日志表的过期清理，只能走 `backend/services/retention.py`。新增表必须按必检清单登记，详见 [docs/database.md](docs/database.md) 第三节《软删除规范》
+- 新增/修改接口或表结构，必须在同一次提交里同步更新 [docs/api.md](docs/api.md) / [docs/database.md](docs/database.md)：改多少写多少（路径、参数、错误码与代码一致），不写背景废话
+- 下线功能必须同步删除文档对应章节，不许留死文档（2026-11-16 清理过一轮：报价处理台章节、过时接口路径共 9 处欠账）
 - 提交规范：`feat:` 新功能 / `fix:` 修 Bug / `refactor:` 重构（重构必须单独提交）

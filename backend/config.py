@@ -72,3 +72,9 @@ MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or (BASE_DIR / "backend" / "media"))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 # 上传文件大小上限（字节，默认 50MB）
 UPLOAD_MAX_BYTES = int(os.getenv("UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
+
+# 自定义铃声：格式白名单 + 大小上限 + 每用户数量上限 + 落盘前磁盘剩余空间下限
+RINGTONE_ALLOWED_EXTS = ("mp3", "m4a", "wav", "ogg")
+RINGTONE_MAX_BYTES = int(os.getenv("RINGTONE_MAX_BYTES", str(5 * 1024 * 1024)))
+RINGTONE_MAX_COUNT = int(os.getenv("RINGTONE_MAX_COUNT", "10"))
+RINGTONE_MIN_FREE_BYTES = int(os.getenv("RINGTONE_MIN_FREE_BYTES", str(100 * 1024 * 1024)))

@@ -4,6 +4,7 @@ from backend.models.audit_log import AuditLog
 from backend.models.base import SoftDeleteMixin
 from backend.models.contact import Contact
 from backend.models.contact_profile import ContactProfile
+from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.conversation import Conversation
 from backend.models.device import Device
 from backend.models.forward_snapshot import ForwardSnapshot
@@ -11,13 +12,15 @@ from backend.models.group_member import GroupMember
 from backend.models.message import Message
 from backend.models.middle_call_log import MiddleCallLog
 from backend.models.org import Org
+from backend.models.ringtone import UserRingtone
 from backend.models.send_task import SendTask
 from backend.models.sync_cursor import SyncCursor
 from backend.models.user import User
 from backend.models.user_device import UserDevice
 
 __all__ = [
-    "SoftDeleteMixin", "AccessLog", "AuditLog", "Contact", "ContactProfile", "Conversation",
-    "Device", "ForwardSnapshot", "GroupMember", "Message", "MiddleCallLog", "Org", "SendTask", "SyncCursor", "User",
-    "UserDevice",
+    "SoftDeleteMixin", "AccessLog", "AuditLog", "Contact", "ContactProfile", "ContactRemarkConfig",
+    "Conversation",
+    "Device", "ForwardSnapshot", "GroupMember", "Message", "MiddleCallLog", "Org",
+    "SendTask", "SyncCursor", "User", "UserDevice", "UserRingtone",
 ]

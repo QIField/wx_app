@@ -1,17 +1,20 @@
 <script setup>
 /** 设置弹窗 · 消息提示音选择。
- *  铃声库来自 utils/ringtones（Web Audio 序列合成，零音频文件），
+ *  系统铃声库来自 utils/ringtones（Web Audio 序列合成，零音频文件），
+ *  自定义铃声分组由 CustomRingtoneList 子组件自管（上传/列表/删除），
  *  试听/换铃声经 utils/notify（复用同一个 AudioContext 与解锁策略），
  *  选择即持久化 localStorage。交互元素统一 user-select:none 防误选中。 */
-import { ref, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { RINGTONES, DEFAULT_RING } from '../utils/ringtones'
-import { currentRingtone, setRingtone, previewRingtone, stopPreview } from '../utils/notify'
+import { RINGTONES, DEFAULT_RING, isCustomId, getCustomRingtones, setCustomRingtones } from '../utils/ringtones'
+import { currentRingtone, setRingtone, previewRingtone, stopPreview, refreshRingtone } from '../utils/notify'
+import { fetchRingtones } from '../api'
+import CustomRingtoneList from './CustomRingtoneList.vue'
 
 const visible = ref(false)
 const current = ref(currentRingtone())
-const previewingId = ref('') // 正在试听的铃声 id（'' = 无）
-let resetTimer = null // 试听动画自动复位定时器
+const previewingId = ref('') // 正在试听的铃声 id（'' = 无；自定义铃声播完经 onEnd 复位）
+let resetTimer = null // 试听动画自动复位定时器（仅合成铃声需要）
 
 /** 打开弹窗：每次都按最新持久化状态渲染（顶栏齿轮调用）。 */
 function open() {
@@ -30,15 +33,17 @@ function stopPreviewNow() {
   previewingId.value = ''
 }
 
-/** 试听：再次点击同一条 = 停止；换听别的会先停掉上一条（互斥）。 */
+/** 试听：再次点击同一条 = 停止；换听别的会先停掉上一条（互斥）。
+ *  系统铃声返回时长走定时复位；自定义铃声返回 -1，播完经 onEnd 回调复位。 */
 function onPreview(id) {
   if (previewingId.value === id) { stopPreviewNow(); return }
   stopPreviewNow()
-  const dur = previewRingtone(id)
+  const dur = previewRingtone(id, () => { previewingId.value = '' })
   if (!dur) return // 静音无试听
   previewingId.value = id
-  // 播完自动复位按钮动画（后端接口无此问题，纯前端状态）
-  resetTimer = setTimeout(() => { previewingId.value = '' }, (dur + 0.2) * 1000)
+  if (dur > 0) {
+    resetTimer = setTimeout(() => { previewingId.value = '' }, (dur + 0.2) * 1000)
+  }
 }
 
 /** 选中即生效：持久化 + 刷新「当前」标签。 */
@@ -63,12 +68,34 @@ function onReset() {
 }
 
 function nameOf(id) {
+  if (isCustomId(id)) {
+    return getCustomRingtones().find((r) => r.cid === id)?.name || '自定义铃声'
+  }
   return RINGTONES.find((r) => r.id === id)?.name || ''
+}
+
+/** 子组件删除回调：先停试听防声音残留；删的是当前铃声则回退默认。 */
+function onCustomDeleted(cid) {
+  stopPreviewNow()
+  if (current.value !== cid) return
+  setRingtone(DEFAULT_RING)
+  current.value = DEFAULT_RING
+  ElMessage.info(`已删除当前铃声，恢复默认提示音「${nameOf(DEFAULT_RING)}」`)
 }
 
 // 弹窗关闭路径收口：遮罩点击 / ESC 都停掉试听，避免声音残留
 onUnmounted(stopPreviewNow)
 defineExpose({ open, close })
+
+/** 开机同步自定义铃声列表（弹窗壳常驻挂载，此时子组件尚未渲染）：
+ *  localStorage 存的 custom:<id> 需要对照列表判断合法性并校正当前铃声，
+ *  否则选过自定义铃声的用户重启后播放会失效。失败静默，打开弹窗时子组件会重拉。 */
+onMounted(async () => {
+  try {
+    setCustomRingtones(await fetchRingtones())
+    refreshRingtone()
+  } catch (e) { /* 网络异常等：不打扰用户 */ }
+})
 </script>
 
 <template>
@@ -116,6 +143,14 @@ defineExpose({ open, close })
               </button>
             </li>
           </ul>
+
+          <CustomRingtoneList
+            :current="current"
+            :previewing-id="previewingId"
+            @preview="onPreview"
+            @select="onSelect"
+            @deleted="onCustomDeleted"
+          />
           <p class="tip">选中即生效 · 新消息按所选铃声提醒</p>
         </div>
       </div>

@@ -18,6 +18,30 @@
 - `code = 0` 表示成功，其他为错误码；`data` 里才是数据
 - 请求体用 JSON
 
+## 0. 认证（业务端自建，2026-11-10）
+
+登录态用 Bearer Token（前端 axios 拦截器自动带 `Authorization: Bearer <token>`）；除
+`/api/auth/login` 与静态资源外，所有 `/api/**` 都要登录。角色三种：developer / admin / agent。
+
+### POST /api/auth/login — 登录
+
+请求体：`{ "username": "demo", "password": "123456" }`
+
+返回 data：`{ "token": "...", "expires_in": 86400, "user": { id, username, name, role, org_id, org_name, must_change_password, devices: [...] } }`
+（user 带 `devices` 绑定设备列表，前端据此生成顶栏设备卡片）
+
+错误：`401` 账号不存在 / 密码错误 / 已停用；`429` 密码连错触发锁定（IP+账号维度，err=LOGIN_LOCKED）。
+连续失败锁定期间连正确密码也拒绝。登录成功会异步触发一次增量资料同步（入队失败不影响登录）。
+
+### GET /api/auth/me — 当前登录人
+
+前端刷新页面时用它恢复会话；返回 data 结构同登录里的 user。强制改密期（must_change_password=1）也可访问。
+
+### PUT /api/auth/password — 自助修改密码
+
+请求体：`{ "old_password": "...", "new_password": "..." }`；新密码 ≥6 位且不能与旧密码相同。
+成功返回 data = 更新后的 user；错误 `400` 旧密码错误 / 新密码不合规。强制改密期唯一放行的业务接口。
+
 ## 1. 会话
 
 ### GET /api/conversations — 会话列表（左栏）
@@ -45,14 +69,22 @@
 
 ### POST /api/conversations — 主动发起会话
 
-按 wxid 建/取会话（联系人须在该设备通讯录里）。请求体：
+按 contact_id 建/取会话（**前端不传 wxid**——脱敏契约，wxid 只在后端解析）。请求体：
 
 ```json
-{ "wxid": "wxid_abc", "chat_type": 1 }
+{ "contact_id": 123, "chat_type": 1 }
 ```
 
+- `contact_id` 是通讯录条目 id：正数 = contact 表行号；负数 = 通讯录未同步到的老会话补集
+  （该 id 是会话行号，两套自增 id 靠符号隔离防发错人）
+- `chat_type`：1 单聊 / 2 群聊；`?openid=` 选设备，默认第一个绑定设备
+
 返回 data：会话对象（同会话列表元素）；已有会话直接返回不重复建。
-错误：`404` 通讯录中没有该联系人；`400` 参数缺失/非法。
+错误：`404` 通讯录中没有该联系人；`400` 参数缺失/非法 / 未绑定设备。
+
+### GET /api/conversations/{id}/members — 群成员列表
+
+返回该群会话的成员（来自 group_member 表）：昵称 / 头像 / 是否群主，供聊天头部与 @ 场景使用。
 
 ## 2. 消息
 
@@ -141,29 +173,32 @@ body：`{ "conv_id": 源会话, "msg_ids": [消息id≤100], "target_ids": [目�
 | send_result | 发送确认成功/失败后 | `{ message_id, status: 1 或 2 }` |
 | device_status | 设备在线状态变化时 | `{ openid, online: true/false }` |
 
-## 4. 客户资料（业务端自建）
+## 4. 客户资料（业务端自建，2026-11-10）
 
-### GET /api/customers/{conversation_id} — 读客户资料
+联系人备注/标签存 contact_profile 表（按 wxid upsert）；前端只传条目 id，不传 wxid。
+`contact_id` 允许负数（会话补集条目），与发起会话的负号约定一致。
 
-### PUT /api/customers/{conversation_id} — 保存客户资料
+### GET /api/contacts/{contact_id}/profile — 读客户资料
 
-请求体：`{ "phone": "138xxxx", "city": "广州", "tags": ["宝马","老客户"], "note": "只修变速箱" }`
+返回 data：`{ "remark": "只修变速箱", "tags": ["宝马","老客户"] }`；无记录返回空默认值。`404` 联系人不存在。
 
-## 5. 报价处理台（业务端自建）
+### PUT /api/contacts/{contact_id}/profile — 保存客户资料
 
-### GET /api/quotes/desk — 报价列表（右栏）
+请求体：`{ "remark": "只修变速箱", "tags": ["宝马","老客户"] }`
 
-参数：`status`（0待处理 1已报价 2已包邮）、`assignee`（按指派人筛）、`sort`（时间排序）
+- 备注上限见 `ContactProfile.MAX_REMARK_LEN`；标签去重去空，个数/单长超限返回 `400`
+- 命中已软删除的旧行会自动复活（避免重复数据）
 
-返回 data：报价单列表，每条含明细行（车型、变速箱、零件号、价格、是否已报价）
+## 5. 设备 / 通讯录
 
-### PATCH /api/quotes/{id} — 更新报价单
+### GET /api/devices — 当前账号的绑定设备（顶栏设备卡片）
 
-请求体：`{ "status": 1, "assignee": "杨洋" }`
+登录鉴权，按关联顺序返回：`openid`（路由键）/ `display_name` / `online` / `unread`（该设备全部会话未读合计）。
+脱敏契约：未命名设备回退「设备N」，不出现 openid 字样（openid 仅作路由参数）。
 
-## 6. 设备 / 通讯录（来自中间方）
+### POST /api/devices/{openid}/online-check — 即时查在线状态
 
-### GET /api/device/status — 设备在线状态
+点击账号卡片时调中间方 check_online 并回写设备字典行；只查自己绑定的设备，`403` 无权访问。
 
 ### GET /api/contacts — 通讯录列表
 
@@ -177,6 +212,122 @@ body：`{ "conv_id": 源会话, "msg_ids": [消息id≤100], "target_ids": [目�
 fetch_contacts_list_cache 拉全量 wxid（好友+群，公众号跳过）→ 缺的插入
 contact 表 → 缺资料好友批量 brief_info（20/批，每轮最多 10 批）、
 缺资料群逐个 chatroom_info。
+
+## 6. 提示音（业务端自建，2026-11-16）
+
+消息提示音选择存前端 localStorage（本地偏好不进后端）；自定义铃声文件与归属关系存后端
+`user_ringtone` 表，落盘 `MEDIA_DIR/ringtones/<uuidhex>.<ext>`。限制：MP3/M4A/WAV/OGG、
+单文件 ≤5MB（`RINGTONE_MAX_BYTES`）、每用户 ≤10 个（`RINGTONE_MAX_COUNT`）、
+落盘前校验磁盘剩余 ≥100MB（`RINGTONE_MIN_FREE_BYTES`）。上传三重校验：
+扩展名白名单 → 大小上限 → 文件头 magic number（伪造扩展名直接拒）。
+
+### POST /api/ringtones — 上传自定义铃声
+
+multipart 字段 `file`，登录鉴权（全角色可用）。展示名默认取文件主名（≤64 字符）。
+
+返回 data：`{ "id": 1, "name": "test-ring", "file_name": "test-ring.mp3", "url": "/media/ringtones/<uuid>.mp3", "size": 205, "fmt": "mp3", "created_at": "..." }`
+
+错误：`400` 格式不支持 / 超过 5MB / 内容与扩展名不符 / 空文件 / 超过数量上限 / 存储空间不足；上传与失败均写审计日志（SYSTEM 模块）。
+
+### GET /api/ringtones — 我的自定义铃声列表
+
+只返回当前登录人自己的（软删除的不返回），按 id 倒序。元素结构同上传返回。
+
+### DELETE /api/ringtones/{id} — 删除自定义铃声
+
+软删除只打 `deleted_at` 标记，磁盘文件保留。只能删自己的：`404` 不存在 / 已删 / 非本人。
+前端若删的是当前铃声，自动回退默认提示音。
+
+### GET /media/ringtones/{name} — 播放音频（不鉴权）
+
+`<audio>` 标签带不了 Authorization 头；安全靠文件名本身：只接受
+`^[0-9a-f]{32}\.(mp3|m4a|wav|ogg)$`（uuid 不可猜测 + 防目录穿越），其余一律 404。
+响应带 `X-Content-Type-Options: nosniff` 与 `Cache-Control: max-age=86400`（重复播放走浏览器缓存）。
+路径解析不中该正则的请求会落入 SPA 静态兜底返回 index.html，不泄露任何文件。
+
+## 7. 管理后台（账号 / 组织 / 设备字典）
+
+角色权限统一口径：`developer` 全部操作；`admin` 可看可管但不碰 developer 行、不可配设备关联；
+设备字典的写操作（新增/编辑/删除/恢复）仅 developer。
+
+### GET /api/accounts — 账号列表
+
+返回全部账号（角色倒序）：含姓名拼音搜索字段 `pinyin` / `pinyin_toks` / `initials` 与绑定设备列表。
+
+### POST /api/accounts — 新增账号
+
+请求体：`{ "username", "name", "role", "org_id", "device_ids?": [设备id≤20] }`
+初始密码固定 `123456`，`must_change_password=1`（登录后强制改密）。
+规则：agent/admin 必选启用中的组织，developer 可空；重复账号 `400`；admin 建 developer `403`。
+
+### PUT /api/accounts/{id} — 编辑账号
+
+姓名必填；`org_id` 提供则改组织；`device_ids` 提供（仅 developer）则**整体替换**关联
+（列表外的解除软删，重新关联复活旧行，关联顺序=传入顺序）。`403` admin 操作 developer 行。
+
+### PUT /api/accounts/{id}/status — 启用 / 停用
+
+请求体：`{ "status": 1|0 }`；不能停用自己（400）；admin 操作 developer 行 `403`。
+
+### PUT /api/accounts/{id}/password — 重置密码
+
+重置为初始密码 `123456` 并重新触发强制改密。
+
+### GET /api/orgs — 启用中的组织（下拉数据源）
+
+### GET /api/orgs/all — 全量组织（含停用，管理表格）
+
+### POST /api/orgs — 新增组织
+
+请求体：`{ "name" }`（≤64 字）；重名（含已停用）直接拒绝 `400`。
+
+### PUT /api/orgs/{id}/status — 启用 / 停用（软删除）
+
+`status=0` 停用=软删除（行保留，历史引用照常解析组织名）；`status=1` 恢复。
+
+### GET /api/admin/devices — 设备字典列表
+
+默认只看未删除；`?include_deleted=1` 为回收站视图。每台设备附 `bound_users`（关联账号，删除拦截提示以真实行数为准）。
+
+### POST /api/admin/devices — 新增设备
+
+请求体：`{ "openid", "name", "org_id" }`；openid 全局唯一（重复/在回收站 `409`）。
+
+### PUT /api/admin/devices/{id} — 编辑设备
+
+仅名称 / 组织；**openid 录入后不可改**（body 里的 openid 一律忽略）。
+
+### DELETE /api/admin/devices/{id} — 删除设备（软删除）
+
+仍被账号关联时 `409`，需先在账号管理解除关联；回收站里不显示在线。
+
+### POST /api/admin/devices/{id}/restore — 从回收站恢复
+
+deleted_at 置回 NULL，原 id 与关联不变。
+
+## 8. 日志查询
+
+详细字段与脱敏规则见专题文档：[docs/audit-log.md](audit-log.md)、[docs/interface-log.md](interface-log.md)。
+
+### GET /api/audit-logs — 审计日志（developer）
+
+`?keyword=` 对 动作/对象/操作人/模块 模糊过滤，新→旧。
+
+### GET /api/admin/stats — 总览指标（developer / admin）
+
+今日消息量 / 客服账号数 / 今日新增客户 / 发送成功率。
+
+### GET /api/send-logs — 发送记录（按绑定设备鉴权）
+
+当前登录人全部绑定设备的发出消息，时间倒序；`?openid=` 只看某台设备。
+
+### GET /api/logs/access — 入站接口日志（developer）
+
+筛选：`start/end`（日期）、`path` 前缀、`user_id`、`org_id`、`status`、`method`。
+
+### GET /api/logs/middle — 出站中间方调用日志（developer）
+
+筛选：`start/end`、`module`、`action`、`uuid` 精确、`success`、`openid`。
 
 ---
 
@@ -354,7 +505,7 @@ chatroom_info → `processing_result.data`：
 | post_file_message | to_wxid, file_url, file_name | 发文件 |
 | post_image_message | to_wxid, img_url | 发图片 |
 | post_video_message | to_wxid, video_url, thumb_url, video_duration | 发视频 |
-| post_link_message | to_wxid, title, desc, link_url, thumb_url | 发链接卡片（报价处理台发报价就用它） |
+| post_link_message | to_wxid, title, desc, link_url, thumb_url | 发链接卡片（H5 促销页等） |
 | revoke_message | to_wxid, msg_id, new_msg_id, create_time | 撤回；实测文字消息 msg_id 传 "0"，靠 new_msg_id 定位 |
 
 以上每个 post_xxx 都有对应 get_post_xxx 查询接口，用于确认发送结果。
