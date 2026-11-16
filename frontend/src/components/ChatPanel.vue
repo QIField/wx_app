@@ -1,22 +1,18 @@
 <script setup>
-/** 中栏：聊天窗 + 输入框。消息行渲染见 MessageRow.vue（气泡/灰条/卡片），输入与发送见 ChatComposer.vue。 */
+/** 中栏：聊天窗 + 输入框。消息行渲染见 MessageRow.vue（气泡/灰条/卡片），输入与发送见 ChatComposer.vue。
+ * 侧栏/骨架屏/多选转发状态见 composables/（usePeerSidePanel/useChatSkeleton/useMultiForward）。 */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
-import {
-  fetchMemberRemarkConfig,
-  fetchRemarkConfig,
-  forwardMessages,
-  revokeMessage,
-  saveMemberRemarkConfig,
-  saveRemarkConfig,
-} from '../api'
-import { displayNameOf } from '../utils/format'
+import { revokeMessage } from '../api'
 import { msgTextOf, canRevoke } from '../utils/message'
 import { messageMediaUrlOf } from '../utils/media'
 import { copyImage, copyText } from '../utils/clipboard'
 import { buildTimeline } from '../utils/timeline'
 import { attachTextSelection, detachTextSelection, clearSelection, copyFragmentOf } from '../utils/textSelection'
+import { usePeerSidePanel } from '../composables/usePeerSidePanel'
+import { useChatSkeleton } from '../composables/useChatSkeleton'
+import { useMultiForward } from '../composables/useMultiForward'
 import MessageRow from './MessageRow.vue'
 import ContextMenu from './ContextMenu.vue'
 import ChatComposer from './ChatComposer.vue'
@@ -28,69 +24,17 @@ const chat = useChatStore()
 const scroller = ref(null)
 const composerRef = ref(null)
 
-/* ---------- 右侧「客户资料」侧栏：点头像 / 顶部备注名展开，统一备注配置入口 ----------
- * 单聊：对方头像与顶部备注名同一入口（用户级，全局生效）；
- * 群聊：成员头像 = 该成员的用户级配置（全局生效），顶部群备注名 = 群级配置。 */
-const side = ref(null)
-const peerRemark = ref('') // 顶部标题优先显示备注名（用户级/群级），未设置回退原名
+/* 右侧「客户资料」侧栏：点头像 / 顶部备注名展开，统一备注配置入口 */
+const { side, peerLabel, openPeerSide, onRowProfile, onSideSaved } = usePeerSidePanel()
 
-watch(() => chat.currentId, async () => {
-  peerRemark.value = ''
-  // 侧栏保持展开：跟随当前会话目标（无会话则收起），避免停留在旧目标
-  if (side.value) {
-    if (chat.currentConv) openPeerSide()
-    else side.value = null
-  }
-  const c = chat.currentConv
-  if (!c) return
-  try {
-    peerRemark.value = (await fetchRemarkConfig(-c.id))?.remark_name || ''
-  } catch { /* 拉取失败回退原名显示 */ }
-})
+/* 多选与转发：底栏勾选、目标选择器、逐条下发 */
+const {
+  multi, pickedIds, pickerVisible,
+  enterMulti, exitMulti, togglePick, startForward, onPickerConfirm,
+} = useMultiForward()
 
-const peerLabel = computed(() => peerRemark.value || displayNameOf(chat.currentConv))
-
-function openPeerSide() {
-  const c = chat.currentConv
-  if (!c) return
-  side.value = {
-    key: `peer-${c.id}`,
-    apiId: -c.id, // 会话条目走负数 id 约定（脱敏契约，不传 wxid）
-    title: displayNameOf(c),
-    subtitle: c.alias ? `匿名标识：${c.alias}` : '',
-    alias: c.alias,
-    avatar: c.avatar,
-    chatType: c.chat_type,
-    fetch: fetchRemarkConfig,
-    save: saveRemarkConfig,
-    fromGroup: false,
-  }
-}
-
-function onRowProfile(msg) {
-  const c = chat.currentConv
-  if (!c || msg.direction === 2) return
-  if (c.chat_type !== 2) return openPeerSide() // 单聊：与顶部入口同源
-  const alias = msg.sender_alias || ''
-  if (!alias) return
-  side.value = {
-    key: `member-${alias}`,
-    apiId: -c.id,
-    title: msg.sender_name || `匿名 ${alias}`,
-    subtitle: `匿名标识：${alias}`,
-    alias,
-    avatar: msg.sender_avatar || null,
-    chatType: 1,
-    fetch: (id) => fetchMemberRemarkConfig(id, alias),
-    save: (id, payload) => saveMemberRemarkConfig(id, alias, payload),
-    fromGroup: true,
-  }
-}
-
-function onSideSaved(cfg) {
-  // 顶部标题只跟随本会话目标的配置（群成员入口不改群标题）
-  if (side.value && !side.value.fromGroup) peerRemark.value = cfg?.remark_name || ''
-}
+/* 合并卡片回看中的消息 id（历史卡片，ForwardRecord 拉快照） */
+const recordMsgId = ref(null)
 
 /* ---------- 图片全屏预览：当前会话所有图片可左右切换 ---------- */
 const preview = ref(null) // { urls: string[], index: number }；null 即关闭
@@ -108,54 +52,12 @@ function openPreview(url) {
   preview.value = index >= 0 ? { urls, index } : { urls: [url], index: 0 }
 }
 
-/* ---------- 骨架屏：铺满聊天区 + 模拟真实对话节奏 ----------
- * 旧行数固定 6 行挤在顶部，下面大片空白，观感像"没加载完"。
- * 改为：实测聊天区高度 → 按行高换算行数铺满整个区域；内容按「in 连发成簇 /
- * out 回应 / 簇间时间胶囊」的对话节奏排布，宽高错落，各行 shimmer 相位错开。 */
-const paneH = ref(0) // 聊天滚动区可视高度（挂载后实测，窗口缩放跟随）
-let offResize = null
-onMounted(() => {
-  const measure = () => { paneH.value = scroller.value?.$el?.clientHeight || 0 }
-  measure()
-  window.addEventListener('resize', measure)
-  offResize = () => window.removeEventListener('resize', measure)
-  attachTextSelection() // 自定义文本选中引擎：Esc/失焦清选等全局监听
-})
-onUnmounted(() => {
-  offResize?.()
-  detachTextSelection()
-})
+/* 自定义文本选中引擎：Esc/失焦清选等全局监听（骨架屏的尺寸测量见 useChatSkeleton） */
+onMounted(() => attachTextSelection())
+onUnmounted(() => detachTextSelection())
 
-const SK_GAP = 16 // 行间距（与 CSS .sk-row margin-bottom 一致）
-const SK_TIME_H = 36 // 时间胶囊行高估算（胶囊 + 上下间距）
-/* 一个「对话周期」：in 连发成簇 → out 回应 → 时间胶囊，宽高错落；循环填充直到铺满 */
-const SK_CYCLE = [
-  { w: 168, h: 34, dir: 'in' }, { w: 214, h: 34, dir: 'in' }, { w: 150, h: 58, dir: 'in' }, 'time',
-  { w: 124, h: 34, dir: 'out' }, { w: 226, h: 34, dir: 'out' }, { w: 178, h: 58, dir: 'out' }, 'time',
-  { w: 190, h: 34, dir: 'in' }, { w: 208, h: 72, dir: 'in' }, 'time',
-  { w: 158, h: 34, dir: 'out' }, { w: 232, h: 58, dir: 'out' }, { w: 118, h: 34, dir: 'out' }, 'time',
-  { w: 184, h: 34, dir: 'in' }, { w: 144, h: 58, dir: 'in' }, { w: 216, h: 34, dir: 'in' }, 'time',
-  { w: 170, h: 34, dir: 'out' }, { w: 198, h: 58, dir: 'out' }, 'time',
-  { w: 156, h: 34, dir: 'in' }, { w: 204, h: 34, dir: 'in' }, { w: 138, h: 58, dir: 'in' },
-]
-const skeletonRows = computed(() => {
-  const target = paneH.value || 560 // 首帧未量到高度时按常见窗格高度兜底
-  const rows = []
-  let used = 0
-  let k = 0
-  while (used < target && k < 120) {
-    const item = SK_CYCLE[k % SK_CYCLE.length]
-    if (item === 'time') {
-      rows.push({ time: true })
-      used += SK_TIME_H
-    } else {
-      rows.push(item)
-      used += item.h + SK_GAP
-    }
-    k++
-  }
-  return rows
-})
+/* 骨架屏：进会话先给呼吸占位，行数按聊天区高度铺满 */
+const { skeletonRows } = useChatSkeleton(scroller)
 
 const timeline = computed(() => buildTimeline(chat.currentMessages))
 
@@ -265,7 +167,7 @@ const menuItems = computed(() => {
 })
 
 /* 撤回：调后端下发中间方，成功后复用 store 的撤回处理换灰条
- * （WS 广播 message_revoked 也会到达，onMessageRevoked 幂等不冲突）；
+ * （WS 广播 message_revoked 也会到达，store 幂等不冲突）；
  * 失败透传后端提示（如"超过 2 分钟，无法撤回"） */
 async function revokeMsg(m) {
   try {
@@ -308,76 +210,6 @@ async function onMenuSelect(key) {
   } catch {
     ElMessage.error('复制失败，可放大图片右键复制')
   }
-}
-
-/* ---------- 多选与转发 ---------- */
-/* 交互规则（产品定稿）：中间方暂无合并卡片发送接口，转发统一按逐条真实下发
- * （普通气泡直达微信）；转发方式不再提供选择。合并卡片 API 保留在服务端，
- * 中间方补上原生接口后前端可随时恢复入口（方式确认弹窗 + modeDlg 编排）。
- * 现状、保留资产与恢复步骤全文见 docs/message-forward.md。 */
-const multi = ref(false)          // 多选模式
-const pickedIds = ref(new Set())  // 当前会话勾选的消息 id
-const pickerVisible = ref(false)  // 转发目标选择器
-const pending = ref(null)         // { convId, msgIds } 待转发的任务
-const recordMsgId = ref(null)     // 回看中的合并卡片消息 id（历史卡片）
-
-function enterMulti() {
-  multi.value = true // 多选模式与文本拖选互斥，进入前清掉自定义选中
-  pickedIds.value = new Set()
-  clearSelection()
-}
-
-function exitMulti() {
-  multi.value = false
-  pickedIds.value = new Set()
-}
-
-function togglePick(id) {
-  const next = new Set(pickedIds.value)
-  next.has(id) ? next.delete(id) : next.add(id)
-  pickedIds.value = next
-}
-
-/* 多选底栏「转发」/单条菜单「转发」→ 打开选择器 */
-function startForward(task) {
-  pending.value = task
-  pickerVisible.value = true
-}
-
-/* 选择器确认目标：统一逐条真实下发 */
-function onPickerConfirm(targetIds) {
-  pickerVisible.value = false
-  doForward(targetIds)
-}
-
-/* 调转发接口：乐观交互——点确认立刻关选择器、退多选并提示"转发中"，
- * 后台继续等响应；完成/失败再补最终提示。
- * 原因：后端逐条串行调中间方（保序不能并行），N 条消息 N 次往返天然耗时，
- * 不该让多选界面跟着挂住。失败时消息仍在会话里，可重新转发。 */
-function doForward(targetIds) {
-  const task = pending.value
-  pending.value = null
-  if (!task || !targetIds?.length) return
-  exitMulti()
-  const loading = ElMessage({ message: '正在转发…', type: 'info', duration: 0 })
-  forwardMessages({
-    conv_id: task.convId,
-    msg_ids: task.msgIds,
-    target_ids: targetIds,
-    mode: 'single',
-  })
-    .then((data) => {
-      loading.close()
-      ElMessage.success(
-        data.skipped
-          ? `已逐条转发 ${data.sent} 条，${data.skipped} 条类型不支持已跳过`
-          : `已逐条转发 ${data.sent} 条`,
-      )
-    })
-    .catch((exc) => {
-      loading.close()
-      ElMessage.error(exc.message || '转发失败')
-    })
 }
 </script>
 
@@ -507,7 +339,7 @@ function doForward(targetIds) {
   user-select: none;
 }
 
-/* 骨架屏：进会话先给呼吸占位，行数按聊天区高度铺满（生成逻辑见 script 的 skeletonRows） */
+/* 骨架屏：进会话先给呼吸占位，行数按聊天区高度铺满（生成逻辑见 composables/useChatSkeleton） */
 .skeleton { padding: 18px 16px 4px; overflow: hidden; }
 .sk-row { display: flex; gap: 8px; margin-bottom: 16px; --sk-d: 0s; }
 .sk-row.out { flex-direction: row-reverse; }

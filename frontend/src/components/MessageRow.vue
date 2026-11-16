@@ -1,20 +1,26 @@
 <script setup>
-/** 单条消息行：文本气泡 / 图片语音视频 / 链接文件卡片 / 微信样式系统灰条。
+/** 单条消息行：文本气泡 / 图片语音视频 / 卡片 / 微信样式系统灰条。
  *
+ * 气泡内容按消息类型分发：媒体与文本留在本组件，引用块（QuoteBlock）、
+ * 合并转发卡（ForwardCard）、文件/链接卡（LinkFileCard）、转账卡
+ * （TransferCard）、语音（VoiceBubble）各自独立成组件。
  * 灰条三类来源：撤回通知（自己撤回的可"重新编辑"）、后端兜底系统行、
  * 残留的微信系统 XML（拍一拍等）。图片点击交给父组件做全屏预览，
  * 气泡右键上抛父层弹操作菜单（复制等，见 ChatPanel）。
  */
 import { computed, ref } from 'vue'
-import { appInfoOf, canReEdit, fileTitleOf, hostOf, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
-import { renderEmojiHtml } from '../utils/emoji'
+import { canReEdit, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
 import { renderMessageHtml } from '../utils/mention'
 import { onTextMouseDown, onTextDblClick } from '../utils/textSelection'
-import { mediaUrlOf, messageMediaUrlOf } from '../utils/media'
+import { messageMediaUrlOf } from '../utils/media'
 import { displayNameOf } from '../utils/format'
+import { useImgBox, useImgRetry, useMediaLoad } from '../composables/useMedia'
 import AnonAvatar from './AnonAvatar.vue'
 import TransferCard from './TransferCard.vue'
 import VoiceBubble from './VoiceBubble.vue'
+import QuoteBlock from './QuoteBlock.vue'
+import ForwardCard from './ForwardCard.vue'
+import LinkFileCard from './LinkFileCard.vue'
 
 const props = defineProps({
   msg: { type: Object, required: true }, // timeline 展开后的单条消息
@@ -86,10 +92,6 @@ const sysText = computed(() => {
 /* 仅自己发的纯文本撤回后可重新编辑（微信同款限制） */
 const showReEdit = computed(() => canReEdit(props.msg))
 
-/* 链接/文件卡片信息（payload.app 优先，旧数据前端解析 XML 兜底） */
-const app = computed(() => (props.msg.msg_type === 5 ? appInfoOf(props.msg) : {}))
-const fileTitle = computed(() => (props.msg.msg_type === 3 ? fileTitleOf(props.msg) : ''))
-
 /* 转账卡片：只展示 谁向谁转多少钱 + 手机操作提示（卡片本体见 TransferCard.vue）。
  * 转出方/收款方：入方向=客户→我；出方向=操作人→客户 */
 const transfer = computed(() => transferInfoOf(props.msg))
@@ -98,85 +100,26 @@ const transferTo = computed(() =>
   props.msg.direction === 2 ? displayNameOf(props.conv) || '客户' : '我'
 )
 
-/* 引用消息：新消息读 payload.quote；历史按链接入库的数据解析 XML 兜底 */
-const quote = computed(() => quoteInfoOf(props.msg))
-
 /* 文本消息渲染：先过表情（内部已转义），再把 @昵称 标蓝——微信同款提醒样式 */
 const contentHtml = computed(() => renderMessageHtml(props.msg.content))
-/* 引用块文本同样走表情渲染（被引用的原消息常含表情码） */
-const quoteHtml = computed(() =>
-  renderEmojiHtml((quote.value?.name ? `${quote.value.name}：` : '') + (quote.value?.text || '[原消息]'))
-)
 
-/* 引用块内的被引用图片：后端解析出原图片消息 id（media_id）才有，
- * 找不到原消息时回退 [图片] 标签。缩略图与预览共用这一个地址 */
-const quoteImg = computed(() => {
-  const id = quote.value?.media_id
-  return id ? mediaUrlOf({ id }) : null
-})
+/* 引用消息：新消息读 payload.quote；历史按链接入库的数据解析 XML 兜底。
+ * 这里只做「有无引用」的分发判断，引用块渲染在 QuoteBlock.vue */
+const quote = computed(() => quoteInfoOf(props.msg))
 
-/* 气泡内媒体的展示地址：自己刚发的取本地 path，其余走媒体接口。
- * 图片加载失败重试时拼 cache-bust 参数（媒体接口 URL 已带 ?token=，
- * 本地 path 无查询串，按有无 ? 选连接符），强制浏览器重新发请求。 */
-const mediaSrc = computed(() => {
-  const base = messageMediaUrlOf(props.msg)
-  return imgBust.value
-    ? `${base}${base.includes('?') ? '&' : '?'}rt=${imgBust.value}`
-    : base
-})
+/* 气泡内媒体的展示地址：自己刚发的取本地 path，其余走媒体接口；
+ * 图片加载失败重试时拼 cache-bust 参数强制刷新（机制见 useMedia.useImgRetry）。 */
+const { withBust, onImgError } = useImgRetry()
+const mediaSrc = computed(() => withBust(messageMediaUrlOf(props.msg)))
 
 /* 图片/表情/视频撑满气泡：去掉内边距（微信样式） */
 const isTight = computed(() => [2, 4, 7].includes(props.msg.msg_type))
 
-/* 媒体加载状态：加载前 shimmer 占位块，加载完淡入（组件按消息 id 复用，状态不串行） */
-const loaded = ref(false)
-/* @load/@error 共用的收尾：坏图也撤占位，避免永远闪 shimmer；并通知父组件重新锚定底部 */
-function onMediaOk() {
-  if (!loaded.value) {
-    loaded.value = true
-    emit('mediaload')
-  }
-}
-/* 图片加载失败自动重试一次：中间方下载瞬时失败（后端 502）实测 2~3 秒内自愈，
- * 拼个 cache-bust 参数强制浏览器重新请求，免去用户"切走再切回来"手动触发重试；
- * 重试仍失败才撤占位进入撕裂态 */
-const imgRetried = ref(false)
-const imgBust = ref('')
-function onImgError() {
-  if (!imgRetried.value) {
-    imgRetried.value = true
-    setTimeout(() => { imgBust.value = Date.now() }, 1500)
-    return
-  }
-  onMediaOk()
-}
+/* 媒体加载状态：加载前 shimmer 占位块，加载完淡入；就绪后通知父层重新锚定底部 */
+const { loaded, onMediaOk } = useMediaLoad(emit)
 
-/* S2 尺寸预占位：后端下发缩略图宽高（payload.w/h，与原图同比例），按显示上限
- * 换算最终盒子，占位与加载后同尺寸 → 高度零突变。历史消息无宽高则在 @load 后
- * 用自然尺寸补盒子（否则骨架屏 min-height 大于图片高度，图下会露一条灰底）。 */
-function fitBox(w, h, maxW, maxH) {
-  const nw = Number(w)
-  const nh = Number(h)
-  if (!nw || !nh) return null
-  const s = Math.min(1, maxW / nw, maxH / nh)
-  return { width: `${Math.round(nw * s)}px`, height: `${Math.round(nh * s)}px` }
-}
-
-/* 图片盒子（气泡图 200×200 / 引用图 180×120 共用一套逻辑）：
- * payload 宽高优先，缺失时靠 natural 兜底；onLoad 顺带结束 shimmer 占位。 */
-function useImgBox(sizeOf, maxW, maxH) {
-  const natural = ref(null)
-  const box = computed(() => fitBox(sizeOf()?.w, sizeOf()?.h, maxW, maxH) || natural.value)
-  function onLoad(e) {
-    if (!natural.value) {
-      natural.value = fitBox(e?.target?.naturalWidth, e?.target?.naturalHeight, maxW, maxH)
-    }
-    onMediaOk()
-  }
-  return { box, onLoad }
-}
-const { box: imgBox, onLoad: onImgLoad } = useImgBox(() => props.msg.payload, 200, 200)
-const { box: qBox, onLoad: onQuoteLoad } = useImgBox(() => quote.value, 180, 120)
+/* 图片盒子 200×200：payload 宽高优先，缺失时靠 natural 兜底（机制见 useMedia.useImgBox） */
+const { box: imgBox, onLoad: onImgLoad } = useImgBox(() => props.msg.payload, 200, 200, onMediaOk)
 
 function onReEdit() {
   emit('reedit', props.msg.content)
@@ -235,7 +178,7 @@ function onTextDbl(e) {
             referrerpolicy="no-referrer"
             decoding="async"
             @load="onImgLoad"
-            @error="onImgError"
+            @error="onImgError(() => onMediaOk())"
             @click="emit('preview', mediaSrc)"
           />
         </span>
@@ -255,42 +198,15 @@ function onTextDbl(e) {
           />
         </span>
 
-        <!-- 文件卡片：图标 + 文件名 + 下载 -->
-        <a v-else-if="msg.msg_type === 3" class="file-card" :href="mediaSrc" :download="fileTitle">
-          <span class="badge">文件</span>
-          <span class="fc-main">
-            <span class="fc-title">{{ fileTitle }}</span>
-            <span class="fc-sub">点击下载</span>
-          </span>
-        </a>
-
-        <!-- 引用消息：回复正文 + 引用内容（微信样式）。
-             被引用的是图片且对上了原消息：不加灰底框，骨架屏占位直接渲染缩略图；
-             其余情况走灰色引用块文字 -->
-        <template v-else-if="quote">
-          <div class="content" @mousedown="onTextDown" @dblclick="onTextDbl">{{ quote.reply || '[引用]' }}</div>
-          <template v-if="quoteImg">
-            <span v-if="quote.name" class="q-text bare">{{ quote.name }}：</span>
-            <span class="ph q-ph" :class="{ on: loaded, sized: !!qBox }" :style="qBox">
-              <img
-                class="q-img fade"
-                :class="{ ok: loaded }"
-                :style="qBox"
-                :src="quoteImg"
-                alt="引用图片"
-                title="点击查看大图"
-                referrerpolicy="no-referrer"
-                decoding="async"
-                @load="onQuoteLoad"
-                @error="onImgError"
-                @click.stop="emit('preview', quoteImg)"
-              />
-            </span>
-          </template>
-          <div v-else class="quote-box">
-            <span class="q-text" v-html="quoteHtml" @mousedown="onTextDown" @dblclick="onTextDbl"></span>
-          </div>
-        </template>
+        <!-- 引用消息：回复正文 + 引用内容（微信样式，含引用图骨架屏） -->
+        <QuoteBlock
+          v-else-if="quote"
+          :msg="msg"
+          :quote="quote"
+          :selectable="selectable"
+          @preview="emit('preview', $event)"
+          @mediaload="emit('mediaload')"
+        />
 
         <!-- 转账卡片：谁向谁转多少钱 + 手机操作提示，不渲染链接（收款只在手机上操作） -->
         <TransferCard
@@ -301,36 +217,17 @@ function onTextDbl(e) {
           :to-name="transferTo"
         />
 
-        <!-- 合并转发卡片（msg_type=9，业务端本地消息）：标题 + 前两条预览 + 页脚，
-             点开拉快照回看（ForwardRecord）。原消息删除不影响快照内容。 -->
-        <button
+        <!-- 合并转发卡片（msg_type=9）：标题 + 前两条预览 + 页脚，点开拉快照回看 -->
+        <ForwardCard
           v-else-if="msg.msg_type === 9"
-          class="fwd-card"
-          type="button"
-          :title="selectable ? '' : '点击查看聊天记录'"
-          @click.stop="selectable ? emit('toggle', msg.id) : emit('openrecord', msg)"
-        >
-          <span class="fwd-title">{{ msg.payload?.title || msg.content || '聊天记录' }}</span>
-          <span v-for="(p, i) in (msg.payload?.preview || []).slice(0, 2)" :key="i" class="fwd-line">{{ p }}</span>
-          <span class="fwd-foot">
-            <span class="badge">聊天记录</span>
-            <span class="fwd-cnt">{{ msg.payload?.count ?? '' }}条消息</span>
-          </span>
-        </button>
+          :msg="msg"
+          :selectable="selectable"
+          @toggle="emit('toggle', $event)"
+          @openrecord="emit('openrecord', $event)"
+        />
 
-        <!-- 链接卡片：标题 + 摘要 + 域名 -->
-        <a
-          v-else-if="msg.msg_type === 5 && app.url"
-          class="link-card"
-          :href="app.url"
-          target="_blank"
-          rel="noopener"
-        >
-          <span class="lc-title">{{ app.title || '[链接]' }}</span>
-          <span v-if="app.desc" class="lc-desc">{{ app.desc }}</span>
-          <span class="lc-host"><span class="badge">链接</span><span class="host">{{ hostOf(app.url) }}</span></span>
-        </a>
-        <div v-else-if="msg.msg_type === 5" class="content type-label">[链接]</div>
+        <!-- 文件卡片（下载）/ 链接卡片（新窗口打开） -->
+        <LinkFileCard v-else-if="msg.msg_type === 3 || msg.msg_type === 5" :msg="msg" />
 
         <div v-else-if="msg.msg_type !== 1" class="content type-label">[未知类型]</div>
         <div v-else class="content" v-html="contentHtml" @mousedown="onTextDown" @dblclick="onTextDbl"></div>
@@ -431,89 +328,14 @@ function onTextDbl(e) {
 .ph-emoji { width: 120px; min-height: 90px; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
-/* 链接/文件卡片 */
-.link-card, .file-card {
-  display: flex; flex-direction: column; gap: 4px;
-  width: 200px; padding: 10px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-md);
-  background: #fff;
-  color: var(--c-text); text-decoration: none;
-  transition: border-color 0.15s;
-}
-.link-card:hover, .file-card:hover { border-color: var(--c-primary); }
-.file-card { flex-direction: row; align-items: center; gap: 8px; }
-.badge {
-  flex-shrink: 0;
-  font-size: 10px; color: var(--c-primary);
-  background: var(--c-primary-soft);
-  border-radius: 3px; padding: 1px 5px;
-}
-.fc-main { display: flex; flex-direction: column; min-width: 0; }
-.fc-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fc-sub { font-size: 11px; color: var(--c-text-sub); }
-.lc-title {
-  font-size: 13px; font-weight: 600; line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
-.lc-desc {
-  font-size: 12px; color: var(--c-text-sub); line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
-.lc-host { font-size: 11px; color: var(--c-text-sub); display: flex; align-items: center; gap: 6px; min-width: 0; }
-.lc-host .host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* 合并转发卡片：白底窄卡，观感与微信「聊天记录」卡片一致 */
-.fwd-card {
-  display: flex; flex-direction: column; gap: 3px;
-  width: 210px; padding: 10px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-md);
-  background: #fff;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.15s;
-}
-.fwd-card:hover { border-color: var(--c-primary); }
-.fwd-title {
-  font-size: 13px; font-weight: 600; line-height: 1.4;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.fwd-line {
-  font-size: 12px; color: var(--c-text-sub); line-height: 1.4;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.fwd-foot {
-  margin-top: 5px; padding-top: 6px;
-  border-top: 1px solid var(--c-border);
-  display: flex; align-items: center; gap: 6px;
-}
-.fwd-cnt { font-size: 11px; color: var(--c-text-sub); }
+.fade { opacity: 0; transition: opacity 0.15s ease; }
+.fade.ok { opacity: 1; }
 
 .content { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
 /* 气泡正文走 v-html，拿不到 scoped 属性，@昵称高亮必须用 :deep */
 .content :deep(.msg-mention) { color: var(--c-primary); font-weight: 600; }
 .type-label { color: var(--c-primary); }
 
-/* 引用块：微信同款灰底 + 左侧竖线（仅文字引用用；图片引用走 .q-ph 骨架屏） */
-.quote-box {
-  margin-top: 5px; padding: 4px 8px;
-  border-left: 2px solid var(--c-border);
-  background: var(--c-surface);
-  border-radius: 4px;
-  font-size: 12px; line-height: 1.5; color: var(--c-text-sub);
-  white-space: pre-wrap; word-break: break-word;
-}
-.q-text.bare { display: block; margin-top: 5px; font-size: 12px; color: var(--c-text-sub); }
-/* 引用块内的被引用图片：骨架屏占位 + 缩略图（点击看大图），无灰底包裹 */
-.q-ph { min-width: 120px; min-height: 90px; margin-top: 3px; }
-.q-img {
-  display: block; max-width: 180px; max-height: 120px;
-  border-radius: 3px;
-  cursor: zoom-in;
-}
-.fade { opacity: 0; transition: opacity 0.15s ease; }
-.fade.ok { opacity: 1; }
 .meta {
   margin-top: 3px; font-size: 10px; color: var(--c-text-sub);
   display: flex; gap: 8px; justify-content: flex-end;

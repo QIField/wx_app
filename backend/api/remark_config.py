@@ -25,6 +25,14 @@ bp = Blueprint("remark_config", __name__)
 # ---------- 条目解析 ----------
 
 
+def _parse_target(resolver, contact_id):
+    """条目 id 解析公共样板：id 转换失败或解析不到 → None（端点统一回 404）。"""
+    try:
+        return resolver(int(contact_id))
+    except ValueError:
+        return None
+
+
 def _config_target(contact_id):
     """条目 id → (wxid, scope_type)。群条目 → group 级，其余 → user 级。
 
@@ -89,6 +97,15 @@ def _member_wxid_by_alias(openid, chatroom_wxid, member_alias):
         if anonymize.alias_of(m.wxid) == member_alias:
             return m.wxid
     return None
+
+
+def _member_wxid(contact_id, member_alias):
+    """群成员入口公共解析：群条目 → 名册 alias 反查 wxid；任一步失败返回 None。"""
+    target = _parse_target(_group_target, contact_id)
+    if not target:
+        return None
+    openid, chatroom_wxid = target
+    return _member_wxid_by_alias(openid, chatroom_wxid, member_alias)
 
 
 # ---------- 读取 / 保存 ----------
@@ -164,10 +181,7 @@ def _save_config(scope, wxid, body):
 @require_role()
 def get_remark_config(contact_id):
     """统一备注配置；前端只传条目 id（不传 wxid——脱敏契约）。"""
-    try:
-        target = _config_target(int(contact_id))
-    except ValueError:
-        return jsonify(code=404, msg="联系人不存在"), 404
+    target = _parse_target(_config_target, contact_id)
     if not target:
         return jsonify(code=404, msg="联系人不存在"), 404
     wxid, scope = target
@@ -178,10 +192,7 @@ def get_remark_config(contact_id):
 @require_role()
 def put_remark_config(contact_id):
     """保存统一备注配置（备注名称 / 自动报价 / 标签）。"""
-    try:
-        target = _config_target(int(contact_id))
-    except ValueError:
-        return jsonify(code=404, msg="联系人不存在"), 404
+    target = _parse_target(_config_target, contact_id)
     if not target:
         return jsonify(code=404, msg="联系人不存在"), 404
     wxid, scope = target
@@ -196,14 +207,7 @@ def put_remark_config(contact_id):
 @require_role()
 def get_member_remark_config(contact_id, member_alias):
     """群成员备注设置：定位用户级配置（与私聊/其他群同源）。"""
-    try:
-        target = _group_target(int(contact_id))
-    except ValueError:
-        return jsonify(code=404, msg="群不存在"), 404
-    if not target:
-        return jsonify(code=404, msg="群不存在"), 404
-    openid, chatroom_wxid = target
-    wxid = _member_wxid_by_alias(openid, chatroom_wxid, member_alias)
+    wxid = _member_wxid(contact_id, member_alias)
     if not wxid:
         return jsonify(code=404, msg="群成员不存在"), 404
     return jsonify(code=0, msg="success", data=_config_data(SCOPE_USER, wxid))
@@ -213,14 +217,7 @@ def get_member_remark_config(contact_id, member_alias):
 @require_role()
 def put_member_remark_config(contact_id, member_alias):
     """保存群成员备注设置：写入该成员的用户级行，私聊与所有群聊同步生效。"""
-    try:
-        target = _group_target(int(contact_id))
-    except ValueError:
-        return jsonify(code=404, msg="群不存在"), 404
-    if not target:
-        return jsonify(code=404, msg="群不存在"), 404
-    openid, chatroom_wxid = target
-    wxid = _member_wxid_by_alias(openid, chatroom_wxid, member_alias)
+    wxid = _member_wxid(contact_id, member_alias)
     if not wxid:
         return jsonify(code=404, msg="群成员不存在"), 404
     resp, status = _save_config(SCOPE_USER, wxid, request.get_json(silent=True) or {})
