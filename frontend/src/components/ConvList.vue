@@ -5,6 +5,7 @@ import { computed, nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf, fmtTime, highlight, matchName } from '../utils/format'
+import { pickNextUnread } from '../utils/badge'
 import ContextMenu from './ContextMenu.vue'
 import ContactAvatar from './ContactAvatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
@@ -19,24 +20,25 @@ const filtered = computed(() =>
   chat.conversations.filter((c) =>
     matchName([displayNameOf(c), c.initials], c.pinyin_toks, keyword.value)))
 
-/* ---------- 未读定位（微信同款：再次点击「会话」图标依次跳到下一条未读） ---------- */
+/* ---------- 未读定位（点击「会话」图标依次跳到下一条未读并打开对应聊天窗） ---------- */
 let lastLocatedId = null // 上次定位到的会话 id；script setup 每实例独立，无需进 store
 
-/** 定位下一条未读：最小滚动带进可视区域（不顶到列表最上方），末尾后回绕循环。
- *  由 WorkbenchPage 的 rail 按钮在 activeView 已为 'chat' 时重复点击触发（双击的第二击）。 */
+/** 定位下一条未读：自动打开对应聊天窗口（红点随选中即清）+ 列表最小滚动带进可视区域，
+ *  末尾后回绕循环。由 WorkbenchPage 的 rail 按钮触发（首次从通讯录切回也会调用）。 */
 function locateUnread() {
-  const list = filtered.value
-  const unread = list.filter((c) => c.unread_count > 0)
-  if (!unread.length) {
+  const next = pickNextUnread(filtered.value, lastLocatedId)
+  if (!next) {
     lastLocatedId = null
     ElMessage.info('没有未读消息')
     return
   }
-  // 从上次定位的会话之后找；找不到（已清零/被搜索过滤）时 findIndex 为 -1，自然回绕到第一条
-  // unread 由 list 派生（同一对象引用），直接 indexOf 定位即可，避免嵌套 findIndex
-  const startIdx = list.findIndex((c) => c.id === lastLocatedId)
-  const next = unread.find((c) => list.indexOf(c) > startIdx) || unread[0]
   lastLocatedId = next.id
+
+  // 先打开聊天窗口再滚动列表：selectConversation 内部 markCurrentRead 同步清红点并落库，
+  // 选中态只改背景色不改布局，不会引起滚动抖动；已在窗口内则只清红点，避免重拉消息闪烁
+  if (chat.currentId === next.id) chat.markCurrentRead()
+  else chat.selectConversation(next.id)
+
   nextTick(() => {
     const wrap = scrollbarRef.value?.wrapRef
     wrap?.querySelector(`[data-conv-id="${next.id}"]`)
