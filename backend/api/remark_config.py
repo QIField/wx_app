@@ -118,11 +118,18 @@ def _config_data(scope, wxid):
     ).first()
     if cfg:
         return cfg.to_json()
-    return {"scope_type": scope, "remark_name": "", "auto_quote_enabled": False, "tags": []}
+    return {
+        "scope_type": scope, "remark_name": "", "auto_quote_enabled": False,
+        "level": ContactRemarkConfig.LEVEL_NORMAL, "tags": [],
+    }
 
 
 def _validated_payload(body):
-    """校验并归一请求体 → (payload, None) 或 (None, 错误消息)。remark 兼容旧字段名。"""
+    """校验并归一请求体 → (payload, None) 或 (None, 错误消息)。remark 兼容旧字段名。
+
+    level 为增量语义：请求体显式带 level 才校验覆盖（None=不变更），
+    避免备注面板等旧调用方不带该字段时误重置客户等级。
+    """
     raw = body.get("remark_name")
     if raw is None:
         raw = body.get("remark", "")
@@ -138,7 +145,12 @@ def _validated_payload(body):
         return None, f"标签最多 {ContactRemarkConfig.MAX_TAGS} 个"
     if any(len(t) > ContactRemarkConfig.MAX_TAG_LEN for t in tags):
         return None, f"单个标签不能超过 {ContactRemarkConfig.MAX_TAG_LEN} 字"
-    return (remark, bool(body.get("auto_quote_enabled")), tags), None
+    level = None
+    if "level" in body and body.get("level") is not None:
+        level = str(body["level"]).strip()
+        if level not in ContactRemarkConfig.ALLOWED_LEVELS:
+            return None, "客户等级不合法（vip_a/vip_b/normal）"
+    return (remark, bool(body.get("auto_quote_enabled")), tags, level), None
 
 
 def _save_config(scope, wxid, body):
@@ -146,7 +158,7 @@ def _save_config(scope, wxid, body):
     payload, err = _validated_payload(body)
     if err:
         return jsonify(code=400, msg=err), 400
-    remark, auto_quote, tags = payload
+    remark, auto_quote, tags, level = payload
 
     cfg = ContactRemarkConfig.query.filter_by(scope_type=scope, target_wxid=wxid).first()
     if cfg is None:
@@ -160,10 +172,14 @@ def _save_config(scope, wxid, body):
         diff.append(f"备注[{cfg.remark_name or ''}]→[{remark}]")
     if bool(cfg.auto_quote_enabled) != auto_quote:
         diff.append("自动报价关→开" if auto_quote else "自动报价开→关")
+    if level is not None and (cfg.level or ContactRemarkConfig.LEVEL_NORMAL) != level:
+        diff.append(f"等级[{cfg.level}]→[{level}]")
     if list(cfg.tags or []) != tags:
         diff.append(f"标签{list(cfg.tags or [])}→{tags}")
     cfg.remark_name = remark
     cfg.auto_quote_enabled = auto_quote
+    if level is not None:
+        cfg.level = level
     cfg.tags = tags
     db.session.commit()
     log_action(

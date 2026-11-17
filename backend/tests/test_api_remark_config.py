@@ -39,8 +39,26 @@ def test_get_default_empty(client):
     conv = make_conv("wxid_u")
     data = client.get(f"/api/contacts/-{conv.id}/remark-config").get_json()["data"]
     assert data == {
-        "scope_type": "user", "remark_name": "", "auto_quote_enabled": False, "tags": [],
+        "scope_type": "user", "remark_name": "", "auto_quote_enabled": False,
+        "level": "normal", "tags": [],
     }
+
+
+def test_level_roundtrip_and_incremental(client):
+    """客户等级：显式传才覆盖（增量语义），非法值 400，不带该字段不重置。"""
+    conv = make_conv("wxid_u")
+    url = f"/api/contacts/-{conv.id}/remark-config"
+
+    resp = client.put(url, json={"remark_name": "张老板", "level": "vip_a"})
+    assert resp.get_json()["code"] == 0
+    assert client.get(url).get_json()["data"]["level"] == "vip_a"
+
+    # 不带 level 的保存（旧调用方）不应重置等级
+    client.put(url, json={"remark_name": "张老板2", "tags": ["月结"]})
+    assert client.get(url).get_json()["data"]["level"] == "vip_a"
+
+    bad = client.put(url, json={"remark_name": "x", "level": "diamond"})
+    assert bad.get_json()["code"] == 400
 
 
 def test_put_get_roundtrip_and_audit(client):

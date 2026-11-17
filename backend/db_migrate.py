@@ -36,6 +36,8 @@ def upgrade_existing_schema():
     # 2026-11-16 备注配置重构：存量备注搬入新表后旧表改名归档
     _backfill_remark_config()
     _archive_contact_profile()
+    # 2026-11-17 自动报价：客户等级列（报价系数 key，存量行回默认普通客户）
+    _try_alter("ALTER TABLE contact_remark_config ADD COLUMN level VARCHAR(20) NOT NULL DEFAULT 'normal'")
 
 
 def _backfill_remark_config():

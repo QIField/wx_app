@@ -16,10 +16,16 @@ SCOPE_GROUP = "group"
 class ContactRemarkConfig(db.Model, SoftDeleteMixin):
     __tablename__ = "contact_remark_config"
 
-    # 业务约束（接口层据此校验，与 ContactProfile 同规）
+    # 业务约束（接口层据此校验）
     MAX_REMARK_LEN = 100
     MAX_TAGS = 10
     MAX_TAG_LEN = 12
+
+    # 客户等级（报价系数映射的 key，见 QuoteConfig.price_map）
+    LEVEL_VIP_A = "vip_a"
+    LEVEL_VIP_B = "vip_b"
+    LEVEL_NORMAL = "normal"
+    ALLOWED_LEVELS = (LEVEL_VIP_A, LEVEL_VIP_B, LEVEL_NORMAL)
 
     id = db.Column(BigIntPK, primary_key=True, autoincrement=True)
     scope_type = db.Column(
@@ -32,6 +38,10 @@ class ContactRemarkConfig(db.Model, SoftDeleteMixin):
     remark_name = db.Column(db.String(100), nullable=False, default="", comment="备注名称")
     auto_quote_enabled = db.Column(
         db.Boolean, nullable=False, default=False, comment="是否开启自动报价",
+    )
+    level = db.Column(
+        db.String(20), nullable=False, default=LEVEL_NORMAL, server_default=LEVEL_NORMAL,
+        comment="客户等级：vip_a/vip_b/normal（报价系数）",
     )
     tags = db.Column(db.JSON, nullable=False, default=list)
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
@@ -46,5 +56,6 @@ class ContactRemarkConfig(db.Model, SoftDeleteMixin):
             "scope_type": self.scope_type,
             "remark_name": self.remark_name or "",
             "auto_quote_enabled": bool(self.auto_quote_enabled),
+            "level": self.level or self.LEVEL_NORMAL,
             "tags": list(self.tags or []),
         }
