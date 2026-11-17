@@ -3,6 +3,7 @@
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useContactsStore } from '../stores/contacts'
+import { useBoundaryResize } from '../composables/useBoundaryResize'
 import BrandLogo from '../components/BrandLogo.vue'
 import ConvList from '../components/ConvList.vue'
 import ContactsPanel from '../components/ContactsPanel.vue'
@@ -26,6 +27,14 @@ const ROLE_TEXT = { developer: '开发者', admin: '管理员', agent: '客服' 
 const activeView = ref('chat') // chat | contacts
 const convListRef = ref(null) // ConvList 实例：用于触发未读定位
 const ringSettingsRef = ref(null) // 设置弹窗实例：左栏底部齿轮打开提示音选择
+
+/* 左栏列表宽度：右缘 ±5px 悬停出拖拽光标，按住拖动实时调宽（220~420），松开持久化 */
+const { width: listWidth, bind: bindListWidth } = useBoundaryResize({
+  initial: 264,
+  min: 220,
+  max: 420,
+  storageKey: 'wb.sideListWidth.v1',
+})
 
 /** rail 会话按钮：每次点击都定位下一条未读并打开对应聊天窗口（红点随打开即清）；
  *  从通讯录切回时先切视图，等 ConvList 挂载完成再定位。 */
@@ -102,7 +111,7 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </nav>
-        <aside class="col-side">
+        <aside :ref="bindListWidth" class="col-side" :style="{ width: listWidth + 'px' }">
           <ConvList ref="convListRef" v-if="activeView === 'chat'" />
           <ContactsPanel v-else />
         </aside>
@@ -258,7 +267,7 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
 }
 
 .col-side {
-  width: 264px;
+  /* 宽度由 useBoundaryResize 控制（初始 264，拖拽 220~420，localStorage 持久化） */
   background: var(--c-panel);
   overflow: hidden;
 }

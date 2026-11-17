@@ -45,6 +45,11 @@ body {
 .wb-frame img,
 .wb-frame svg { -webkit-user-drag: none; user-select: none; }
 
+/* 左栏列表边界拖拽（useBoundaryResize）：悬停触发区 / 拖拽中强制整页 col-resize 光标，
+   否则列表项、按钮等自带 cursor 的子元素会盖掉继承光标 */
+body.edge-resize-hover, body.edge-resizing,
+body.edge-resize-hover *, body.edge-resizing * { cursor: col-resize !important; }
+
 /* 微信表情内联图：消息气泡 / 引用块 / 输入区共用，与文字基线对齐（微信同款视觉） */
 .wx-emoji {
   display: inline-block;
