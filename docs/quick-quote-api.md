@@ -87,7 +87,7 @@
 | 字段 | 类型 | 说明 |
 | ---- | ---- | ---- |
 | total / per_page / current_page | int / **str** / int | 分页信息；`per_page` 实测为字符串 |
-| data.list | list | 产品行；`per_page` 默认 10，实测上限未知 |
+| data.data | list | 产品行；`per_page` 默认 10，实测上限未知 |
 | data.no_exist_oe | list | 未命中编号回显（如 `["0005400017"]`，前缀字母已剥离） |
 
 `list` 条目主要字段（完整 40+ 字段原始 JSON 见测试报告 §4.6）：

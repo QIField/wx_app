@@ -27,6 +27,14 @@ DATABASE_URL = _pick_database_url()
 # 中间方
 MIDDLE_BASE_URL = os.getenv("MIDDLE_BASE_URL", "")
 
+# 快捷报价服务（对接契约见 docs/quick-quote-api.md）：
+# - 基址实测仅 HTTP 可用（HTTPS 证书 hostname 不匹配）
+# - openid 服务方独立签发，与中间方设备 openid 不通用，不设代码默认值，必须 .env 配置 QQ_OPENID
+# - 超时默认 90s：extract_parts_demand 是 AI 分析，耗时明显长于普通查询
+QQ_API_BASE_URL = os.getenv("QQ_API_BASE_URL", "http://wx_api.fsbbr.net/wechat_x/")
+QQ_OPENID = os.getenv("QQ_OPENID", "")
+QQ_TIMEOUT_SECONDS = int(os.getenv("QQ_TIMEOUT_SECONDS", "90"))
+
 # 登录令牌：签名密钥与有效期（小时）；SECRET_KEY 不配则开发期用固定值，生产必须在 .env 配置
 SECRET_KEY = os.getenv("SECRET_KEY", "wxcs-dev-secret-key-change-me")
 # 有效期默认 12 小时：缩短令牌泄露后的可用窗口（够一个工作日，跨天需重新登录）
