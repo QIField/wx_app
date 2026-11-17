@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <!--
+    网页消息台 · 右侧拓展栏重构原型（快捷报价）
+    对接契约：docs/quick-quote-api.md（2026-11-17 实测版，基址 http://wx_api.fsbbr.net/wechat_x/）
+    技术栈：vanilla 纯静态；默认 MOCK 演示数据，点击顶栏徽章可切换真实接口
+    响应式断点：<=1280px 折叠聊天区 / <=760px 单栏
+  -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>快捷报价拓展栏 · 网页消息台原型</title>
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/views.css">
+</head>
+<body>
+  <div class="stage">
+
+    <!-- 顶栏：演示外壳（真实项目为消息台顶栏） -->
+    <div class="topbar">
+      <span class="logo">WX-DESK</span>
+      <span class="sub">网页消息台 · 右侧拓展栏重构演示（快捷报价 v1.0）</span>
+      <span class="spacer"></span>
+      <button id="envChip" class="env-chip" title="点击切换 演示数据 / 真实接口">MOCK 演示数据</button>
+    </div>
+
+    <div class="main">
+
+      <!-- 左：聊天区（消息台主区，此处为演示背景） -->
+      <div class="chat-pane">
+        <div class="chat-head">
+          <div class="avatar">鑫</div>
+          <div class="tinfo">
+            <div class="t">鑫铃自动报价群</div>
+            <div class="s">佛山鑫铃 139****9515(测试)</div>
+          </div>
+          <span class="tag">报价群</span>
+        </div>
+
+        <div class="chat-body" id="chatBody"></div>
+
+        <div class="chat-foot">
+          <div class="hint">演示：点击按钮模拟客户发来一条询价消息，触发右侧拓展栏自动报价流水线</div>
+          <div class="btns">
+            <button id="chatBtnOe" class="btn sm">OE 编号询价</button>
+            <button id="chatBtnVin" class="btn sm">VIN 图片询价</button>
+            <button id="chatBtnName" class="btn sm">VIN+名称询价</button>
+            <button id="chatBtnNl" class="btn sm">自然语言询价</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：拓展栏（重构主体，四视图） -->
+      <div class="qq-panel">
+        <div class="qq-head">
+          <div class="row1">
+            <span class="title">快捷报价</span>
+            <span class="ver">QQ v1.0</span>
+            <span id="modeChip" class="mode-chip">仅预览</span>
+          </div>
+          <!-- 菜单由视图注册表驱动（js/core.js 的 registerView），新增拓展页自动入列；
+               超出宽度自动横向滚动，两侧渐隐提示，badge=true 显示新功能红点 -->
+          <div class="qq-menu-wrap">
+            <div class="qq-menu" id="qqMenu"></div>
+          </div>
+        </div>
+
+        <div class="qq-body" id="qqBody"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 全局提示 -->
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <script src="js/api.js"></script>
+  <script src="js/mock.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/view-auto.js"></script>
+  <script src="js/view-manual.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
