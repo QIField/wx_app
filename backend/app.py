@@ -136,6 +136,9 @@ def register_routes(app: Flask) -> None:
     app.register_blueprint(uploads_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(orgs_bp)
+    from backend.services.auto_quote import init_app as init_auto_quote
+
+    init_auto_quote(app)
     app.register_blueprint(remark_config_bp)
     app.register_blueprint(quote_config_bp)
     app.register_blueprint(ringtones_bp)

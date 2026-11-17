@@ -128,6 +128,11 @@ def broadcast_messages(pushed, openid=""):
         sender_maps[conv.id] = group_member.sender_map_for(conv, wxids)
 
     for saved in pushed:
+        if saved["direction"] == Message.DIR_IN:
+            # 自动报价触发器（阶段 2）：内部自带资格判定与异常兜底，不影响收信
+            from backend.services.auto_quote import on_new_message
+
+            on_new_message(saved["conversation_id"])
         info = sender_maps.get(saved["conversation_id"], {}).get(saved["sender_wxid"] or "")
         hub.broadcast("new_message", {
             "message_id": saved["message_id"],

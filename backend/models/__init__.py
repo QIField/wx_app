@@ -12,6 +12,7 @@ from backend.models.message import Message
 from backend.models.middle_call_log import MiddleCallLog
 from backend.models.org import Org
 from backend.models.quote_config import QuoteConfig
+from backend.models.quote_inquiry import QuoteInquiry
 from backend.models.ringtone import UserRingtone
 from backend.models.send_task import SendTask
 from backend.models.sync_cursor import SyncCursor
@@ -22,5 +23,5 @@ __all__ = [
     "SoftDeleteMixin", "AccessLog", "AuditLog", "Contact", "ContactRemarkConfig",
     "Conversation",
     "Device", "ForwardSnapshot", "GroupMember", "Message", "MiddleCallLog", "Org",
-    "SendTask", "SyncCursor", "QuoteConfig", "User", "UserDevice", "UserRingtone",
+    "SendTask", "SyncCursor", "QuoteConfig", "QuoteInquiry", "User", "UserDevice", "UserRingtone",
 ]

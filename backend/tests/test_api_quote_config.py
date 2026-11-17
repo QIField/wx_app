@@ -53,22 +53,23 @@ def test_put_global_by_developer(dev_client):
     assert "配件黑名单" in logs[0].detail and "价格系数" in logs[0].detail
 
 
-def test_put_global_forbidden_for_agent(client):
-    """agent 写全局字段 → 403；写自己的执行开关不受限。"""
+def test_put_forbidden_for_agent(client):
+    """agent 四个字段全部只读（执行开关已全局化，语义见 models/quote_config.py）。"""
     resp = client.put("/api/quote/config", json={"parts_blacklist": ["保险杠总成"]})
     assert resp.status_code == 403
+    resp = client.put("/api/quote/config", json={"ai_enabled": False, "quote_mode": "auto"})
+    assert resp.status_code == 403
+    # GET 不受限
+    assert client.get("/api/quote/config").get_json()["code"] == 0
 
-    ok = client.put("/api/quote/config", json={"ai_enabled": False, "quote_mode": "auto"})
-    assert ok.get_json()["code"] == 0
-    assert ok.get_json()["data"]["ai_enabled"] is False
-    assert ok.get_json()["data"]["quote_mode"] == "auto"
 
-
-def test_user_row_independent(dev_client, client):
-    """user 行按登录人隔离：agent 的执行开关不影响 developer 读到的默认。"""
-    client.put("/api/quote/config", json={"quote_mode": "auto"})
-    assert client.get("/api/quote/config").get_json()["data"]["quote_mode"] == "auto"
-    assert dev_client.get("/api/quote/config").get_json()["data"]["quote_mode"] == "preview"
+def test_mode_global_shared(dev_client, client):
+    """执行开关全局共享：developer 改，agent 读到同一值。"""
+    dev_client.put("/api/quote/config", json={"quote_mode": "auto", "ai_enabled": False})
+    for c in (dev_client, client):
+        data = c.get("/api/quote/config").get_json()["data"]
+        assert data["quote_mode"] == "auto"
+        assert data["ai_enabled"] is False
 
 
 def test_validation_errors(dev_client, client):
@@ -86,7 +87,7 @@ def test_validation_errors(dev_client, client):
     missing_key = dev_client.put(url, json={"price_map": {"vip_a": 0.8, "vip_b": 0.8}})
     assert missing_key.get_json()["code"] == 400
 
-    bad_mode = client.put(url, json={"quote_mode": "magic"})
+    bad_mode = dev_client.put(url, json={"quote_mode": "magic"})
     assert bad_mode.get_json()["code"] == 400
 
     # 以上失败都不应产生任何写入
@@ -99,3 +100,12 @@ def test_empty_put_rejected(client):
     """空请求体 / 无关字段 → 400。"""
     assert client.put("/api/quote/config", json={}).get_json()["code"] == 400
     assert client.put("/api/quote/config", json={"foo": 1}).get_json()["code"] == 400
+
+
+def test_ai_switch_off_then_on(dev_client):
+    """AI 总开关关→开：审批 diff 记录两次变更。"""
+    dev_client.put("/api/quote/config", json={"ai_enabled": False})
+    dev_client.put("/api/quote/config", json={"ai_enabled": True})
+    logs = AuditLog.query.filter_by(action="保存报价配置").all()
+    details = "；".join(l.detail for l in logs)
+    assert "AI开关开→关" in details and "AI开关关→开" in details

@@ -1,10 +1,10 @@
-"""快捷报价配置 API（quote_config：global 黑名单/系数 + user 执行开关/模式）。
+"""快捷报价配置 API（quote_config：global 行 = 黑名单/系数/执行开关，user 行预留）。
 
-- GET /api/quote/config：合并视图（global 行 + 当前登录人 user 行）。
-- PUT /api/quote/config：body 任意子集。
-  parts_blacklist / price_map → global 行，仅 admin/developer；
-  ai_enabled / quote_mode → user 行，全角色（每人自己的执行开关）。
-- 读侧容错：price_map 黑名单缺键时回落默认系数，保证阶段 4 计算永远拿得到全三档。
+- GET /api/quote/config：合并视图（global 行为主，user 行预留未启用）。
+- PUT /api/quote/config：body 任意子集，全部仅 admin/developer 可写
+  （黑名单/系数是业务配置；AI 执行开关/报价模式是全局总闸——自动报价由后台定时器
+  触发，无登录人上下文，语义见 models/quote_config.py 模块注释）。
+- 读侧容错：price_map 缺键时回落默认系数，保证阶段 4 计算永远拿得到全三档。
 """
 from flask import Blueprint, g, jsonify, request
 
@@ -12,7 +12,7 @@ from backend.extensions import db
 from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.quote_config import (
     ALLOWED_MODES, DEFAULT_PRICE_MAP, MAX_BLACKLIST, MAX_PART_LEN,
-    SCOPE_GLOBAL, SCOPE_USER, QuoteConfig,
+    SCOPE_GLOBAL, QuoteConfig,
 )
 from backend.services.audit import AuditModule, log_action
 from backend.services.auth import require_role
@@ -29,23 +29,17 @@ def _global_row():
     return QuoteConfig.query.filter_by(scope=SCOPE_GLOBAL, deleted_at=None).first()
 
 
-def _user_row(user_id):
-    return QuoteConfig.query.filter_by(
-        scope=SCOPE_USER, user_id=user_id, deleted_at=None,
-    ).first()
-
-
-def merged_config(user_id):
-    """合并视图：全局黑名单/系数 + 个人执行开关。阶段 2 触发器与前端都读这里。"""
-    g_row, u_row = _global_row(), _user_row(user_id)
+def merged_config(user_id=0):
+    """合并视图（执行开关全局化后与 user_id 无关，保留签名兼容阶段 0 调用方）。"""
+    g_row = _global_row()
     price_map = dict(DEFAULT_PRICE_MAP)
     if g_row:
         price_map.update(g_row.price_map or {})
     return {
         "parts_blacklist": list(g_row.parts_blacklist or []) if g_row else [],
         "price_map": price_map,
-        "ai_enabled": bool(u_row.ai_enabled) if u_row else True,
-        "quote_mode": (u_row.quote_mode if u_row else None) or "preview",
+        "ai_enabled": bool(g_row.ai_enabled) if g_row else True,
+        "quote_mode": (g_row.quote_mode if g_row else None) or "preview",
     }
 
 
@@ -85,7 +79,7 @@ def _validate_price_map(mapping):
 
 
 def _save_global(body, diff):
-    """黑名单/价格系数 → global 行（仅 admin/developer）。"""
+    """黑名单/价格系数/AI 执行开关/报价模式 → global 行（仅 admin/developer）。"""
     parts, err = _validate_blacklist(body.get("parts_blacklist") or [])
     if err:
         return err
@@ -107,20 +101,11 @@ def _save_global(body, diff):
         if dict(row.price_map or {}) != pmap:
             diff.append(f"价格系数{dict(row.price_map or {})}→{pmap}")
         row.price_map = pmap
-    return None
-
-
-def _save_user(body, diff):
-    """执行开关/模式 → 当前登录人 user 行。"""
-    row = _user_row(g.current_user.id)
-    if row is None:
-        row = QuoteConfig(scope=SCOPE_USER, user_id=g.current_user.id)
-        db.session.add(row)
-    else:
-        row.restore()
     if "ai_enabled" in body:
         val = bool(body.get("ai_enabled"))
-        if bool(row.ai_enabled) != val:
+        # 新建行 flush 前实例属性为 None，按模型默认 True 参与比较
+        cur = bool(row.ai_enabled) if row.ai_enabled is not None else True
+        if cur != val:
             diff.append("AI开关开→关" if not val else "AI开关关→开")
         row.ai_enabled = val
     if "quote_mode" in body:
@@ -146,24 +131,17 @@ def get_quote_config():
 @require_role()
 def put_quote_config():
     body = request.get_json(silent=True) or {}
-    touches_global = ("parts_blacklist" in body) or ("price_map" in body)
-    touches_user = ("ai_enabled" in body) or ("quote_mode" in body)
-    if not touches_global and not touches_user:
+    keys = {"parts_blacklist", "price_map", "ai_enabled", "quote_mode"}
+    if not (keys & set(body)):
         return jsonify(code=400, msg="无可保存字段"), 400
-    if touches_global and g.current_user.role not in _MANAGE_ROLES:
-        return jsonify(code=403, msg="黑名单与价格系数仅管理员可修改"), 403
+    if g.current_user.role not in _MANAGE_ROLES:
+        return jsonify(code=403, msg="报价配置仅管理员可修改"), 403
 
     diff = []
-    if touches_global:
-        err = _save_global(body, diff)
-        if err:
-            db.session.rollback()
-            return jsonify(code=400, msg=err), 400
-    if touches_user:
-        err = _save_user(body, diff)
-        if err:
-            db.session.rollback()
-            return jsonify(code=400, msg=err), 400
+    err = _save_global(body, diff)
+    if err:
+        db.session.rollback()
+        return jsonify(code=400, msg=err), 400
     db.session.commit()
     log_action(
         AuditModule.SYSTEM, "保存报价配置",
