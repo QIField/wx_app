@@ -1,10 +1,13 @@
-"""自动报价发送（阶段 5）：算价完成的 pending 询价 → 自动发产品图 + 话术 → 置已报价。
+"""报价发送编排（阶段 5 自动 / 阶段 6 人工）：图前文后发出 → 置已报价。
 
-发送通道用自家发消息编排（sync/send_service.send_message，operator=None 系统代发）：
+发送通道用自家发消息编排（sync/send_service.send_message，自动=operator None 系统代发，
+人工=登录人快照）：
 - 产品图在前（msg_type=2，payload.img_url=产品图公网 URL，中间方按 URL 拉取），
   话术在后（msg_type=1）——发送决议「分开发、图片在前、只发产品图、默认发」；
-- 报价模式 quote_mode（仅 global 行）= auto 才自动发，preview 留给人工（阶段 6 前端预览）；
-- 发送前守门：仍 pending + 有产品 + 有话术；SEND_ENABLED=false（只收不发阶段）整体跳过；
+- 自动：quote_mode（仅 global 行）= auto 才发，preview 留给人工（阶段 6 前端预览）；
+  发送前守门：仍 pending + 有产品 + 有话术；SEND_ENABLED=false（只收不发阶段）整体跳过；
+- 人工（send_manual，阶段 6 预览流动作）：话术可经改价重建（quote_pricing.rebuild_quote_text），
+  产品图仍带上；
 - 成功置已报价（sent_at=now）；下发失败转 review（契约 B「发送失败」出口），error 记原因。
 
 下发成功时消息保持「发送中」，由 task_query 轮询确认（与人工发送同一条链路）；
@@ -44,26 +47,51 @@ def auto_send_pending(rows):
 
 
 def _send_one(row):
-    """单条发送：图前文后。成功置已报价，下发失败转 review。返回是否发出。"""
+    """单条自动发送：守门（有产品+有话术）后走统一下发。返回是否发出。"""
     r = row.price_json or {}
     product = r.get("product") or {}
     text = ((r.get("pricing") or {}).get("text") or "").strip()
     image = (product.get("image") or "").strip()
     if not product or not text:
         return False  # 无产品/无话术：没有可发内容，保持 pending 等人工
+    return _dispatch_and_mark(row, text, image)
 
+
+def send_manual(row, text, operator):
+    """人工发送（阶段 6 预览流动作）：话术可经改价重建，产品图仍带上（图前文后）。
+
+    成功置已报价；下发失败转 review（与自动发送同一出口）。返回是否发出。
+    """
+    image = (((row.price_json or {}).get("product") or {}).get("image") or "").strip()
+    ok = _dispatch_and_mark(row, (text or "").strip(), image,
+                            operator=operator, fail_label="发送失败")
+    if ok:
+        log.info("人工报价已发送 inquiry=%s conv=%s operator=%s",
+                 row.id, row.conversation_id, operator.name)
+    return ok
+
+
+def _dispatch_and_mark(row, text, image, operator=None, fail_label="自动发送失败"):
+    """图前文后下发并按结果置状态：成功置已报价+广播；下发失败转 review 记原因。
+
+    operator=None 系统代发（自动报价）；人工传登录人（消息快照记操作人）。
+    """
+    r = row.price_json or {}
     pushed, conv, failed = [], None, None
     try:
         conv = db.session.get(Conversation, row.conversation_id)
         if image:
             pushed.append(_pushed(
                 send_service.send_message(
-                    row.conversation_id, Message.MSG_IMAGE, "", {"img_url": image}
+                    row.conversation_id, Message.MSG_IMAGE, "",
+                    {"img_url": image}, operator=operator,
                 ),
                 conv,
             ))
         pushed.append(_pushed(
-            send_service.send_message(row.conversation_id, Message.MSG_TEXT, text, {}),
+            send_service.send_message(
+                row.conversation_id, Message.MSG_TEXT, text, {}, operator=operator,
+            ),
             conv,
         ))
     except SendDispatchError as exc:
@@ -71,13 +99,14 @@ def _send_one(row):
 
     if failed is not None:
         row.status = QuoteInquiry.ST_REVIEW  # 契约 B：发送失败 → 人工处理
-        row.price_json = {**r, "error": f"自动发送失败：{failed}"}
+        row.price_json = {**r, "error": f"{fail_label}：{failed}"}
         return False
 
     row.status = QuoteInquiry.ST_SENT
     row.sent_at = datetime.now()
     _broadcast(pushed, conv)
-    log.info("自动报价已发送 inquiry=%s conv=%s 带图=%s", row.id, row.conversation_id, bool(image))
+    log.info("报价已发送 inquiry=%s conv=%s 带图=%s 系统代发=%s",
+             row.id, row.conversation_id, bool(image), operator is None)
     return True
 
 
@@ -92,7 +121,7 @@ def _pushed(msg, conv):
         "content": msg.content,
         "payload": msg.payload,
         "summary": msg.content,
-        "operator_name": "自动报价",
+        "operator_name": msg.operator_name or "自动报价",
         "create_time": msg.create_time.strftime("%Y-%m-%d %H:%M:%S"),
     }
 

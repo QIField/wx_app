@@ -90,6 +90,40 @@ def price_inquiry(row):
     return row
 
 
+def rebuild_quote_text(row, price=None):
+    """人工发送前改价 → 话术联动重建（改价=发送前手动改价，price_json 记改后价）。
+
+    price 有值且首件有报价时：替换首件 final_price（两位小数）、联动重算 4S 节省
+    百分比，重生成话术并回写 price_json；无件可价（纯车型卡/异常卡）或改价缺省、
+    非法时原样返回已存话术。
+    """
+    r = row.price_json or {}
+    pricing = dict(r.get("pricing") or {})
+    stored = (pricing.get("text") or "").strip()
+    if price is None:
+        return stored
+    items = list(pricing.get("items") or [])
+    if not items:
+        return stored
+    try:
+        final = f"{float(price):.2f}"
+    except (TypeError, ValueError):
+        return stored
+    first = dict(items[0])
+    first["final_price"] = final
+    try:
+        store = float(first.get("store_price") or 0)
+        if store > 0:
+            first["save_percent"] = max(0, round((1 - float(final) / store) * 100))
+    except (TypeError, ValueError):
+        pass
+    pricing["items"] = [first] + items[1:]
+    pricing["final_price"] = final
+    pricing["text"] = _quote_text(r.get("car"), pricing["items"])
+    row.price_json = {**r, "pricing": pricing}
+    return pricing["text"]
+
+
 # ---------- 链路各段 ----------
 
 

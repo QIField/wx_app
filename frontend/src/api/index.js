@@ -210,6 +210,25 @@ export const fetchMemberRemarkConfig = (contactId, memberAlias) =>
 export const saveMemberRemarkConfig = (contactId, memberAlias, payload) =>
   http.put(`/groups/${contactId}/members/${memberAlias}/remark-config`, payload)
 
+/* ===== 报价处理台（阶段 6） ===== */
+
+/** 询价列表：{status: 0-4, conversation_id, page, limit} 可选，id 倒序。 */
+export const fetchQuoteInquiries = (params) => http.get('/quote/inquiries', { params })
+
+/** 人工发送报价（预览流动作）：price 可选改价（后端话术联动重建），图前文后发出。
+ *  已报价 409 / 发送未启用 403 / 下发失败 502（询价转人工 review）。 */
+export const sendQuoteInquiry = (id, price) =>
+  http.post(`/quote/inquiries/${id}/send`, price != null && price !== '' ? { price } : {})
+
+/** 人工忽略询价：置 ignored；已报价 409。 */
+export const ignoreQuoteInquiry = (id) => http.post(`/quote/inquiries/${id}/ignore`)
+
+/** 快捷报价配置（global 行）：配件黑名单/价格系数/AI 开关/报价模式。 */
+export const fetchQuoteConfig = () => http.get('/quote/config')
+
+/** 保存报价配置：body 任意子集，仅 admin/developer 可写（客服 403，前端 toast）。 */
+export const saveQuoteConfig = (payload) => http.put('/quote/config', payload)
+
 /** WebSocket 长连接：收到推送回调 onEvent(event, data)；断线重连成功后触发一次
  * onReopen（首次连接不触发），供调用方补拉断连期间错过的数据。 */
 export function connectWs(onEvent, onReopen) {

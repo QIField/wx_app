@@ -1,9 +1,44 @@
-"""询价查询 API 单测（阶段 3）：状态/会话过滤、分页、权限口径与出参脱敏。"""
+"""询价查询 + 人工动作 API 单测（阶段 3 查询 / 阶段 6 动作）。
+
+查询：状态/会话过滤、分页、权限口径与出参脱敏。
+动作：人工发送（改价话术联动/图前文后/409/403）、忽略，下发失败转 review。
+"""
+import pytest
+
 from backend.extensions import db
 from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.conversation import Conversation
 from backend.models.quote_inquiry import QuoteInquiry
 from backend.services.devices import user_openids
+
+IMAGE = "https://data.gzbbr.com/pic/1.jpg"
+
+
+def priced_json():
+    """一条已算价的契约 A r 结构（与 test_quote_sender 同构，够话术重生成用）。"""
+    return {
+        "car": {"vin": "WBAWX3100G0L69597", "brandName": "宝马", "model": "X3",
+                "yearPattern": "2016", "displacement": "2.0T", "fuel": "汽油"},
+        "product": {"product_id": 1, "image": IMAGE, "product_name": "节温器总成",
+                    "store_price": "300.00",
+                    "child": [{"brand_name": "博世", "cost_price": "96.21",
+                               "store_price": "300.00", "stock": 5}]},
+        "pricing": {
+            "text": "【宝马 X3 2016款 2.0T】\n节温器总成（OE 11538635689）\n博世 ¥96.21"
+                    "\n报价 ¥72.16\n4S对照价 ¥300.00",
+            "final_price": "72.16",
+            "items": [{
+                "part": "节温器", "oe": "11538635689",
+                "product": {"product_id": 1, "product_name": "节温器总成",
+                            "store_price": "300.00",
+                            "child": [{"brand_name": "博世", "cost_price": "96.21",
+                                       "store_price": "300.00", "stock": 5}]},
+                "cost_price": "96.21", "store_price": "300.00",
+                "final_price": "72.16", "save_percent": 76,
+            }],
+        },
+        "error": None,
+    }
 
 
 def make_conv(openid, wxid, chat_type=Conversation.CHAT_GROUP, name="测试群"):
@@ -106,3 +141,132 @@ def test_row_shape_and_desensitize(client):
     assert "wxid" not in item  # 脱敏契约：wxid 不出参
     assert item["status"] == 0 and item["status_label"] == "待报价"
     assert item["sent_at"] is None and item["created_at"]
+
+
+# ---------- 人工动作（阶段 6） ----------
+
+
+@pytest.fixture()
+def send_spy(monkeypatch):
+    """中间方发送 mock（与 test_quote_sender 同款）：捕获 post_image/post_text 调用。"""
+    from backend.sync import send_service
+
+    calls = {"image": [], "text": []}
+    monkeypatch.setattr(send_service.middle_sender, "post_image",
+                        lambda **kw: calls["image"].append(kw) or {"code": 0})
+    monkeypatch.setattr(send_service.middle_sender, "post_text",
+                        lambda **kw: calls["text"].append(kw) or {"code": 0})
+    return calls
+
+
+def make_priced(conv, status=QuoteInquiry.ST_PENDING, **over):
+    """一条已算价（契约 A r 结构齐备）的询价行。"""
+    fields = dict(
+        conversation_id=conv.id, sender_name="老王", vin="WBAWX3100G0L69597",
+        part_name="节温器", oem_no="11538635689", status=status,
+        price_json=priced_json(),
+    )
+    fields.update(over)
+    row = QuoteInquiry(**fields)
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+def test_send_image_first_then_text(client, send_spy):
+    """人工发送：图前文后下发，置已报价带 sent_at。"""
+    conv = make_conv("dev01", "group1")
+    row = make_priced(conv)
+    resp = client.post(f"/api/quote/inquiries/{row.id}/send")
+    body = resp.get_json()
+    assert resp.status_code == 200 and body["code"] == 0
+    assert [c["img_url"] for c in send_spy["image"]] == [IMAGE]
+    assert len(send_spy["text"]) == 1 and "¥72.16" in send_spy["text"][0]["content"]
+    assert body["data"]["status"] == QuoteInquiry.ST_SENT
+    assert body["data"]["sent_at"]
+
+
+def test_send_with_price_rebuilds_text(client, send_spy):
+    """改价发送：话术联动重建（¥88.00），price_json 记改后价，节省百分比重算。"""
+    conv = make_conv("dev01", "group1")
+    row = make_priced(conv)
+    resp = client.post(f"/api/quote/inquiries/{row.id}/send", json={"price": 88})
+    assert resp.status_code == 200
+    text = send_spy["text"][0]["content"]
+    assert "报价 ¥88.00" in text and "¥72.16" not in text
+    assert row.price_json["pricing"]["final_price"] == "88.00"
+    assert row.price_json["pricing"]["items"][0]["save_percent"] == 71  # 1-88/300
+
+
+def test_send_rejects_invalid_price(client, send_spy):
+    """改价校验：非数字/非正数一律 400，不下发不置状态。"""
+    conv = make_conv("dev01", "group1")
+    row = make_priced(conv)
+    for price in ("abc", "-5", "0"):
+        assert client.post(f"/api/quote/inquiries/{row.id}/send",
+                           json={"price": price}).status_code == 400
+    assert send_spy["text"] == [] and send_spy["image"] == []
+    assert row.status == QuoteInquiry.ST_PENDING
+
+
+def test_send_without_text_rejected(client, send_spy):
+    """无话术（纯车型卡/异常卡）：400 不发送，保持 pending。"""
+    conv = make_conv("dev01", "group1")
+    row = make_priced(conv)
+    row.price_json = {"car": None, "product": None, "pricing": {"text": ""}, "error": None}
+    db.session.commit()
+    assert client.post(f"/api/quote/inquiries/{row.id}/send").status_code == 400
+    assert send_spy["text"] == []
+    assert row.status == QuoteInquiry.ST_PENDING
+
+
+def test_send_conflict_when_sent(client, send_spy):
+    """重复发送拒绝：已报价（sent）409。"""
+    conv = make_conv("dev01", "group1")
+    row = make_priced(conv, status=QuoteInquiry.ST_SENT)
+    assert client.post(f"/api/quote/inquiries/{row.id}/send").status_code == 409
+    assert send_spy["text"] == []
+
+
+def test_send_hidden_for_other_device(client, send_spy):
+    """权限口径：跨绑定设备的询价不可见 → 404。"""
+    other = make_conv("dev99", "group_other")
+    row = make_priced(other)
+    assert client.post(f"/api/quote/inquiries/{row.id}/send").status_code == 404
+    assert send_spy["text"] == []
+
+
+def test_send_forbidden_when_send_disabled(client, send_spy, monkeypatch):
+    """SEND_ENABLED=false（只收不发阶段）：403 不下发。"""
+    conv = make_conv("dev01", "group1")
+    row = make_priced(conv)
+    monkeypatch.setattr("backend.api.quote_inquiry.SEND_ENABLED", False)
+    assert client.post(f"/api/quote/inquiries/{row.id}/send").status_code == 403
+    assert send_spy["text"] == []
+
+
+def test_send_dispatch_failure_goes_review(client, send_spy, monkeypatch):
+    """下发失败：502 + 转 review（契约 B 出口），error 记原因，不置已报价。"""
+    conv = make_conv("dev01", "group1")
+    row = make_priced(conv)
+    from backend.sync import send_service
+
+    def boom(**kw):
+        raise send_service.SendDispatchError("网络不可达")
+
+    monkeypatch.setattr(send_service.middle_sender, "post_image", boom)
+    resp = client.post(f"/api/quote/inquiries/{row.id}/send")
+    assert resp.status_code == 502
+    assert row.status == QuoteInquiry.ST_REVIEW
+    assert "发送失败" in row.price_json["error"]
+
+
+def test_ignore_moves_to_ignored_and_conflict_on_sent(client):
+    """忽略：pending → ignored（4）；已报价拒绝 409。"""
+    conv = make_conv("dev01", "group1")
+    row = make_inquiry(conv)
+    body = client.post(f"/api/quote/inquiries/{row.id}/ignore").get_json()
+    assert body["code"] == 0 and body["data"]["status"] == QuoteInquiry.ST_IGNORED
+
+    sent = make_inquiry(conv, status=QuoteInquiry.ST_SENT)
+    assert client.post(f"/api/quote/inquiries/{sent.id}/ignore").status_code == 409

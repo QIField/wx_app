@@ -1,32 +1,61 @@
 <script setup>
-/** 右栏：报价处理台（本期为静态演示数据，后端接口后续接入，数据结构与 quote_order/quote_item 对齐）。 */
-import { computed, ref } from 'vue'
+/** 右栏：报价处理台（阶段 6 前端接入）。
+ *
+ * 数据源 GET /quote/inquiries（绑定设备口径，id 倒序），15s 轮询保持新鲜，
+ * 动作（发送/忽略）由 QuoteCard 处理后 emit refresh 即时刷新。
+ * tab 口径：待处理=pending+review（含发送失败转人工）、已报价=sent、已忽略=ignored+blocked。
+ */
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { fetchQuoteInquiries } from '../api'
+import QuoteCard from './QuoteCard.vue'
+import QuoteSettings from './QuoteSettings.vue'
+
+const POLL_MS = 15000
+const FETCH_LIMIT = 200 // V1 一次拉前 200 条（id 倒序），前端按状态分 tab
 
 const TABS = [
-  { key: 'pending', label: '待处理' },
-  { key: 'quoted', label: '已报价' },
-  { key: 'done', label: '已购' },
-]
-
-/* 演示数据：对标报价单卡片（群名/联系方式/车辆信息/进度），非真实接口 */
-const QUOTES = [
-  { id: 1, status: 'pending', group: '鑫铃自动报价群', contact: '佛山鑫铃 139****9515(测试)', time: '15:30:36', urgent: true,
-    car: '一汽大众 A4L(中国-2009-15) 2011 2.0L C0ZA-涡轮增压 汽油 CVT 无级变速箱 (LVSJCB2B6S2555553)', done: 1, total: 3 },
-  { id: 2, status: 'pending', group: '泉州鑫铃-奔驰超豪', contact: '泉州鑫铃 138****6652', time: '15:26:41', urgent: false,
-    car: '奔驰 Super Hao Raul(2009-2015)超豪 2012 1.8L CEAA-涡轮增压 汽油 6速自动变速箱 (LSVCR3BT2B6750555)', done: 0, total: 1 },
-  { id: 3, status: 'pending', group: '鑫铃自动报价群', contact: '佛山鑫铃 139****9515(测试)', time: '15:02:26', urgent: false,
-    car: '进口奥迪 A6L Avant(2019-2025) 3.0L DLZA 7速双离合变速箱 (WAURGFCF20LN00955)', done: 1, total: 3 },
-  { id: 4, status: 'quoted', group: '鑫铃自动报价群', contact: '佛山鑫铃 139****9515(测试)', time: '14:47:58', urgent: false,
-    car: '进口大众 途锐(2011-2014) 2014款 3.0L CRCA-机械增压 汽油 8速自动变速箱 (WVGAY97PZED039956)', done: 1, total: 2 },
-  { id: 5, status: 'quoted', group: '广州鑫铃-奔驰超豪', contact: '广州鑫铃 136****0027', time: '11:32:19', urgent: false,
-    car: '本田 2014 (JHMC63FORTU2045) 2.4L K24W5-自然吸气 汽油 CVT 无级变速箱', done: 2, total: 2 },
-  { id: 6, status: 'done', group: '厦门鑫铃', contact: '厦门鑫铃 135****8890', time: '10:14:59', urgent: false,
-    car: '东风悦达起亚 Q2(2010-2015)Q2 2015 3.0L CJTC 8速自动变速箱 (WAAEAD3GF0D001479)', done: 1, total: 1 },
+  { key: 'pending', label: '待处理', statuses: [0, 1] },
+  { key: 'sent', label: '已报价', statuses: [3] },
+  { key: 'ignored', label: '已忽略', statuses: [2, 4] },
 ]
 
 const active = ref('pending')
-const list = computed(() => QUOTES.filter(q => q.status === active.value))
-const count = key => QUOTES.filter(q => q.status === key).length
+const view = ref('list') // list | settings
+const rows = ref([])
+const loading = ref(false)
+const loaded = ref(false)
+let timer = null
+
+const visible = computed(() => {
+  const st = TABS.find((t) => t.key === active.value)
+  return rows.value.filter((r) => st.statuses.includes(r.status))
+})
+const count = (key) => {
+  const st = TABS.find((t) => t.key === key)
+  return rows.value.filter((r) => st.statuses.includes(r.status)).length
+}
+
+async function fetchRows(silent = false) {
+  if (!silent) loading.value = true
+  try {
+    rows.value = await fetchQuoteInquiries({ limit: FETCH_LIMIT }) || []
+    loaded.value = true
+  } catch {
+    /* 轮询失败不打断页面，下个周期再试 */
+  } finally {
+    loading.value = false
+  }
+}
+
+function refresh() {
+  fetchRows(true)
+}
+
+onMounted(() => {
+  fetchRows()
+  timer = setInterval(refresh, POLL_MS)
+})
+onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
@@ -38,40 +67,45 @@ const count = key => QUOTES.filter(q => q.status === key).length
     </div>
 
     <div class="filter-row">
-      <div class="status-tabs">
-        <span
-          v-for="t in TABS" :key="t.key"
-          class="st" :class="{ on: active === t.key }"
-          @click="active = t.key"
-        >{{ t.label }} <em class="num">{{ count(t.key) }}</em></span>
-      </div>
-      <span class="lang">语别:全部</span>
+      <template v-if="view === 'list'">
+        <div class="status-tabs">
+          <span
+            v-for="t in TABS" :key="t.key"
+            class="st" :class="{ on: active === t.key }"
+            @click="active = t.key"
+          >{{ t.label }} <em class="num">{{ count(t.key) }}</em></span>
+        </div>
+        <button class="gear" title="报价设置" @click="view = 'settings'">
+          <svg viewBox="0 0 24 24" width="13" height="13">
+            <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7zm7.4-2.6l1.8 1.1-1.5 2.6-2-.7a7 7 0 0 1-1.6 1l-.4 2.1h-3l-.4-2.1a7 7 0 0 1-1.6-1l-2 .7-1.5-2.6 1.8-1.1a7 7 0 0 1 0-1.8L4.2 9.8l1.5-2.6 2 .7a7 7 0 0 1 1.6-1l.4-2.1h3l.4 2.1a7 7 0 0 1 1.6 1l2-.7 1.5 2.6-1.8 1.1a7 7 0 0 1 0 1.8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </template>
+      <template v-else>
+        <span class="set-back" @click="view = 'list'">
+          <svg viewBox="0 0 24 24" width="12" height="12">
+            <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          返回列表
+        </span>
+        <span class="set-title">报价设置</span>
+      </template>
     </div>
 
-    <el-scrollbar class="scroll">
-      <div class="cards">
-        <div
-          v-for="(q, i) in list"
-          :key="q.id"
-          class="card"
-          :class="{ urgent: q.urgent }"
-          :style="{ animationDelay: i * 45 + 'ms' }"
-        >
-          <div class="row-top">
-            <span class="group">{{ q.group }}</span>
-            <span class="contact">{{ q.contact }}</span>
-          </div>
-          <div class="car">{{ q.car }}</div>
-          <div class="row-bottom">
-            <span class="time num">{{ q.time }}</span>
-            <span class="progress">
-              <em class="num" :class="{ zero: q.done === 0 }">{{ q.done }}/{{ q.total }}</em>
-              <span class="links"><a>查全部</a><i>|</i><a>车型报价</a></span>
-            </span>
-          </div>
-        </div>
+    <el-scrollbar v-if="view === 'list'" class="scroll" v-loading="loading && !loaded">
+      <div v-if="visible.length" class="cards">
+        <QuoteCard
+          v-for="(q, i) in visible" :key="q.id"
+          :inquiry="q" :style="{ animationDelay: i * 45 + 'ms' }"
+          @refresh="refresh"
+        />
       </div>
-      <div class="footnote">演示数据 · 后端接口后续接入</div>
+      <div v-else-if="loaded" class="empty">暂无{{ TABS.find(t => t.key === active).label }}询价</div>
+      <div class="footnote">每 {{ POLL_MS / 1000 }} 秒自动刷新 · 新询价由 AI 守门自动分流</div>
+    </el-scrollbar>
+
+    <el-scrollbar v-else class="scroll">
+      <QuoteSettings />
     </el-scrollbar>
   </div>
 </template>
@@ -115,66 +149,29 @@ const count = key => QUOTES.filter(q => q.status === key).length
   border-color: #b9d0ff;
 }
 .st em { font-style: normal; font-size: 11px; opacity: 0.75; margin-left: 1px; }
-.lang { font-size: 11px; color: var(--c-text-sub); }
+
+.gear {
+  border: none; background: none; padding: 3px;
+  color: var(--c-text-sub); cursor: pointer;
+  display: flex; align-items: center;
+  border-radius: var(--r-sm);
+}
+.gear:hover { color: var(--c-primary); background: var(--c-primary-soft); }
+
+.set-back {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 12px; color: var(--c-primary); cursor: pointer;
+}
+.set-back:hover { text-decoration: underline; }
+.set-title { font-size: 12px; font-weight: 600; color: var(--c-text); }
 
 .scroll { flex: 1; }
 .cards { padding: 4px 10px; }
 
-.card {
-  padding: 8px 10px;
-  border-bottom: 1px dashed var(--c-border-strong);
-  position: relative;
-  animation: card-in 0.3s both;
-  transition: background 0.15s;
+.empty {
+  text-align: center; font-size: 12px; color: var(--c-text-sub);
+  padding: 40px 0 20px;
 }
-@keyframes card-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
-}
-.card::before {
-  content: '';
-  position: absolute; left: -2px; top: 10px; bottom: 10px; width: 3px;
-  background: var(--c-primary);
-  border-radius: 2px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.card:hover { background: #f8fafd; }
-.card:hover::before { opacity: 1; }
-.card.urgent::after {
-  content: '急';
-  position: absolute; right: 8px; top: 7px;
-  font-size: 10px; color: #fff; background: var(--c-danger);
-  border-radius: 3px; padding: 0 4px; line-height: 15px;
-}
-
-.row-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-.group { font-weight: 600; font-size: 13px; }
-.contact {
-  font-size: 11px; color: var(--c-text-sub);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-
-.car {
-  margin: 5px 0;
-  padding: 5px 7px;
-  font-size: 12px; line-height: 1.5;
-  color: var(--c-primary-deep);
-  background: var(--c-primary-soft);
-  border-radius: var(--r-sm);
-  border-left: 3px solid var(--c-primary);
-}
-
-.row-bottom { display: flex; justify-content: space-between; align-items: center; }
-.time { font-size: 11px; color: var(--c-text-sub); }
-.progress { display: flex; align-items: center; gap: 8px; }
-.progress em { font-style: normal; font-weight: 700; font-size: 13px; color: var(--c-primary); }
-.progress em.zero { color: var(--c-warn); }
-.links { display: flex; align-items: center; gap: 5px; font-size: 11px; }
-.links a { color: var(--c-primary); cursor: pointer; }
-.links a:hover { text-decoration: underline; }
-.links i { color: var(--c-border-strong); font-style: normal; }
-
 .footnote {
   text-align: center; font-size: 10px; color: var(--c-border-strong);
   padding: 8px 0 10px;
