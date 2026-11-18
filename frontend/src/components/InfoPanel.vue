@@ -38,7 +38,9 @@ const count = (key) => {
 async function fetchRows(silent = false) {
   if (!silent) loading.value = true
   try {
-    rows.value = await fetchQuoteInquiries({ limit: FETCH_LIMIT }) || []
+    // 出参为分页对象 {total, page, limit, list}，询价行在 list 里
+    const res = await fetchQuoteInquiries({ limit: FETCH_LIMIT })
+    rows.value = res?.list || []
     loaded.value = true
   } catch {
     /* 轮询失败不打断页面，下个周期再试 */
