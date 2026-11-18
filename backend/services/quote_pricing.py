@@ -152,6 +152,11 @@ def _car_block(vin):
     data = qq_client.vininfo(vin)
     rows = data if isinstance(data, list) else []
     info = rows[0] if rows and isinstance(rows[0], dict) else {}
+    return _car_from_info(info, vin)
+
+
+def _car_from_info(info, vin=""):
+    """vininfo 单行 → 契约 A car 子集；carBrandCode 供爆炸图 carBrandId 取值（手动查询用）。"""
     if not (info.get("carBrandName") or info.get("carModelName")):
         return None
     sale = info.get("saleModelName") or ""
@@ -165,6 +170,7 @@ def _car_block(vin):
         "displacement": disp.group(0).replace(" ", "").upper() if disp else "",
         "fuel": info.get("fuelType") or "",
         "saleModelName": sale,
+        "carBrandCode": info.get("carBrandCode") or "",
     }
 
 

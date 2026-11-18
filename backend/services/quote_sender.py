@@ -43,7 +43,15 @@ def auto_send_pending(rows):
         except Exception:  # noqa: BLE001 单条异常不拖垮批量
             log.exception("自动报价发送异常 inquiry=%s", row.id)
     db.session.commit()
+    _notify_status(rows)
     return sent
+
+
+def _notify_status(rows):
+    """批量发送后的询价状态广播（sent/review 变更 → 拓展栏 feed 静默刷新）。"""
+    from backend.services.quote_dispatch import notify_inquiry
+
+    notify_inquiry([r for r in rows if r.status != QuoteInquiry.ST_PENDING])
 
 
 def _send_one(row):

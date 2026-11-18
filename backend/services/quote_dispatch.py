@@ -8,6 +8,7 @@
 """
 from backend.extensions import db
 from backend.models.quote_inquiry import QuoteInquiry
+from backend.ws.hub import broadcast
 
 
 def _truthy(v):
@@ -45,6 +46,21 @@ def _status_of(scene, blacklist):
     return QuoteInquiry.ST_PENDING
 
 
+def notify_inquiry(rows, created=False):
+    """询价落库/状态变更 → WS 广播（拓展栏自动报价 feed 的静默 refresh 信号）。
+
+    rows: QuoteInquiry 行列表；created=True 表示新询价落库。空列表不广播。
+    """
+    if not rows:
+        return
+    broadcast("quote_inquiry_changed", {
+        "created": created,
+        "ids": [r.id for r in rows],
+        "statuses": [r.status for r in rows],
+        "conversation_id": rows[0].conversation_id,
+    })
+
+
 def dispatch(conversation_id, scenarios, blacklist):
     """场景落表（同一 conversation 可多条），返回写入行 list。空场景不落。"""
     rows = []
@@ -64,4 +80,5 @@ def dispatch(conversation_id, scenarios, blacklist):
         rows.append(row)
     if rows:
         db.session.commit()
+        notify_inquiry(rows, created=True)
     return rows

@@ -123,6 +123,33 @@ def test_dispatch_status_gates(app):
     assert rows[0].quoted is False and rows[1].quoted is True
 
 
+def test_dispatch_broadcasts_inquiry_changed(app, monkeypatch):
+    """落库后广播 quote_inquiry_changed（拓展栏 feed 静默 refresh 信号）。"""
+    captured = []
+    monkeypatch.setattr("backend.services.quote_dispatch.broadcast",
+                        lambda event, data: captured.append((event, data)))
+    conv = make_conv("group1")
+    rows = dispatch(conv.id, [{"sender_name": "老王", "part_name": "节温器", "vin": "VIN1"}], [])
+
+    assert len(captured) == 1
+    event, data = captured[0]
+    assert event == "quote_inquiry_changed"
+    assert data["created"] is True
+    assert data["ids"] == [rows[0].id]
+    assert data["conversation_id"] == conv.id
+    assert data["statuses"] == [QuoteInquiry.ST_PENDING]
+
+
+def test_dispatch_empty_scenes_no_broadcast(app, monkeypatch):
+    """空场景不落表也不广播。"""
+    captured = []
+    monkeypatch.setattr("backend.services.quote_dispatch.broadcast",
+                        lambda event, data: captured.append((event, data)))
+    conv = make_conv("group1")
+    assert dispatch(conv.id, [], []) == []
+    assert captured == []
+
+
 # ---------- 资格判定（契约 C：群>用户，AND 全局开关） ----------
 
 

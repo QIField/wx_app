@@ -19,6 +19,7 @@ from backend.models.quote_inquiry import QuoteInquiry
 from backend.services import anonymize, quote_sender
 from backend.services.auth import require_role
 from backend.services.devices import user_openids
+from backend.services.quote_dispatch import notify_inquiry
 from backend.services.quote_pricing import rebuild_quote_text
 
 bp = Blueprint("quote_inquiry", __name__)
@@ -97,6 +98,11 @@ def _inquiry_payload(row):
     return _inquiry_json(row, db.session.get(Conversation, row.conversation_id))
 
 
+def _notify_changed(row):
+    """询价状态变更广播（拓展栏 feed 静默 refresh）。"""
+    notify_inquiry([row])
+
+
 @bp.post("/api/quote/inquiries/<int:inquiry_id>/send")
 @require_role()
 def send_inquiry(inquiry_id):
@@ -129,8 +135,10 @@ def send_inquiry(inquiry_id):
     if not quote_sender.send_manual(row, text, operator=g.current_user):
         err = (row.price_json or {}).get("error") or "发送失败"
         db.session.commit()  # review 状态与 error 原因落库
+        _notify_changed(row)  # 失败也转了 review，前端需刷新状态
         return jsonify(code=502, msg=err), 502
     db.session.commit()
+    _notify_changed(row)
     return jsonify(code=0, msg="success", data=_inquiry_payload(row))
 
 
@@ -145,6 +153,7 @@ def ignore_inquiry(inquiry_id):
         return jsonify(code=409, msg="已报价的询价不能忽略"), 409
     row.status = QuoteInquiry.ST_IGNORED
     db.session.commit()
+    _notify_changed(row)
     return jsonify(code=0, msg="success", data=_inquiry_payload(row))
 
 

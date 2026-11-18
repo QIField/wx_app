@@ -104,6 +104,7 @@ def test_car_block_maps_real_fields(app, mock_api):
         "vin": VIN, "brandName": "宝马", "model": "进口宝马 X3 20iX",
         "yearPattern": "2016", "displacement": "2.0T", "fuel": "汽油",
         "saleModelName": "进口宝马 X3 20iX 2016 2.0T 手自一体",
+        "carBrandCode": "BMW",
     }
 
 

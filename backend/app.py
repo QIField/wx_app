@@ -119,6 +119,8 @@ def register_routes(app: Flask) -> None:
     from backend.api.orgs import bp as orgs_bp
     from backend.api.quote_config import bp as quote_config_bp
     from backend.api.quote_inquiry import bp as quote_inquiry_bp
+    from backend.api.quote_query import bp as quote_query_bp
+    from backend.api.quote_stats import bp as quote_stats_bp
     from backend.api.remark_config import bp as remark_config_bp
     from backend.api.ringtones import bp as ringtones_bp
     from backend.api.send_logs import bp as send_logs_bp
@@ -143,6 +145,8 @@ def register_routes(app: Flask) -> None:
     app.register_blueprint(remark_config_bp)
     app.register_blueprint(quote_config_bp)
     app.register_blueprint(quote_inquiry_bp)
+    app.register_blueprint(quote_query_bp)
+    app.register_blueprint(quote_stats_bp)
     app.register_blueprint(ringtones_bp)
 
     import backend.ws.hub  # noqa: F401 注册 /ws WebSocket 路由
