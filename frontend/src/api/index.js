@@ -229,23 +229,65 @@ export const fetchQuoteConfig = () => http.get('/quote/config')
 /** 保存报价配置：body 任意子集，仅 admin/developer 可写（客服 403，前端 toast）。 */
 export const saveQuoteConfig = (payload) => http.put('/quote/config', payload)
 
-/** WebSocket 长连接：收到推送回调 onEvent(event, data)；断线重连成功后触发一次
- * onReopen（首次连接不触发），供调用方补拉断连期间错过的数据。 */
+/* ===== 快捷报价查询/统计（拓展栏重做 · 手动报价与报价分析数据源） ===== */
+
+/** 手动查询链式搜索：{q, part_name?} → {type, car, product, partImagesList, chain}。上游串行多跳，超时放宽 60s。 */
+export const qqManualSearch = (q, partName) =>
+  http.post('/quote/query/manual-search', { q, part_name: partName || undefined }, { timeout: 60000 })
+
+/** AI 询价要素提取（AI 对话子 tab）：{text} → 场景 list。 */
+export const qqExtractParts = (text) =>
+  http.post('/quote/query/extract-parts', { text }, { timeout: 60000 })
+
+/** 兆配云全网比价（中文键名列表原样透传）。 */
+export const qqZpy = (number) => http.post('/quote/query/zpy', { number }, { timeout: 60000 })
+
+/** 机汽人平台竞价：{jy_data, xj_data}。 */
+export const qqJqr = (number) => http.post('/quote/query/jqr', { number }, { timeout: 60000 })
+
+/** 采购历史：{total:{purchase_quantity,totalprice}, list:{total,current_page,last_page,data}}。 */
+export const qqPurchaseHistory = (number, page = 1, limit = 10) =>
+  http.post('/quote/query/purchase-history', { number, page, limit }, { timeout: 60000 })
+
+/** 报价分析统计：period=day|month → {kpi, prev, trend, days, series, top}。 */
+export const fetchQuoteStats = (period) => http.get('/quote/stats', { params: { period } })
+
+/** WebSocket 订阅：收到推送回调 onEvent(event, data)，断线重连成功触发一次 onReopen。
+ * 返回 {ws, stop()}——视图卸载必须 stop()，否则断线重连闭包会永久泄漏。 */
 export function connectWs(onEvent, onReopen) {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const ws = new WebSocket(`${proto}://${location.host}/ws`)
+  let sock = null
+  let stopped = false
   let reopened = false
 
-  ws.onopen = () => {
-    if (reopened && onReopen) onReopen()
-    reopened = true
+  function open() {
+    if (stopped) return
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    sock = new WebSocket(`${proto}://${location.host}/ws`)
+    sock.onopen = () => {
+      if (reopened && onReopen) onReopen()
+      reopened = true
+    }
+    sock.onmessage = (e) => {
+      try {
+        const { event, data } = JSON.parse(e.data)
+        if (event && event !== 'ping') onEvent(event, data)
+      } catch { /* 心跳/坏包忽略 */ }
+    }
+    sock.onclose = () => {
+      if (!stopped) setTimeout(open, 2000) // 断线重连
+    }
+    sock.onerror = () => sock.close()
   }
-  ws.onmessage = (e) => {
-    try {
-      const { event, data } = JSON.parse(e.data)
-      if (event && event !== 'ping') onEvent(event, data)
-    } catch { /* 心跳/坏包忽略 */ }
+
+  open()
+  return {
+    get ws() { return sock },
+    stop() {
+      stopped = true
+      if (sock) {
+        sock.onclose = null
+        sock.close()
+      }
+    },
   }
-  ws.onclose = () => setTimeout(() => connectWs(onEvent, onReopen), 2000) // 断线重连
-  return ws
 }
