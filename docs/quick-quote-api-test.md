@@ -271,6 +271,29 @@ openid = `5A8D08A1A292061C4B52B3E5DF035B53`，全部 HTTP 200 / code=0（jqr、z
 `extract_parts_demand`(聊天→VIN+件名) → `vininfo`(VIN→车型) → `partno`(VIN+件名→OE)
 → `partImages`(VIN+OE→图 id) → `partImages_list`(图 id→全件清单+坐标+价) → `zpy/jqr`(比价)。
 
+### 4.13 联调期补测（2026-11-18，多模态端到端 + xj_data）
+
+> 配套业务端同日验证：pytest 443 绿；真实链路冒烟 5/5（vininfo / product_list / partno / jqr / zpy 两条已知参数全部对上历史值）。
+
+**① chat_content 多模态条目端到端（隔离变量法）**：
+
+| 用例 | 输入要点 | 结果 |
+|---|---|---|
+| A 纯文本对照 | 1 条文本（奔驰 VIN + 节温器） | ✅ 1 场景，vin/part 提取正确——服务当日健康 |
+| B 图片+备注+指代追问 | 文本仅「这个多少钱」+ gg.png + 系统备注 | ✅ **1 场景，vin=`LBV5S3104GSN16986`（图内 VIN）**——AI 从图片读出 VIN，「图+文合并理解」端到端打通；part=null（图上无件名） |
+| C 图片+坏音频 | B 再加 1 条不可达 `input_audio`（URL 404） | ❌ **0 场景静默归零**，无错误码 |
+| D 全混排 | 文本+图片+audio+file+video 共 10 条（后三类 URL 均不可达） | ❌ 0 场景——坏媒体条目毒化整次调用 |
+
+**对接红线**：`input_audio / input_file / input_video` 条目只要带不可达 URL，**整个 extract
+调用静默返回空 list**（连好图片场景一起丢）。组装器规则：媒体条目只放「已确认可公网拉取」
+的 URL，不可达宁可降级为占位文本备注——业务端 V1 现行实现即如此
+（`backend/services/quote_context.py` 只发占位备注，不发媒体直链）。另：`quoted` 字段
+实测可为 null（非恒为 bool）。
+
+**② jqr 的 `xj_data` 结构**：OE `1665000075`（jy_data 464 条）与 `11538635689`
+（jy_data 230 条）的 `xj_data` 均**恒为空 list**——正常比价路径不产出询价数据，
+对接按空列表处理即可，无需展开结构。
+
 ## 5. 异常与问题标注
 
 ### 5.1 接口调用失败原因
@@ -333,6 +356,7 @@ openid = `5A8D08A1A292061C4B52B3E5DF035B53`，全部 HTTP 200 / code=0（jqr、z
   `0005400017`（前缀字母被剥离）；`jqr`/`zpy` ✅ **已验证**（§4.11）：number 按 OE 检索，
   `1665000075` → jqr 469 条竞价 / zpy 8 条报价，`11538635689` → 230 条 / 9 条——
   两平台按任意 OE 全量返回比价数据，无"档案不存在"概念（查不到时应为空列表/空data）。
+  **`xj_data` 补测（§4.13）**：两个 OE 均恒空 list，对接按空列表处理。
 - `purchaseHistory_list` 的 `page`/`limit`：实测接受 `page=1&limit=10` 并回显
   `per_page:"10"`（字符串）；默认值与上限未知；**`page=2` 服务端 500**（§4.8）。
 - `partno` 的 `originalPartsNos` 多值分隔方式：✅ **已关闭**——逗号分隔有效，
@@ -356,10 +380,13 @@ openid = `5A8D08A1A292061C4B52B3E5DF035B53`，全部 HTTP 200 / code=0（jqr、z
    §5.1）均已解决。剩余待办：auto_quote 语义说明。
 2. **[服务方] 说明 product_list 的 `auto_quote` 数组语义**。
    （imageIds←partImages.imageId、carBrandId=carBrandCode 均已闭环证实 ✓，见 §4.12。）
-3. **[对接] `.env` 增加 `QUICK_QUOTE_BASE_URL = http://wx_api.fsbbr.net/wechat_x` 与
-   `QUICK_QUOTE_OPENID`（专用 id `5A8D08A1A292061C4B52B3E5DF035B53`，勿与中间方 openid 混用）**，
-   并在 docs/quick-quote-api.md 补记部署地址（✓ 已补记，见该文档「统一约定」）。
-4. 音频/视频/文件场景（chat_content 的 input_audio / input_video / input_image / input_file）
-   按本次要求未测，联调语音报价时补充。
+3. **[对接] `.env` 增加 `QQ_API_BASE_URL = http://wx_api.fsbbr.net/wechat_x/` 与
+   `QQ_OPENID`（专用 id `5A8D08A1A292061C4B52B3E5DF035B53`，勿与中间方 openid 混用）**——
+   ✅ 已落地（`backend/config.py` 键名 `QQ_API_BASE_URL` / `QQ_OPENID` / `QQ_TIMEOUT_SECONDS`，
+   实测前记的 `QUICK_QUOTE_*` 键名为勘误），docs/quick-quote-api.md 部署地址已补记（✓ 见「统一约定」）。
+4. ~~音频/视频/文件场景（chat_content 的 input_audio / input_video / input_image / input_file）
+   按本次要求未测~~ ✅ **2026-11-18 已补测（§4.13）**：input_image 端到端打通（图内 VIN
+   提取成功）；input_audio/file/video 带不可达 URL 时**整次调用静默返回空 list**——
+   组装器只放可达媒体 URL 或降级占位备注（现行实现已遵循）。
 5. OCR 建议优先 tx_vin（local_vin 对样图识别失败）；如有真实 VIN 车照片可补测 local_vin。
 6. 若走 HTTPS 需求成立，请服务方修正证书（当前 hostname mismatch）。

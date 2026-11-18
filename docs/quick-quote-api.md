@@ -202,7 +202,10 @@
 
 实测行为：多条消息按询价人正确归并（4 条消息 → 3 条询价）；图片/音频条目配合
 「系统备注」文本可正确归属发送人；多配件 `\n` 分隔、多条回复序号拼接均与文档一致。
-（图片/音频/视频条目的**端到端识别**联调期补测，见附录 B。）
+**多模态端到端（2026-11-18 补测，见附录 B）**：`input_image` 打通——指代追问
+「这个多少钱」+ 图片 → 从图内读出 VIN；⚠️ `input_audio / input_file / input_video`
+带不可达 URL 时**整次调用静默返回空 list**（无错误码）——媒体条目只放已确认可公网
+拉取的 URL，不可达降级为占位文本备注。另：`quoted` 实测可为 null。
 
 请求示例（纯文本 3 条，URL 编码前）：
 
@@ -461,7 +464,7 @@ extract_parts_demand（聊天 → VIN + 件名）
 | 1 | ~~purchaseHistory_list 同参数连打结果漂移、偶发 500~~ | **已修复**（2026-11-17，6/6 连测稳定） | 响应层级勘误见该接口章节 |
 | 2 | product_list 的 `auto_quote:["1280","91327","32464"]` 语义 | 待服务方说明 | 91327=product_id 已证实，另两个未知 |
 | 3 | 个别脏数据 VIN 触发 vininfo 500（如误读变体 `…G0L68597`） | 边缘行为 | 500 兜底 catch，不重试 |
-| 4 | chat_content 的 input_image / input_audio / input_video / input_file | 联调期补测 | 纯文本链路已完整验证 |
-| 5 | jqr 的 `xj_data`（询价数据）内部结构 | 联调期展开 | jy_data 已完整验证 |
+| 4 | chat_content 的 `input_image` ✅ 端到端验证通过（2026-11-18，指代追问 → 图内 VIN 提取）；`input_audio / input_file / input_video` 带不可达 URL 时**整次调用静默返回空 list** | 媒体条目只放可达 URL，不可达降级占位文本（`quote_context.py` 现行做法） | 图片锚定链路可用 |
+| 5 | jqr 的 `xj_data`（询价数据）**实测恒空**（两 OE 验证，jy_data 正常） | 按空列表处理，无需展开 | jy_data 已完整验证 |
 | 6 | HTTPS 证书 hostname 不匹配 | 仅 HTTP 可用 | 需要时由服务方修正 |
 | 7 | local_vin 对样图识别失败（返回空串） | 已知局限 | 优先 tx_vin |
