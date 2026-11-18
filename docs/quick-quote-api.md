@@ -82,28 +82,33 @@
 | openid | string | 是 | 服务方签发 |
 | number | string | 是 | OE / store 号（`A+OE`）/ PARTENT 号均可 |
 
-返回 `data`（dict）：
+返回 `data`（dict）—— **实测三层信封（2026-11-17 真链路复验）**：
+`data = {status, msg, data:{分页器}}`，产品组行在 `data.data.data`：
 
 | 字段 | 类型 | 说明 |
 | ---- | ---- | ---- |
-| total / per_page / current_page | int / **str** / int | 分页信息；`per_page` 实测为字符串 |
-| data.data | list | 产品行；`per_page` 默认 10，实测上限未知 |
-| data.no_exist_oe | list | 未命中编号回显（如 `["0005400017"]`，前缀字母已剥离） |
+| data.status / data.msg | int / str | 内层信封 |
+| data.data.current_page / last_page / per_page / total | int | 分页信息 |
+| data.data.data | list | **产品组行**；`per_page` 默认 10 |
+| data.data.no_exist_oe | list | 未命中编号回显（如 `["0005400017"]`，前缀字母已剥离） |
+| data.data.auto_quote | list[str] | `["1280","91327","32464"]`，语义**待服务方说明** |
+| data.data.pricehead / store_price_state | str/int | 价头部信息 |
 
-`list` 条目主要字段（完整 40+ 字段原始 JSON 见测试报告 §4.6）：
+产品组行实测只有 `{no, child:[品牌行]}` 两个键，全部业务字段挂在**品牌行**上
+（完整 100+ 字段原始 JSON 见测试报告 §4.6），品牌行主要字段：
 
 | 字段 | 类型 | 说明 / 实测样例 |
 | ---- | ---- | ---- |
-| product_id | int | `91327` |
-| store_number | string | `A1665000075`（store 号 = `A` + OE） |
-| partent_number | string | `724500401`（PARTENT 号） |
-| display_number | object | `{"key":"OE","value":"1665000075"}` 命中编号回显 |
-| product_name | string | 上水管 |
-| brand_id | int | **配件品牌** id：`1`=菲尔(FREY) / `79`=原厂 / `43`=盖茨（非车品牌） |
+| product_id | int | `1280` |
+| display_number | list | **数组形态**：`[{"key":"OE","number":"1665000075"},{"key":"PARTENT","number":"724500401"},{"key":"store","number":"A1665000075"}]`（文档早期记为单对象 `{key,value}` 有误） |
+| name / l_name_zh | string | 上水管 |
+| brand_id / brand_name | string | **配件品牌**：`1`=菲尔 / 原厂 / 盖茨（非车品牌） |
 | cost_price | string | `"69.00"` 我方采购价 |
 | store_price | string | `"628.14"` 4S 对照价 |
-| auto_quote | list[str] | `["1280","91327","32464"]`，语义**待服务方说明**（91327=product_id） |
-| child | list | 按配件品牌拆分的多行报价（同一 OE 菲尔 69.00 / 原厂 260.00 / 盖茨 109.00） |
+| stock / frey_stock | string | 库存（字符串数字） |
+| bigpic | string | **产品图真实 URL**：`https://data.gzbbr.com//admin/Tools.Pic/?frey_no=724500401`（前置确认①已确认：图源即此字段，服务方图片域） |
+| l_model_zh | string | `276/166` 适配车型 |
+| child 首行 | — | 主品牌行（组行 child[0] 即主行，与原型「首行高亮推荐」一致） |
 
 请求示例：`openid=…&number=1665000075`
 

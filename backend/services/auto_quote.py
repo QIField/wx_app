@@ -16,6 +16,7 @@ from backend import qq_client
 from backend.api.quote_config import merged_config
 from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.conversation import Conversation
+from backend.models.quote_inquiry import QuoteInquiry
 from backend.services.quote_context import (
     build_chat_content, build_empty_check, fetch_recent_messages,
 )
@@ -118,8 +119,12 @@ def analyze_conversation(conversation_id):
     if not scenes:
         return
     rows = dispatch(conversation_id, scenes, cfg["parts_blacklist"])
-    from backend.models.quote_inquiry import QuoteInquiry
+    pending = [r for r in rows if r.status == QuoteInquiry.ST_PENDING]
+    if pending:
+        # 阶段 4：待报价行立即算价回写 price_json（异常内部兜底，不影响分析流程）
+        from backend.services.quote_pricing import price_inquiries
 
+        price_inquiries(pending)
     log.info(
         "自动报价分析 conv=%s 场景=%d 状态=%s", conversation_id, len(scenes),
         [QuoteInquiry.STATUS_LABELS.get(r.status) for r in rows],
