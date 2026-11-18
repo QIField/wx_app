@@ -125,6 +125,10 @@ def analyze_conversation(conversation_id):
         from backend.services.quote_pricing import price_inquiries
 
         price_inquiries(pending)
+        # 阶段 5：算价后仍 pending 的行自动发送（quote_mode=auto 才发，preview 留人工）
+        from backend.services.quote_sender import auto_send_pending
+
+        auto_send_pending([r for r in pending if r.status == QuoteInquiry.ST_PENDING])
     log.info(
         "自动报价分析 conv=%s 场景=%d 状态=%s", conversation_id, len(scenes),
         [QuoteInquiry.STATUS_LABELS.get(r.status) for r in rows],
