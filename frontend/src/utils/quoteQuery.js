@@ -52,3 +52,17 @@ export function savePercent(r) {
   if (!(mine > 0) || !(store > 0)) return null
   return Math.max(0, Math.round((1 - mine / store) * 100))
 }
+
+/** 展示兜底：null/undefined/空串 → '-'，其余 String 化（比价与采购历史表格共用）。 */
+export function fmtValue(v) {
+  return v === null || v === undefined || v === '' ? '-' : String(v)
+}
+
+/** 秒级时间戳 → 本地日期 YYYY-MM-DD（不能用 toISOString：按 UTC 取日期在中国时区会偏移一天）。 */
+export function ts2date(ts) {
+  const n = Number(ts)
+  if (!(n > 0)) return '-'
+  const d = new Date(n * 1000)
+  const pad = (x) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}

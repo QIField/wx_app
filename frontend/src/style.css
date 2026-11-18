@@ -69,3 +69,84 @@ body.edge-resize-hover *, body.edge-resizing * { cursor: col-resize !important; 
 .msgs, .msgs * { -webkit-user-select: none; user-select: none; }
 /* 自定义选中高亮：主色透底，入/出方向气泡与引用块通吃（仅支持文本类属性） */
 ::highlight(chat-text-sel) { background-color: rgba(29, 93, 228, 0.28); }
+
+/* ===== 快捷报价面板公共样式（拓展栏 4 视图共用，qq- 前缀隔离） =====
+   抽自 right/ 各视图逐字重复的 scoped 样式；组件内只保留差异覆盖。
+   有意统一的微差（此前各组件 ±1~2px 漂移）：输入框 padding 6px 9px + focus
+   光晕 + placeholder 灰、主按钮 6px 14px、空态 22px 10px、徽章不带外边距。 */
+.qq-box {
+  border: 1px solid var(--c-border); border-radius: var(--r-md);
+  padding: 10px; background: #f9fafd; margin-bottom: 8px;
+}
+.qq-row { display: flex; gap: 6px; align-items: center; }
+.qq-row.sub { margin-top: 6px; }
+
+.qq-input {
+  flex: 1; min-width: 0; padding: 6px 9px; font-size: 12px;
+  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+  background: var(--c-panel); color: var(--c-text); outline: none; font-family: inherit;
+}
+.qq-input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(29, 93, 228, 0.12); }
+.qq-input::placeholder { color: #9aa7bc; }
+.qq-input.num { font-family: var(--f-num); }
+
+.qq-btn-primary {
+  flex: none; padding: 6px 14px; font-size: 12px; border-radius: var(--r-md);
+  border: 1px solid var(--c-primary-deep); color: #fff; font-weight: 600;
+  background: linear-gradient(135deg, #2f6ff0, #1d5de4); cursor: pointer;
+}
+.qq-btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #3d7bf5, #2a67e8); }
+.qq-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.qq-btn-sm {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; font-size: 11px; border-radius: var(--r-sm);
+  border: 1px solid var(--c-border-strong); background: var(--c-panel);
+  color: var(--c-text); cursor: pointer; transition: all 0.15s;
+}
+.qq-btn-sm:hover:not(:disabled) { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-soft); }
+.qq-btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
+.qq-btn-sm.primary {
+  background: linear-gradient(135deg, #2f6ff0, #1d5de4);
+  border-color: var(--c-primary-deep); color: #fff; font-weight: 600;
+}
+.qq-btn-sm.primary:hover:not(:disabled) { background: linear-gradient(135deg, #3d7bf5, #2a67e8); color: #fff; }
+
+.qq-skel { padding: 14px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
+.qq-skel .ring {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--c-border-strong); border-top-color: var(--c-primary);
+  border-radius: 50%; animation: qq-spin 0.7s linear infinite;
+  vertical-align: -3px; margin-right: 6px;
+}
+@keyframes qq-spin { to { transform: rotate(360deg); } }
+
+.qq-empty { padding: 22px 10px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
+.qq-empty.err { color: var(--c-danger); }
+
+.qq-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.qq-table th {
+  text-align: left; font-weight: 600; color: var(--c-text-sub);
+  padding: 4px 6px; background: var(--c-bg);
+  border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border);
+  white-space: nowrap;
+}
+.qq-table td { padding: 5px 6px; border-bottom: 1px solid var(--c-border); }
+.qq-table td.n { font-family: var(--f-num); white-space: nowrap; }
+
+.qq-switch { position: relative; width: 34px; height: 18px; flex: none; cursor: pointer; }
+.qq-switch input { display: none; }
+.qq-switch .track { position: absolute; inset: 0; border-radius: 999px; background: #c4cddc; transition: background 0.18s; }
+.qq-switch .track::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff; transition: left 0.18s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.qq-switch input:checked + .track { background: var(--c-ok); }
+.qq-switch input:checked + .track::after { left: 18px; }
+
+.qq-badge { display: inline-block; padding: 2px 7px; font-size: 10px; border-radius: var(--r-sm); font-weight: 600; }
+.qq-badge.b-blue { background: var(--c-primary-soft); color: var(--c-primary); }
+.qq-badge.b-green { background: var(--c-ok-soft); color: var(--c-ok); }
+.qq-badge.b-red { background: var(--c-danger-soft); color: var(--c-danger); }
+.qq-badge.b-orange { background: var(--c-warn-soft); color: var(--c-warn); }
+.qq-badge.b-gray { background: var(--c-bg); color: var(--c-text-sub); }

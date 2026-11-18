@@ -84,9 +84,9 @@ async function copyText() {
     <div v-if="chain.length" class="chain">
       <template v-for="(s, i) in chain" :key="s + i">
         <span v-if="i" class="arr">▸</span>
-        <span class="badge b-blue">{{ s }}</span>
+        <span class="qq-badge b-blue">{{ s }}</span>
       </template>
-      <span v-if="r.type" class="badge b-gray">{{ { vin: 'VIN', oe: 'OE', name: '名称' }[r.type] }}查询</span>
+      <span v-if="r.type" class="qq-badge b-gray">{{ { vin: 'VIN', oe: 'OE', name: '名称' }[r.type] }}查询</span>
     </div>
 
     <div v-if="car" class="car"><b>{{ carLine }}</b></div>
@@ -100,37 +100,37 @@ async function copyText() {
         <div class="price-line">
           <span class="mine num">¥{{ quotePrice(r) }}<small> 起我方价</small></span>
           <button v-if="!sentOk" class="price-edit" title="发送前改价" @click="startEdit">✎</button>
-          <span v-if="edited" class="badge b-orange">已改价</span>
+          <span v-if="edited" class="qq-badge b-orange">已改价</span>
           <span v-if="product.store_price" class="s4 num">4S ¥{{ product.store_price }}</span>
           <span v-if="percent != null" class="save">省 {{ percent }}%</span>
         </div>
         <div v-if="product.sell_point" class="sell">卖点：{{ product.sell_point }}</div>
         <div v-if="editing" class="price-edit-row">
-          <input v-model="priceInput" class="input num" inputmode="decimal" @keyup.enter="confirmEdit" @keyup.esc="editing = false">
-          <button class="btn sm primary" @click="confirmEdit">确定</button>
-          <button class="btn sm" @click="editing = false">取消</button>
+          <input v-model="priceInput" class="qq-input num" inputmode="decimal" @keyup.enter="confirmEdit" @keyup.esc="editing = false">
+          <button class="qq-btn-sm primary" @click="confirmEdit">确定</button>
+          <button class="qq-btn-sm" @click="editing = false">取消</button>
         </div>
       </div>
     </div>
 
-    <table v-if="child.length" class="qtable">
+    <table v-if="child.length" class="qq-table">
       <thead>
         <tr><th>品牌</th><th>我方价</th><th>4S价</th><th>库存</th></tr>
       </thead>
       <tbody>
         <tr v-for="(c, i) in child" :key="i" :class="{ me: i === 0 }">
-          <td>{{ c.brand_name }}<span v-if="i === 0" class="badge b-green">推荐</span></td>
+          <td>{{ c.brand_name }}<span v-if="i === 0" class="qq-badge b-green">推荐</span></td>
           <td class="n">¥{{ c.cost_price }}</td>
           <td class="n">¥{{ c.store_price }}</td>
           <td class="n">
             <span v-if="c.stock > 0">{{ c.stock }}</span>
-            <span v-else class="badge b-red">缺货</span>
+            <span v-else class="qq-badge b-red">缺货</span>
           </td>
         </tr>
       </tbody>
     </table>
 
-    <table v-if="images && images.length" class="qtable">
+    <table v-if="images && images.length" class="qq-table">
       <thead>
         <tr><th>标号</th><th>周边配件（爆炸图）</th><th>OE</th><th>4S价</th><th>用量</th></tr>
       </thead>
@@ -146,13 +146,13 @@ async function copyText() {
     </table>
 
     <div class="qacts">
-      <button v-if="product" class="btn sm primary" :disabled="!canSend || sending" :title="chat.currentId ? '' : '请在工作台选中会话'" @click="onSend">
+      <button v-if="product" class="qq-btn-sm primary" :disabled="!canSend || sending" :title="chat.currentId ? '' : '请在工作台选中会话'" @click="onSend">
         {{ sentOk ? '已发送' : sending ? '发送中…' : '发送报价' }}
       </button>
-      <button class="btn sm" @click="copyText">复制话术</button>
+      <button class="qq-btn-sm" @click="copyText">复制话术</button>
       <span class="sent-tag">
-        <span v-if="sentOk" class="badge b-green">✓ 已发送至会话</span>
-        <span v-else-if="!product" class="badge b-gray">无产品档案，仅车型卡</span>
+        <span v-if="sentOk" class="qq-badge b-green">✓ 已发送至会话</span>
+        <span v-else-if="!product" class="qq-badge b-gray">无产品档案，仅车型卡</span>
       </span>
     </div>
   </div>
@@ -163,13 +163,7 @@ async function copyText() {
 
 .chain { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
 .chain .arr { font-size: 9px; color: var(--c-border-strong); margin: 0 1px; }
-
-.badge { display: inline-block; padding: 2px 7px; font-size: 10px; border-radius: var(--r-sm); font-weight: 600; }
-.badge.b-blue { background: var(--c-primary-soft); color: var(--c-primary); }
-.badge.b-green { background: var(--c-ok-soft); color: var(--c-ok); margin-left: 4px; }
-.badge.b-red { background: var(--c-danger-soft); color: var(--c-danger); }
-.badge.b-orange { background: var(--c-warn-soft); color: var(--c-warn); }
-.badge.b-gray { background: var(--c-bg); color: var(--c-text-sub); margin-left: auto; }
+.chain .qq-badge.b-gray { margin-left: auto; }
 
 .car {
   font-size: 11px; color: var(--c-text-sub);
@@ -203,31 +197,13 @@ async function copyText() {
 }
 .price-edit:hover { background: #d8e5ff; }
 .price-edit-row { display: flex; gap: 5px; margin-top: 6px; }
-.price-edit-row .input { width: 84px; padding: 3px 6px; font-size: 12px; font-family: var(--f-num); border: 1px solid var(--c-border-strong); border-radius: var(--r-sm); outline: none; }
-.price-edit-row .input:focus { border-color: var(--c-primary); }
+/* 改价输入框：定宽紧凑款，覆盖公共 .qq-input 的自适应布局 */
+.price-edit-row .qq-input { flex: none; width: 84px; padding: 3px 6px; }
+.price-edit-row .qq-input:focus { box-shadow: none; }
 
-.btn.sm {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 8px; font-size: 11px; border-radius: var(--r-sm);
-  border: 1px solid var(--c-border-strong); background: var(--c-panel);
-  color: var(--c-text); cursor: pointer; transition: all 0.15s;
-}
-.btn.sm:hover:not(:disabled) { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-soft); }
-.btn.sm.primary { background: linear-gradient(135deg, #2f6ff0, #1d5de4); border-color: var(--c-primary-deep); color: #fff; font-weight: 600; }
-.btn.sm.primary:hover:not(:disabled) { background: linear-gradient(135deg, #3d7bf5, #2a67e8); color: #fff; }
-.btn.sm:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.sm + .btn.sm { margin-left: 0; }
-
-.qtable { width: 100%; border-collapse: collapse; margin: 6px 0 8px; font-size: 11px; }
-.qtable th {
-  text-align: left; font-weight: 600; color: var(--c-text-sub);
-  padding: 4px 6px; background: var(--c-bg);
-  border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border);
-  white-space: nowrap;
-}
-.qtable td { padding: 5px 6px; border-bottom: 1px solid var(--c-border); }
-.qtable td.n { font-family: var(--f-num); white-space: nowrap; }
-.qtable tr.me td { background: var(--c-primary-soft); font-weight: 600; }
+.qq-table { margin: 6px 0 8px; }
+.qq-table tr.me td { background: var(--c-primary-soft); font-weight: 600; }
+.qq-table .qq-badge.b-green { margin-left: 4px; }
 
 .qacts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .sent-tag { margin-left: auto; display: inline-flex; }

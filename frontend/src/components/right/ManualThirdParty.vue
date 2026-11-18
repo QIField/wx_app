@@ -7,6 +7,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qqJqr, qqZpy } from '../../api'
+import { fmtValue } from '../../utils/quoteQuery'
 
 const SOURCE_DEFAULT = '1665000075'
 
@@ -76,7 +77,7 @@ const isMin = (row) => {
   return p > 0 && p === minPrice()
 }
 
-const fmt = (v) => (v === null || v === undefined || v === '' ? '-' : String(v))
+const fmt = fmtValue
 
 function switchSource(key) {
   source.value = key
@@ -88,22 +89,22 @@ onMounted(load)
 
 <template>
   <div class="third">
-    <div class="mq-box">
-      <div class="row">
+    <div class="qq-box">
+      <div class="qq-row">
         <div class="seg">
           <span class="sg" :class="{ on: source === 'zpy' }" @click="switchSource('zpy')">兆配云</span>
           <span class="sg" :class="{ on: source === 'jqr' }" @click="switchSource('jqr')">机汽人</span>
         </div>
-        <input v-model="number" class="input num" placeholder="OE 编号" @keyup.enter="load">
-        <button class="btn primary" :disabled="loading" @click="load">查询</button>
+        <input v-model="number" class="qq-input num" placeholder="OE 编号" @keyup.enter="load">
+        <button class="qq-btn-primary" :disabled="loading" @click="load">查询</button>
       </div>
     </div>
 
-    <div v-if="loading" class="skel"><span class="ring"></span>比价查询中…</div>
-    <div v-else-if="error" class="empty err">{{ error }}</div>
+    <div v-if="loading" class="qq-skel"><span class="ring"></span>比价查询中…</div>
+    <div v-else-if="error" class="qq-empty err">{{ error }}</div>
 
     <template v-else-if="source === 'zpy'">
-      <table v-if="zpyRows.length" class="qtable">
+      <table v-if="zpyRows.length" class="qq-table">
         <thead>
           <tr><th v-for="c in ZPY_COLS" :key="c.key">{{ c.label }}</th></tr>
         </thead>
@@ -111,16 +112,16 @@ onMounted(load)
           <tr v-for="(r, i) in zpyRows" :key="i" :class="{ min: isMin(r) }">
             <td v-for="c in ZPY_COLS" :key="c.key" :class="{ n: c.key !== '发货说明' }">
               {{ fmt(r[c.key]) }}
-              <span v-if="c.key === '含税售价' && isMin(r)" class="badge b-green">最低</span>
+              <span v-if="c.key === '含税售价' && isMin(r)" class="qq-badge b-green">最低</span>
             </td>
           </tr>
         </tbody>
       </table>
-      <div v-else-if="loaded" class="empty">兆配云未返回该 OE 的报价</div>
+      <div v-else-if="loaded" class="qq-empty">兆配云未返回该 OE 的报价</div>
     </template>
 
     <template v-else>
-      <table v-if="jyRows.length" class="qtable">
+      <table v-if="jyRows.length" class="qq-table">
         <thead>
           <tr><th v-for="c in JQR_COLS" :key="c.key">{{ c.label }}</th></tr>
         </thead>
@@ -130,7 +131,7 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
-      <div v-else-if="loaded" class="empty">
+      <div v-else-if="loaded" class="qq-empty">
         机汽人未返回该 OE 的竞价{{ xjRows.length ? '' : '（xj 数据为空）' }}
       </div>
     </template>
@@ -138,48 +139,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-.mq-box {
-  border: 1px solid var(--c-border); border-radius: var(--r-md);
-  padding: 10px; background: #f9fafd; margin-bottom: 8px;
-}
-.row { display: flex; gap: 6px; align-items: center; }
 .seg { display: flex; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); overflow: hidden; flex: none; }
 .sg { padding: 5px 10px; font-size: 11px; color: var(--c-text-sub); cursor: pointer; background: var(--c-panel); }
 .sg.on { background: var(--c-primary-soft); color: var(--c-primary); font-weight: 600; }
-.input {
-  flex: 1; min-width: 0; padding: 5px 9px; font-size: 12px;
-  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
-  background: var(--c-panel); color: var(--c-text); outline: none;
-}
-.input:focus { border-color: var(--c-primary); }
-.input.num { font-family: var(--f-num); }
-.btn.primary {
-  padding: 5px 13px; font-size: 12px; border-radius: var(--r-md); flex: none;
-  border: 1px solid var(--c-primary-deep); color: #fff; font-weight: 600;
-  background: linear-gradient(135deg, #2f6ff0, #1d5de4); cursor: pointer;
-}
-.btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.skel { padding: 14px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
-.skel .ring {
-  display: inline-block; width: 14px; height: 14px;
-  border: 2px solid var(--c-border-strong); border-top-color: var(--c-primary);
-  border-radius: 50%; animation: spin 0.7s linear infinite;
-  vertical-align: -3px; margin-right: 6px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.qtable { width: 100%; border-collapse: collapse; font-size: 11px; }
-.qtable th {
-  text-align: left; font-weight: 600; color: var(--c-text-sub);
-  padding: 4px 6px; background: var(--c-bg);
-  border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border);
-  white-space: nowrap;
-}
-.qtable td { padding: 5px 6px; border-bottom: 1px solid var(--c-border); }
-.qtable td.n { font-family: var(--f-num); white-space: nowrap; }
-.qtable tr.min td { background: var(--c-ok-soft); font-weight: 600; }
-.badge.b-green { display: inline-block; padding: 1px 6px; font-size: 10px; border-radius: var(--r-sm); background: var(--c-ok); color: #fff; margin-left: 4px; }
-.empty { padding: 20px 10px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
-.empty.err { color: var(--c-danger); }
+.qq-table tr.min td { background: var(--c-ok-soft); font-weight: 600; }
+/* 单元格内「最低」徽章：比公共款更紧凑、实底绿（表格高亮语义） */
+.qq-table .qq-badge.b-green { padding: 1px 6px; margin-left: 4px; background: var(--c-ok); color: #fff; }
 </style>

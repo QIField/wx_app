@@ -69,13 +69,13 @@ async function doQuery(text) {
     </div>
 
     <template v-if="subTab === 'query'">
-      <div class="mq-box">
-        <div class="mq-row">
-          <input v-model="q" class="input num" placeholder="输入 OE / VIN / 配件名称（如：节温器）" @keyup.enter="doQuery()">
-          <button class="btn primary" :disabled="loading" @click="doQuery()">查询</button>
+      <div class="qq-box">
+        <div class="qq-row">
+          <input v-model="q" class="qq-input num" placeholder="输入 OE / VIN / 配件名称（如：节温器）" @keyup.enter="doQuery()">
+          <button class="qq-btn-primary" :disabled="loading" @click="doQuery()">查询</button>
         </div>
-        <div class="mq-row sub">
-          <input v-model="partName" class="input" placeholder="配件名（VIN 查询时译码用，可留空）" @keyup.enter="doQuery()">
+        <div class="qq-row sub">
+          <input v-model="partName" class="qq-input" placeholder="配件名（VIN 查询时译码用，可留空）" @keyup.enter="doQuery()">
           <span v-if="q.trim()" class="type-hint">识别：{{ typeLabel() }}</span>
         </div>
         <div class="chips">
@@ -84,13 +84,13 @@ async function doQuery(text) {
       </div>
 
       <div class="res">
-        <div v-if="loading" class="skel"><span class="ring"></span>解析中（识别 → 译码 → CRM → 爆炸图）…</div>
-        <div v-else-if="error" class="empty err">
-          <span class="badge b-red">查询失败</span>
+        <div v-if="loading" class="qq-skel"><span class="ring"></span>解析中（识别 → 译码 → CRM → 爆炸图）…</div>
+        <div v-else-if="error" class="qq-empty err">
+          <span class="qq-badge b-red">查询失败</span>
           <span class="msg">{{ error }}</span>
         </div>
         <QuoteResultCard v-else-if="result" :r="result" />
-        <div v-else class="empty">查询结果将在此输出（识别 → 译码 → CRM → 爆炸图）</div>
+        <div v-else class="qq-empty">查询结果将在此输出（识别 → 译码 → CRM → 爆炸图）</div>
       </div>
     </template>
 
@@ -115,31 +115,9 @@ async function doQuery(text) {
   border-color: var(--c-primary); color: var(--c-primary); font-weight: 600;
 }
 
-.mq-box {
-  border: 1px solid var(--c-border); border-radius: var(--r-md);
-  padding: 10px; background: #f9fafd;
-}
-.mq-row { display: flex; gap: 6px; align-items: center; }
-.mq-row.sub { margin-top: 6px; }
-.mq-row .input {
-  flex: 1; min-width: 0;
-  padding: 6px 9px; font-size: 12px;
-  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
-  background: var(--c-panel); color: var(--c-text); outline: none; font-family: inherit;
-}
-.mq-row .input.num { font-family: var(--f-num); }
-.mq-row .input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(29, 93, 228, 0.12); }
-.mq-row .input::placeholder { color: #9aa7bc; }
-.mq-row .input.sub-in { font-size: 11px; }
+/* 查询卡后接结果区，间距由 .res 控制，不吃公共 .qq-box 的 margin-bottom */
+.qq-box { margin-bottom: 0; }
 .type-hint { font-size: 10px; color: var(--c-primary); white-space: nowrap; }
-
-.btn.primary {
-  padding: 6px 14px; font-size: 12px; border-radius: var(--r-md);
-  border: 1px solid var(--c-primary-deep); color: #fff; font-weight: 600;
-  background: linear-gradient(135deg, #2f6ff0, #1d5de4); cursor: pointer;
-}
-.btn.primary:hover:not(:disabled) { background: linear-gradient(135deg, #3d7bf5, #2a67e8); }
-.btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .chips { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
 .chip {
@@ -150,16 +128,7 @@ async function doQuery(text) {
 .chip:hover { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-soft); }
 
 .res { margin-top: 10px; }
-.skel { padding: 14px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
-.skel .ring {
-  display: inline-block; width: 14px; height: 14px;
-  border: 2px solid var(--c-border-strong); border-top-color: var(--c-primary);
-  border-radius: 50%; animation: spin 0.7s linear infinite;
-  vertical-align: -3px; margin-right: 6px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-.empty { padding: 22px 10px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
-.empty.err { display: flex; align-items: center; justify-content: center; gap: 8px; }
-.empty.err .msg { text-align: left; word-break: break-all; }
-.badge.b-red { display: inline-block; padding: 2px 7px; font-size: 10px; border-radius: var(--r-sm); font-weight: 600; background: var(--c-danger-soft); color: var(--c-danger); flex: none; }
+.qq-empty.err { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.qq-empty.err .msg { text-align: left; word-break: break-all; }
+.qq-empty.err .qq-badge { flex: none; }
 </style>

@@ -67,7 +67,7 @@ function onKeydown(e) {
 <template>
   <div class="ai-chat">
     <div ref="msgsEl" class="msgs">
-      <div v-if="!log.length" class="empty">支持文字输入（图片 / 文件待后端支持），解析询价需求</div>
+      <div v-if="!log.length" class="qq-empty">支持文字输入（图片 / 文件待后端支持），解析询价需求</div>
       <div v-for="(m, i) in log" :key="i" class="msg" :class="m.role">
         <div class="who">{{ m.role === 'user' ? '我' : 'AI' }}</div>
         <div class="bubble" :class="{ need: m.need }">{{ m.text }}</div>
@@ -77,8 +77,8 @@ function onKeydown(e) {
 
     <div class="inputs">
       <div class="attach">
-        <button class="btn sm" disabled title="待后端支持：需公网可访问的图片直链（OCR 识别 VIN）">🖼 图片</button>
-        <button class="btn sm" disabled title="待后端支持：文件解析暂未开放">📎 文件</button>
+        <button class="qq-btn-sm" disabled title="待后端支持：需公网可访问的图片直链（OCR 识别 VIN）">🖼 图片</button>
+        <button class="qq-btn-sm" disabled title="待后端支持：文件解析暂未开放">📎 文件</button>
       </div>
       <div class="inputbox">
         <textarea
@@ -130,7 +130,6 @@ function onKeydown(e) {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
-.empty { padding: 22px 10px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
 
 .inputs {
   flex: none; padding: 8px 10px 10px;
@@ -138,11 +137,8 @@ function onKeydown(e) {
   display: flex; flex-direction: column; gap: 6px;
 }
 .attach { display: flex; gap: 5px; }
-.btn.sm {
-  padding: 3px 8px; font-size: 11px; border-radius: var(--r-sm);
-  border: 1px solid var(--c-border-strong); background: var(--c-panel);
-  color: var(--c-text-sub); cursor: not-allowed;
-}
+/* 预留按钮：常置灰（待后端支持），覆盖公共款的可交互态 */
+.attach .qq-btn-sm { color: var(--c-text-sub); cursor: not-allowed; }
 .inputbox { display: flex; flex-direction: column; }
 .ta {
   display: block; width: 100%;

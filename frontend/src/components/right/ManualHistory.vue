@@ -6,6 +6,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qqPurchaseHistory } from '../../api'
+import { fmtValue, ts2date } from '../../utils/quoteQuery'
 
 const OE_DEFAULT = '1665000075'
 const PAGE_SIZE = 10
@@ -19,11 +20,7 @@ const rows = ref([])
 const page = ref(1)
 const pages = ref(1)
 
-const ts2date = (ts) => {
-  const n = Number(ts)
-  return n > 0 ? new Date(n * 1000).toISOString().slice(0, 10) : '-'
-}
-const fmt = (v) => (v === null || v === undefined || v === '' ? '-' : String(v))
+const fmt = fmtValue
 
 async function load(p = 1) {
   const num = number.value.trim()
@@ -63,15 +60,15 @@ onMounted(load)
 
 <template>
   <div class="history">
-    <div class="mq-box">
-      <div class="row">
-        <input v-model="number" class="input num" placeholder="OE 编号" @keyup.enter="load(1)">
-        <button class="btn primary" :disabled="loading" @click="load(1)">查询</button>
+    <div class="qq-box">
+      <div class="qq-row">
+        <input v-model="number" class="qq-input num" placeholder="OE 编号" @keyup.enter="load(1)">
+        <button class="qq-btn-primary" :disabled="loading" @click="load(1)">查询</button>
       </div>
     </div>
 
-    <div v-if="loading" class="skel"><span class="ring"></span>采购历史查询中…</div>
-    <div v-else-if="error" class="empty err">{{ error }}</div>
+    <div v-if="loading" class="qq-skel"><span class="ring"></span>采购历史查询中…</div>
+    <div v-else-if="error" class="qq-empty err">{{ error }}</div>
 
     <template v-else-if="loaded">
       <div class="ph-summary">
@@ -79,7 +76,7 @@ onMounted(load)
         <div class="ph-box"><div class="pl">累计采购金额</div><div class="pv num">¥{{ summary.total }}</div></div>
       </div>
 
-      <table v-if="rows.length" class="qtable">
+      <table v-if="rows.length" class="qq-table">
         <thead>
           <tr><th>采购单号</th><th>配件</th><th>供应商</th><th>单价</th><th>数量</th><th>日期</th></tr>
         </thead>
@@ -94,7 +91,7 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty">该 OE 无采购记录</div>
+      <div v-else class="qq-empty">该 OE 无采购记录</div>
 
       <div v-if="pages > 1" class="pager">
         <button class="pg" :disabled="page <= 1" @click="go(-1)">‹ 上一页</button>
@@ -102,30 +99,11 @@ onMounted(load)
         <button class="pg" :disabled="page >= pages" @click="go(1)">下一页 ›</button>
       </div>
     </template>
-    <div v-else class="empty">输入 OE 查询历史采购记录</div>
+    <div v-else class="qq-empty">输入 OE 查询历史采购记录</div>
   </div>
 </template>
 
 <style scoped>
-.mq-box {
-  border: 1px solid var(--c-border); border-radius: var(--r-md);
-  padding: 10px; background: #f9fafd; margin-bottom: 8px;
-}
-.row { display: flex; gap: 6px; }
-.input {
-  flex: 1; min-width: 0; padding: 5px 9px; font-size: 12px;
-  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
-  background: var(--c-panel); color: var(--c-text); outline: none;
-}
-.input:focus { border-color: var(--c-primary); }
-.input.num { font-family: var(--f-num); }
-.btn.primary {
-  padding: 5px 13px; font-size: 12px; border-radius: var(--r-md); flex: none;
-  border: 1px solid var(--c-primary-deep); color: #fff; font-weight: 600;
-  background: linear-gradient(135deg, #2f6ff0, #1d5de4); cursor: pointer;
-}
-.btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
 .ph-summary { display: flex; gap: 8px; margin-bottom: 8px; }
 .ph-box {
   flex: 1; text-align: center;
@@ -135,27 +113,6 @@ onMounted(load)
 }
 .ph-box .pl { font-size: 10px; color: var(--c-primary-deep); margin-bottom: 3px; }
 .ph-box .pv { font: 700 18px/1 var(--f-num); color: var(--c-primary); }
-
-.skel { padding: 14px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
-.skel .ring {
-  display: inline-block; width: 14px; height: 14px;
-  border: 2px solid var(--c-border-strong); border-top-color: var(--c-primary);
-  border-radius: 50%; animation: spin 0.7s linear infinite;
-  vertical-align: -3px; margin-right: 6px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.qtable { width: 100%; border-collapse: collapse; font-size: 11px; }
-.qtable th {
-  text-align: left; font-weight: 600; color: var(--c-text-sub);
-  padding: 4px 6px; background: var(--c-bg);
-  border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border);
-  white-space: nowrap;
-}
-.qtable td { padding: 5px 6px; border-bottom: 1px solid var(--c-border); }
-.qtable td.n { font-family: var(--f-num); white-space: nowrap; }
-.empty { padding: 20px 10px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
-.empty.err { color: var(--c-danger); }
 
 .pager { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; }
 .pg {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectType, quotePrice, quoteText, savePercent } from '../../src/utils/quoteQuery'
+import { detectType, fmtValue, quotePrice, quoteText, savePercent, ts2date } from '../../src/utils/quoteQuery'
 
 const PRODUCT = {
   product_name: '节温器总成',
@@ -75,5 +75,29 @@ describe('savePercent 省比', () => {
   it('价格缺失或 4S 价非正返回 null', () => {
     expect(savePercent({ product: { ...PRODUCT, store_price: '' } })).toBeNull()
     expect(savePercent({})).toBeNull()
+  })
+})
+
+describe('fmtValue / ts2date 表格展示兜底', () => {
+  it('fmtValue：null/undefined/空串 → -，其余 String 化', () => {
+    expect(fmtValue(null)).toBe('-')
+    expect(fmtValue(undefined)).toBe('-')
+    expect(fmtValue('')).toBe('-')
+    expect(fmtValue(0)).toBe('0')
+    expect(fmtValue(628)).toBe('628')
+  })
+
+  it('ts2date：本地日期取日，深夜 23:30 不偏移到第二天', () => {
+    // 本地构造 2026-01-15 23:30:00（toISOString 会按 UTC 偏移成 16 日）
+    const lateNight = new Date(2026, 0, 15, 23, 30, 0)
+    expect(ts2date(Math.floor(lateNight.getTime() / 1000))).toBe('2026-01-15')
+    expect(ts2date(new Date(2026, 10, 18, 8, 0, 0).getTime() / 1000)).toBe('2026-11-18')
+  })
+
+  it('ts2date：无效时间戳返回 -', () => {
+    expect(ts2date(0)).toBe('-')
+    expect(ts2date(-1)).toBe('-')
+    expect(ts2date('abc')).toBe('-')
+    expect(ts2date(null)).toBe('-')
   })
 })

@@ -8,14 +8,14 @@
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { connectWs, fetchQuoteConfig, fetchQuoteInquiries, saveQuoteConfig } from '../../api'
+import { connectWs, fetchQuoteInquiries, saveQuoteConfig } from '../../api'
+import { useQuoteConfig } from '../../composables/useQuoteConfig'
 import QuoteCard from '../QuoteCard.vue'
 
 const POLL_MS = 15000
 const FETCH_LIMIT = 200
 
-const aiOn = ref(true)
-const mode = ref('preview')
+const { aiOn, mode, load: loadConfigFields } = useQuoteConfig()
 const saved = ref({ aiOn: true, mode: 'preview' }) // 最近一次成功落库值（失败回滚基准）
 
 const rows = ref([])
@@ -31,9 +31,7 @@ const modeTxt = computed(() =>
 
 async function loadConfig() {
   try {
-    const cfg = await fetchQuoteConfig()
-    aiOn.value = cfg.ai_enabled !== false
-    mode.value = cfg.quote_mode || 'preview'
+    await loadConfigFields()
     saved.value = { aiOn: aiOn.value, mode: mode.value }
   } catch { /* 配置拉取失败不打断 feed，开关保持默认值可重试 */ }
 }
@@ -89,7 +87,7 @@ onUnmounted(() => {
   <div class="auto">
     <div class="strip">
       <span class="lbl">AI 智能识别</span>
-      <label class="switch" :title="aiOn ? '已开启：命中询价自动算价' : '已关闭：纯手动普通模式'">
+      <label class="qq-switch" :title="aiOn ? '已开启：命中询价自动算价' : '已关闭：纯手动普通模式'">
         <input v-model="aiOn" type="checkbox" @change="saveConfig({ ai_enabled: aiOn })">
         <span class="track"></span>
       </label>
@@ -114,7 +112,7 @@ onUnmounted(() => {
         :inquiry="q" :class="{ dim: [2, 4].includes(q.status) }"
         @refresh="refresh"
       />
-      <div v-if="loaded && !rows.length" class="empty">
+      <div v-if="loaded && !rows.length" class="qq-empty">
         监听已开启的好友/群新消息，AI 识别需求后在此输出报价…
       </div>
       <div class="footnote">每 {{ POLL_MS / 1000 }} 秒自动刷新 · 新询价由 AI 守门自动分流</div>
@@ -148,17 +146,6 @@ onUnmounted(() => {
 .mode-chip.auto { background: var(--c-ok-soft); color: var(--c-ok); border: 1px solid rgba(24, 160, 88, 0.35); }
 .mode-chip.off { background: var(--c-bg); color: var(--c-text-sub); border: 1px solid var(--c-border); }
 
-/* 开关（原型同款 34x18） */
-.switch { position: relative; width: 34px; height: 18px; flex: none; cursor: pointer; }
-.switch input { display: none; }
-.switch .track { position: absolute; inset: 0; border-radius: 999px; background: #c4cddc; transition: background 0.18s; }
-.switch .track::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
-  border-radius: 50%; background: #fff; transition: left 0.18s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-.switch input:checked + .track { background: var(--c-ok); }
-.switch input:checked + .track::after { left: 18px; }
-
 .feed-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
 .feed-head .t { font-weight: 700; font-size: 12px; }
 .live { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--c-ok); font-family: var(--f-num); }
@@ -185,6 +172,5 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .feed > :deep(.card.dim) { opacity: 0.72; }
-.empty { padding: 22px 10px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
 .footnote { text-align: center; font-size: 10px; color: var(--c-border-strong); padding: 4px 0 2px; }
 </style>

@@ -1,9 +1,9 @@
 """快捷报价查询代理 API（拓展栏重做 · 手动报价视图的上游查询出口）。
 
 上游能力 backend/qq_client.py 已封装（docs/quick-quote-api.md 实测契约），
-本层只做：登录鉴权 → 参数校验 → 编排/透传 → QuoteApiError 统一 502（msg 带
-步骤名便于定位卡点）。查询类无副作用不落库。爆炸图上游实测不稳定
-（quick-quote-api-test.md §4.13：真实数据场景静默空返回），失败降级为
+本层只做：登录鉴权 → 参数校验 → 编排/透传 → 统一错误映射（_query_endpoint：
+缺参 400 / 编排失败与上游异常 502）。查询类无副作用不落库。爆炸图上游实测
+不稳定（quick-quote-api-test.md §4.13：真实数据场景静默空返回），失败降级为
 partImagesList=None 不拖垮整体结果。
 
 - POST /api/quote/query/manual-search   {q, part_name?} → r 结构 + chain 步骤名
@@ -12,6 +12,7 @@ partImagesList=None 不拖垮整体结果。
 - POST /api/quote/query/purchase-history {number, page?, limit?} → 采购历史
 """
 import re
+from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
@@ -33,6 +34,25 @@ class _QueryError(Exception):
     """manual-search 编排失败（消息含步骤名与原因），端点层统一转 502。"""
 
 
+class _MissingParam(Exception):
+    """必填参数缺失（消息含参数名），端点层统一转 400。"""
+
+
+def _query_endpoint(fn):
+    """端点统一错误映射：缺参 → 400，编排失败 / 上游异常 → 502。"""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except _MissingParam as exc:
+            return jsonify(code=400, msg=str(exc)), 400
+        except (_QueryError, qq_client.QuoteApiError) as exc:
+            return jsonify(code=502, msg=str(exc)), 502
+
+    return wrapper
+
+
 def _detect_type(q):
     if _VIN_RE.match(q):
         return "vin"
@@ -43,6 +63,14 @@ def _detect_type(q):
 
 def _json_body():
     return request.get_json(silent=True) or {}
+
+
+def _require(body, key):
+    """必填字符串字段：去空格后非空，空值抛 _MissingParam（装饰器统一转 400）。"""
+    value = str(body.get(key) or "").strip()
+    if not value:
+        raise _MissingParam(f"{key} 不能为空")
+    return value
 
 
 def _vininfo_row(vin):
@@ -129,79 +157,54 @@ def _search(q, part_name):
 
 @bp.post("/api/quote/query/manual-search")
 @require_role()
+@_query_endpoint
 def manual_search():
     """链式查询：VIN/OE/配件名 → r 结构（车线/产品卡/爆炸图），前端 QuoteResultCard 消费。"""
     body = _json_body()
-    q = str(body.get("q") or "").strip()
-    if not q:
-        return jsonify(code=400, msg="q 不能为空"), 400
-    part_name = str(body.get("part_name") or "").strip()
-    try:
-        data = _search(q, part_name)
-    except _QueryError as exc:
-        return jsonify(code=502, msg=str(exc)), 502
-    except qq_client.QuoteApiError as exc:
-        return jsonify(code=502, msg=f"上游查询失败：{exc}"), 502
-    return jsonify(code=0, msg="success", data=data)
+    q = _require(body, "q")
+    return jsonify(code=0, msg="success",
+                   data=_search(q, str(body.get("part_name") or "").strip()))
 
 
 @bp.post("/api/quote/query/extract-parts")
 @require_role()
+@_query_endpoint
 def extract_parts():
     """AI 对话子 tab：单条文本 → 询价要素提取（chat_content 契约组装）。"""
-    text = str(_json_body().get("text") or "").strip()
-    if not text:
-        return jsonify(code=400, msg="text 不能为空"), 400
-    try:
-        data = qq_client.extract_parts([{"type": "input_text", "text": text}])
-    except qq_client.QuoteApiError as exc:
-        return jsonify(code=502, msg=str(exc)), 502
-    return jsonify(code=0, msg="success", data=data)
+    text = _require(_json_body(), "text")
+    return jsonify(code=0, msg="success",
+                   data=qq_client.extract_parts([{"type": "input_text", "text": text}]))
 
 
 @bp.post("/api/quote/query/zpy")
 @require_role()
+@_query_endpoint
 def zpy_query():
     """兆配云全网比价（中文键名原样透传，前端统一 String 化展示）。"""
-    number = str(_json_body().get("number") or "").strip()
-    if not number:
-        return jsonify(code=400, msg="number 不能为空"), 400
-    try:
-        data = qq_client.zpy(number)
-    except qq_client.QuoteApiError as exc:
-        return jsonify(code=502, msg=str(exc)), 502
-    return jsonify(code=0, msg="success", data=data)
+    return jsonify(code=0, msg="success", data=qq_client.zpy(_require(_json_body(), "number")))
 
 
 @bp.post("/api/quote/query/jqr")
 @require_role()
+@_query_endpoint
 def jqr_query():
     """机汽人平台竞价查询（jy_data/xj_data 原样透传）。"""
-    number = str(_json_body().get("number") or "").strip()
-    if not number:
-        return jsonify(code=400, msg="number 不能为空"), 400
-    try:
-        data = qq_client.jqr(number)
-    except qq_client.QuoteApiError as exc:
-        return jsonify(code=502, msg=str(exc)), 502
-    return jsonify(code=0, msg="success", data=data)
+    return jsonify(code=0, msg="success", data=qq_client.jqr(_require(_json_body(), "number")))
 
 
 @bp.post("/api/quote/query/purchase-history")
 @require_role()
+@_query_endpoint
 def purchase_history():
     """采购历史（三层嵌套 {total, list} 原样透传，前端展示汇总与分页）。"""
     body = _json_body()
-    number = str(body.get("number") or "").strip()
-    if not number:
-        return jsonify(code=400, msg="number 不能为空"), 400
+    number = _require(body, "number")
     try:
         page = int(body.get("page") or 1)
         limit = max(1, min(int(body.get("limit") or 10), 50))
     except (TypeError, ValueError):
-        return jsonify(code=400, msg="page/limit 必须是整数"), 400
-    try:
-        data = qq_client.purchase_history(number, page=page, limit=limit)
-    except qq_client.QuoteApiError as exc:
-        return jsonify(code=502, msg=str(exc)), 502
-    return jsonify(code=0, msg="success", data=data)
+        raise _MissingParam("page/limit 必须是整数") from None
+    return jsonify(
+        code=0, msg="success",
+        data=qq_client.purchase_history(number, page=page, limit=limit),
+    )

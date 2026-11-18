@@ -33,23 +33,20 @@ const kpis = computed(() => {
   ]
 })
 
-/** 每列双柱（报价 / OE），共用报价系列的最大值归一。 */
+/** 每列双柱（报价 / OE；VIN 仅进 KPI 不出柱），共用报价系列的最大值归一。 */
 const cols = computed(() => {
   const d = data.value
   if (!d) return []
   return d.days.map((label, i) => {
     const quote = (d.series.quote && d.series.quote[i]) || 0
     const oe = (d.series.oe && d.series.oe[i]) || 0
-    const vin = (d.series.vin && d.series.vin[i]) || 0
     return {
       label,
       showLabel: period.value === 'month' ? i % 2 === 0 : i % 3 === 0,
       quote: barPercent(quote, seriesMax.value),
       oe: barPercent(oe, seriesMax.value),
-      vin: barPercent(vin, seriesMax.value),
       quoteVal: quote,
       oeVal: oe,
-      vinVal: vin,
     }
   })
 })
@@ -87,7 +84,7 @@ onMounted(() => {
       >{{ p.label }}</span>
     </div>
 
-    <div v-if="error" class="empty err">{{ error }}</div>
+    <div v-if="error" class="qq-empty err">{{ error }}</div>
 
     <template v-else-if="loaded && data">
       <div class="kpis">
@@ -125,10 +122,10 @@ onMounted(() => {
             <span class="ct num">{{ t.ct }}</span>
           </li>
         </ol>
-        <div v-else class="empty">该时段暂无询价记录</div>
+        <div v-else class="qq-empty">该时段暂无询价记录</div>
       </div>
     </template>
-    <div v-else class="empty">统计加载中…</div>
+    <div v-else class="qq-empty">统计加载中…</div>
   </div>
 </template>
 
@@ -194,7 +191,4 @@ onMounted(() => {
 .rank-list .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rank-list .oe { font: 11px var(--f-num); color: var(--c-text-sub); }
 .rank-list .ct { font: 700 12px var(--f-num); color: var(--c-danger); }
-
-.empty { padding: 20px 10px; text-align: center; color: var(--c-text-sub); font-size: 11px; }
-.empty.err { color: var(--c-danger); }
 </style>

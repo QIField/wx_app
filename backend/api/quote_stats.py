@@ -8,6 +8,7 @@ Python 分桶——不用 SQL date 函数（跨 SQLite/MySQL 方言且单测好�
   day:   最近 15 天日桶；KPI=今日，对比=昨日
   month: 最近 10 周周桶（周一为界）；KPI=本月，对比=上月
 """
+from bisect import bisect_right
 from datetime import datetime, timedelta
 
 from flask import Blueprint, g, jsonify, request
@@ -107,12 +108,17 @@ def _count_in(rows, start, end):
 
 
 def _aggregate(rows, buckets):
-    """行分桶计数 + 配件 Top 计数（part_name|oem_no 组合键，全窗口口径）。"""
+    """行分桶计数 + 配件 Top 计数（part_name|oem_no 组合键，全窗口口径）。
+
+    桶按起点升序且互不重叠，二分定位行所属桶 O(log n)；落点早于首桶或
+    晚于末桶（右开边界之外）丢弃。
+    """
+    starts = [b[0] for b in buckets]
     counts = [_empty() for _ in buckets]
     top = {}
     for created, vin, oem, part in rows:
-        idx = next((i for i, b in enumerate(buckets) if b[0] <= created < b[1]), None)
-        if idx is None:
+        idx = bisect_right(starts, created) - 1
+        if idx < 0 or created >= buckets[idx][1]:
             continue
         c = counts[idx]
         c["quote"] += 1

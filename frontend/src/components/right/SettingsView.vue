@@ -7,15 +7,15 @@
  */
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { fetchQuoteConfig, saveQuoteConfig } from '../../api'
+import { saveQuoteConfig } from '../../api'
+import { useQuoteConfig } from '../../composables/useQuoteConfig'
 
 const MAX_BLACKLIST = 20
 const MAX_PART_LEN = 20
 
 const loading = ref(true)
 const saving = ref(false)
-const aiEnabled = ref(true)
-const quoteMode = ref('preview')
+const { aiOn, mode: quoteMode, load: loadConfigFields } = useQuoteConfig()
 const rates = ref({ vip_a: '', vip_b: '', normal: '' })
 const parts = ref([])
 const partInput = ref('')
@@ -41,15 +41,14 @@ const NOTIFS = [
 
 onMounted(async () => {
   try {
-    const cfg = await fetchQuoteConfig()
-    aiEnabled.value = cfg.ai_enabled !== false
-    quoteMode.value = cfg.quote_mode || 'preview'
-    rates.value = {
-      vip_a: cfg.price_map?.vip_a ?? '0.75',
-      vip_b: cfg.price_map?.vip_b ?? '0.82',
-      normal: cfg.price_map?.normal ?? '0.90',
-    }
-    parts.value = (cfg.parts_blacklist || []).map((t) => String(t))
+    await loadConfigFields((cfg) => {
+      rates.value = {
+        vip_a: cfg.price_map?.vip_a ?? '0.75',
+        vip_b: cfg.price_map?.vip_b ?? '0.82',
+        normal: cfg.price_map?.normal ?? '0.90',
+      }
+      parts.value = (cfg.parts_blacklist || []).map((t) => String(t))
+    })
   } catch (e) {
     ElMessage.error(e.message || '配置加载失败')
   } finally {
@@ -91,7 +90,7 @@ async function onSave() {
   saving.value = true
   try {
     await saveQuoteConfig({
-      ai_enabled: aiEnabled.value,
+      ai_enabled: aiOn.value,
       quote_mode: quoteMode.value,
       price_map: {
         vip_a: Number(rates.value.vip_a).toFixed(2),
@@ -119,8 +118,8 @@ async function onSave() {
             <div class="rt">AI 智能识别</div>
             <div class="rs">关闭后进入普通模式：不自动分析新消息，手动查询报价不受影响</div>
           </div>
-          <label class="switch sw">
-            <input v-model="aiEnabled" type="checkbox">
+          <label class="qq-switch sw">
+            <input v-model="aiOn" type="checkbox">
             <span class="track"></span>
           </label>
         </div>
@@ -145,7 +144,7 @@ async function onSave() {
           </div>
           <div class="blk-add">
             <input v-model="partInput" class="input" placeholder="输入配件名后回车加入黑名单" @keyup.enter="addPart">
-            <button class="btn sm" @click="addPart">添加</button>
+            <button class="qq-btn-sm add-btn" @click="addPart">添加</button>
           </div>
         </div>
       </div>
@@ -170,7 +169,7 @@ async function onSave() {
     </div>
 
     <div class="set-sec disabled" title="待后端支持">
-      <div class="sh">报价话术模板 <span class="badge b-gray">待后端支持</span></div>
+      <div class="sh">报价话术模板 <span class="qq-badge b-gray">待后端支持</span></div>
       <div class="sb">
         <div class="tpl-grid">
           <div v-for="t in TPLS" :key="t.key" class="tpl-card" :class="{ on: tpl === t.key }" @click="tpl = t.key">
@@ -184,7 +183,7 @@ async function onSave() {
     </div>
 
     <div class="set-sec disabled" title="待后端支持">
-      <div class="sh">通知配置 <span class="badge b-gray">待后端支持</span></div>
+      <div class="sh">通知配置 <span class="qq-badge b-gray">待后端支持</span></div>
       <div class="sb">
         <div v-for="n in NOTIFS" :key="n.key" class="set-row notif">
           <div class="rl">
@@ -192,7 +191,7 @@ async function onSave() {
             <div class="rs">{{ n.desc }}</div>
           </div>
           <input class="input th-input num" :value="n.th" disabled>
-          <label class="switch sw">
+          <label class="qq-switch sw">
             <input type="checkbox" :checked="n.on" disabled>
             <span class="track"></span>
           </label>
@@ -259,12 +258,8 @@ async function onSave() {
 .input.rate { width: 80px; padding: 4px 8px; font-size: 11px; font-family: var(--f-num); }
 .th-input { width: 74px; padding: 4px 6px; font-size: 11px; font-family: var(--f-num); }
 
-.btn.sm {
-  padding: 5px 10px; font-size: 11px; border-radius: var(--r-sm);
-  border: 1px solid var(--c-border-strong); background: var(--c-panel);
-  color: var(--c-text); cursor: pointer;
-}
-.btn.sm:hover { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-soft); }
+/* 表单行「添加」按钮：比公共 .qq-btn-sm 更高（配合表单输入框） */
+.add-btn { padding: 5px 10px; border-radius: var(--r-md); }
 
 .map-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .map-table th { text-align: left; color: var(--c-text-sub); font-weight: 600; padding: 4px 6px; background: var(--c-bg); border-bottom: 1px solid var(--c-border); }
@@ -288,18 +283,6 @@ async function onSave() {
   padding: 8px 10px; font-size: 11px; white-space: pre-wrap;
   border: 1px dashed var(--c-border-strong);
 }
-
-.switch { position: relative; width: 34px; height: 18px; flex: none; cursor: pointer; }
-.switch input { display: none; }
-.switch .track { position: absolute; inset: 0; border-radius: 999px; background: #c4cddc; transition: background 0.18s; }
-.switch .track::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
-  border-radius: 50%; background: #fff; transition: left 0.18s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-.switch input:checked + .track { background: var(--c-ok); }
-.switch input:checked + .track::after { left: 18px; }
-
-.badge.b-gray { background: var(--c-bg); color: var(--c-text-sub); padding: 2px 7px; font-size: 10px; border-radius: var(--r-sm); font-weight: 600; }
 
 .save-btn {
   font-size: 13px; font-weight: 600; padding: 8px 0;
