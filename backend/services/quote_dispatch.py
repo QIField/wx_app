@@ -2,9 +2,10 @@
 
 守门顺序（docs/auto-quote-plan.md 阶段 3 语义，本阶段落表、阶段 4 才消费 pending）：
   1. 配件命中黑名单（精确相等或包含）→ blocked
-  2. quoted=true（跟进旧报价/二次议价）→ review（quoted=false 闸门挡重复报价）
-  3. vin 与 part_name 全缺（识别不完整）→ review
-  4. 其余 → pending（待报价）
+  2. quoted=true（跟进旧报价/二次议价）→ review
+  3. is_replied=true（窗口里能看到客服发过报价）→ review
+  4. vin / part_name / oem_no 全缺（识别不完整）→ review
+  5. 其余 → pending（全新询价，待自动报价）
 """
 from backend.extensions import db
 from backend.models.quote_inquiry import QuoteInquiry
@@ -37,11 +38,15 @@ def _hit_blacklist(part_name, blacklist):
 
 def _status_of(scene, blacklist):
     part = (scene.get("part_name") or "").strip()
+    oem = (scene.get("oem_no") or "").strip()
+    vin = (scene.get("vin") or "").strip()
     if _hit_blacklist(part, blacklist):
         return QuoteInquiry.ST_BLOCKED
     if _truthy(scene.get("quoted")):
         return QuoteInquiry.ST_REVIEW
-    if not (scene.get("vin") or "").strip() and not part:
+    if _truthy(scene.get("is_replied")):
+        return QuoteInquiry.ST_REVIEW
+    if not vin and not part and not oem:
         return QuoteInquiry.ST_REVIEW
     return QuoteInquiry.ST_PENDING
 
