@@ -95,8 +95,11 @@ def _is_meaningless(text: str) -> bool:
 def should_trigger(messages: list[Message]) -> bool:
     """是否需要进入识别流程。
 
-    触发：有客户消息含 VIN / ≥6位数字 / 图片
-    不触发：纯表情、纯标点、纯无意义文字
+    触发（任一满足）：
+      - 客户发图片消息
+      - 客户文本含 VIN / ≥6位数字 / 带前缀号码
+      - 客户文本含 recognizable 配件名（PART_NAME_RE 命中）
+    不触发：纯表情、纯标点、纯无意义文字、极短闲聊
     """
     for m in messages:
         if m.direction != Message.DIR_IN:
@@ -109,6 +112,8 @@ def should_trigger(messages: list[Message]) -> bool:
         if _is_meaningless(text):
             continue
         if _has_vin(text) or _has_long_digits(text):
+            return True
+        if PART_NAME_RE.search(text):
             return True
     return False
 
@@ -357,11 +362,16 @@ def rule_extract(messages: list[Message], focus_msg_ids: set[int] | None = None)
             if not s.get("vin"):
                 s["vin"] = all_vins[0]  # 取第一个 VIN（通常就是客户的车）
 
-    # 过滤：完全空的场景跳过
-    result = [
-        s for s in merged
-        if s.get("vin") or s.get("part_name") or s.get("oem_no")
-    ]
+    # 保守过滤：只保留有"强标识"的场景。
+    # 纯 part_name 场景（无 VIN、无号码）交给 AI 处理——rule_extract 没法关联车型/品牌。
+    # 有 VIN 或 有 ≥6 位号码 → rule_extract 自信，留用。
+    def _has_strong_identifier(s: dict) -> bool:
+        if s.get("vin"):
+            return True
+        raw_no = s.get("oem_no") or ""
+        return bool(PART_NO_DIGITS_RE.search(raw_no) or PART_NO_PREFIX_RE.search(raw_no))
+
+    result = [s for s in merged if _has_strong_identifier(s)]
 
     if result:
         log.info("普通识别提取成功 scenes=%d", len(result))
