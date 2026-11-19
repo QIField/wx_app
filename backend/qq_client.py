@@ -114,8 +114,11 @@ def part_images_list(vin, image_ids, oe_code, car_brand_id):
 
 
 def extract_parts(chat_content):
-    """聊天记录（list[dict]）→ AI 询价要素提取；chat_content 序列化为 JSON 字符串。"""
-    return call("extractParts", {"chat_content": json.dumps(chat_content, ensure_ascii=False)})
+    """聊天记录（list[dict]）→ AI 询价要素提取；chat_content 序列化为 JSON 字符串。
+
+    按服务方接口规定：json.dumps 不带 ensure_ascii=False，中文字符统一用 \\uXXXX 转义。
+    """
+    return call("extractParts", {"chat_content": json.dumps(chat_content)})
 
 
 def ocr_vin(image_url, prefer_tx=True):

@@ -119,13 +119,13 @@ def test_unknown_endpoint(openid, capture):
 
 
 def test_extract_parts_serializes_chinese(openid, capture):
-    """chat_content 序列化保留中文（ensure_ascii=False），服务端可读。"""
+    """chat_content 序列化：不带 ensure_ascii=False，中文字符统一 \\uXXXX 转义（跟随服务方接口规定）。"""
     holder = capture(FakeResp(body={"code": 0, "data": {"list": []}}))
     content = [{"type": "input_text", "text": "2026-11-17 10:00:00【老王】：节温器多少钱"}]
     qq_client.extract_parts(content)
     sent = holder["data"]["chat_content"]
-    assert "节温器" in sent
-    assert json.loads(sent)[0]["text"].endswith("节温器多少钱")
+    assert "\\u3010\\u8001\\u738b\\u3011" in sent         # 【老王】变成 \\uXXXX
+    assert json.loads(sent)[0]["text"].endswith("节温器多少钱")  # 解析后仍正确
 
 
 def test_convenience_wrappers_map_endpoints(openid, capture):
