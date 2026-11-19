@@ -9,15 +9,18 @@ function renderAutoView() {
   $('#qqBody').innerHTML = `
     <div class="view">
       <div class="auto-strip">
-        <span class="lbl">AI智能识别</span>
-        <label class="switch"><input type="checkbox" id="aiSwitch" ${a.aiOn ? 'checked' : ''}><span class="track"></span></label>
-        <span class="sep"></span>
-        <span class="sw-label">自动报价模式</span>
-        <select class="select mode-sel" id="modeSel">
-          <option value="preview" ${a.mode === 'preview' ? 'selected' : ''}>仅侧边预览</option>
-          <option value="auto" ${a.mode === 'auto' ? 'selected' : ''}>识别成功自动发送</option>
-        </select>
-        <span class="mode-chip ${modeCls}" style="margin-left:auto">${modeTxt}</span>
+        <div class="strip-row">
+          <span class="lbl">AI智能识别</span>
+          <label class="switch"><input type="checkbox" id="aiSwitch" ${a.aiOn ? 'checked' : ''}><span class="track"></span></label>
+          <span class="mode-chip ${modeCls}" style="margin-left:auto">${modeTxt}</span>
+        </div>
+        <div class="strip-row">
+          <span class="sw-label">自动报价模式</span>
+          <select class="select mode-sel" id="modeSel">
+            <option value="preview" ${a.mode === 'preview' ? 'selected' : ''}>仅侧边预览</option>
+            <option value="auto" ${a.mode === 'auto' ? 'selected' : ''}>识别成功自动发送</option>
+          </select>
+        </div>
       </div>
       <div class="feed-head">
         <span class="t">新消息触发流</span>
@@ -90,7 +93,7 @@ function runScenario(sc) {
       return;
     }
     for (const s of steps) { s.classList.add('run'); await sleep(320 + Math.random() * 380); s.classList.remove('run'); s.classList.add('done'); }
-    if (sc.aiNote) body.innerHTML += `<div style="font-size:10px;color:#6d4de0;background:#f1ecff;border-radius:var(--r-sm);padding:5px 8px;margin-bottom:8px;">AI：${esc(sc.aiNote)}</div>`;
+    if (sc.aiNote) body.innerHTML += `<div style="font-size:10px;color:#3a6ce0;background:#eef4ff;border-radius:var(--r-sm);padding:5px 8px;margin-bottom:8px;">AI：${esc(sc.aiNote)}</div>`;
     const r = { car: sc.vininfo || sc.car, product: sc.product || window.QQMock.SCENARIOS.find(x => x.product)?.product, partImagesList: sc.partImagesList };
     body.innerHTML = quoteCardHTML(r);
     bindCardActs(card, r);

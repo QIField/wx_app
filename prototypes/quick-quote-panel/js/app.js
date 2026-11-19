@@ -27,7 +27,7 @@ function renderAnalysis() {
       </div>
       <div class="sec-title">趋势<div class="line"></div></div>
       <div class="barchart">${cols}</div>
-      <div class="legend"><span><i style="background:#1d5de4"></i>报价次数</span><span><i style="background:#6d4de0"></i>OE 次数</span></div>
+      <div class="legend"><span><i style="background:#e82016"></i>报价次数</span><span><i style="background:#5588f1"></i>OE 次数</span></div>
       <div class="sec-title">TOP 询价配件<div class="line"></div></div>
       <div class="rank-list">${d.top.map((t, i) => `
         <div class="rank"><span class="no">${i + 1}</span><span class="nm">${esc(t.name)} <span class="num" style="color:var(--c-text-sub)">${esc(t.oe)}</span></span><span class="ct">${t.ct} 次</span></div>`).join('')}</div>

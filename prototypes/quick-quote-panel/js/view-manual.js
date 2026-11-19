@@ -52,7 +52,7 @@ function renderManualSub() {
             <div class="ai-sendrow">
               <span class="ai-hint">Enter 发送 · Shift+Enter 换行</span>
               <button class="ai-send" id="aiSend" title="发送（Enter）">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
           </div>
@@ -100,23 +100,27 @@ async function manualQuery(q) {
     const type = detectType(q);
     let car = null, partno = null, product = null, piList = null;
     if (type === 'vin') {
-      car = (await qqCall('vininfo', { vin: q }))[0] || null;
+      // qqCall 返回响应信封 {code,msg,data}，业务数据一律取 .data（mock 与真实接口同构）
+      car = ((await qqCall('vininfo', { vin: q })).data || [])[0] || null;
       if (!car) throw new Error('VIN 未命中车型档案（200+空，按「查无此车」处理）');
-      partno = await qqCall('partno', { vin: q, originalPartsNos: '节温器' });
+      partno = (await qqCall('partno', { vin: q, originalPartsNos: '节温器' })).data;
     } else if (type === 'oe') {
       const pl = await qqCall('productList', { number: q });
-      if (!pl.data.list.length) throw new Error(`OE 未命中产品档案：no_exist_oe=[${pl.data.no_exist_oe}]`);
-      product = pl.data.list[0];
+      // product_list 分页信封：data = {total, per_page, current_page, data: {list, no_exist_oe}}
+      const inner = (pl.data && pl.data.data) || pl.data || {};
+      if (!inner.list || !inner.list.length) throw new Error(`OE 未命中产品档案：no_exist_oe=[${inner.no_exist_oe}]`);
+      product = inner.list[0];
     } else {
-      partno = await qqCall('partno', { vin: 'WBAWX3100G0L69597', originalPartsNos: q });
+      partno = (await qqCall('partno', { vin: 'WBAWX3100G0L69597', originalPartsNos: q })).data;
       if (!partno.oeCodeTrim) throw new Error('名称译码失败（字段空串=无档案）');
     }
     if (partno && partno.oeCodeTrim) {
       const pl = await qqCall('productList', { number: partno.oeCodeTrim });
-      product = pl.data.list[0] || null;
-      const pi = await qqCall('partImages', { vin: car ? car.vin : 'WBAWX3100G0L69597', oeCode: partno.oeCodeTrim });
+      const inner2 = (pl.data && pl.data.data) || pl.data || {};
+      product = (inner2.list && inner2.list[0]) || null;
+      const pi = (await qqCall('partImages', { vin: car ? car.vin : 'WBAWX3100G0L69597', oeCode: partno.oeCodeTrim })).data;
       if (Array.isArray(pi) && pi[0] && pi[0].imageId) {
-        piList = await qqCall('partImagesList', { vin: car ? car.vin : 'WBAWX3100G0L69597', oeCode: partno.oeCodeTrim, imageIds: pi[0].imageId, carBrandId: car ? car.carBrandCode : 'BMW' });
+        piList = (await qqCall('partImagesList', { vin: car ? car.vin : 'WBAWX3100G0L69597', oeCode: partno.oeCodeTrim, imageIds: pi[0].imageId, carBrandId: car ? car.carBrandCode : 'BMW' })).data;
       }
     }
     if (!product && !car) throw new Error('无匹配结果');
@@ -157,7 +161,8 @@ async function loadThird() {
   const body = $('#thirdBody');
   try {
     if (S.manual.thirdTab === 'zpy') {
-      const rows = await qqCall('zpy', { number: '11538635689' });
+      const env = await qqCall('zpy', { number: '11538635689' });
+      const rows = Array.isArray(env.data) ? env.data : [];
       const min = Math.min(...rows.map(r => r['含税售价']));
       body.innerHTML = `<table class="ztable">
         <thead><tr><th>城市</th><th>库存</th><th>折扣</th><th>含税售价</th><th>4S含税进价</th></tr></thead>
@@ -169,7 +174,8 @@ async function loadThird() {
             <td class="n">¥${esc(r['4S含税进价'])}</td></tr>`).join('')}</tbody></table>
         <div style="font-size:10px;color:var(--c-text-sub);margin-top:6px;">${esc(rows[0]['发货说明'])} · 数据来自 platform_api/zpy（响应为中文键名，价格字段混用字符串/数字已统一展示）</div>`;
     } else {
-      const d = await qqCall('jqr', { number: '11538635689' });
+      const env = await qqCall('jqr', { number: '11538635689' });
+      const d = env.data || { jy_data: [] };
       body.innerHTML = `<table class="ztable">
         <thead><tr><th>品牌</th><th>城市</th><th>供应商编码</th><th>等级</th><th>信用分</th><th>匹配分</th></tr></thead>
         <tbody>${d.jy_data.map(r => `
