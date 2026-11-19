@@ -21,6 +21,7 @@ from backend.services.quote_context import (
     build_chat_content, build_empty_check, fetch_recent_messages,
 )
 from backend.services.quote_dispatch import dispatch, parse_scenarios
+from backend.services.rule_extract import rule_extract, should_trigger
 
 log = logging.getLogger(__name__)
 
@@ -108,16 +109,33 @@ def _analyze_with_context(conversation_id):
 
 
 def analyze_conversation(conversation_id):
-    """拉窗口 → 组装 → AI 分析 → 分流落表。调用方需持有 app_context。"""
+    """拉窗口 → 普通识别 → AI 兜底 → 分流落表。调用方需持有 app_context。
+
+    两层识别（不互斥，先快后慢）：
+    1. 普通识别（正则 + 中间方 OCR）→ 命中则直接用，省 AI token
+    2. 普通识别没结果 → AI extract_parts 兜底
+    """
     cfg = merged_config(0)
     messages = fetch_recent_messages(conversation_id)
-    chat_content = build_chat_content(messages)
-    if not build_empty_check(chat_content):
-        return  # 窗口内无文本（纯图片占位），V1 不分析
-    data = qq_client.extract_parts(chat_content)
-    scenes = parse_scenarios(data)
+
+    # 触发条件前置：无 VIN/长数字/图片 直接跳过（纯表情/逗号/中文不触发）
+    if not should_trigger(messages):
+        return
+
+    # Step 1：普通识别（规则驱动，零成本）
+    scenes = rule_extract(messages)
+
+    # Step 2：普通识别没覆盖 → AI 兜底
+    if not scenes:
+        chat_content = build_chat_content(messages)
+        if not build_empty_check(chat_content):
+            return  # 窗口内无文本、OCR 也没产出，彻底没东西
+        data = qq_client.extract_parts(chat_content)
+        scenes = parse_scenarios(data)
+
     if not scenes:
         return
+
     rows = dispatch(conversation_id, scenes, cfg["parts_blacklist"])
     pending = [r for r in rows if r.status == QuoteInquiry.ST_PENDING]
     if pending:
