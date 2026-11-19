@@ -22,7 +22,6 @@ const chat = useChatStore()
 const composerEl = ref(null)
 const draftEmpty = ref(true)
 const pickerVisible = ref(false)
-const composerH = ref(72) // 底部要给悬浮发送按钮留位，最小高度随之加大
 
 /* @提及浮层状态：检索词/高亮项/位置都在这里，成员名册缓存放在 chat store。
    只在群聊生效——单聊 @ 没有意义，还容易误发。 */
@@ -39,22 +38,6 @@ watch(() => chat.currentId, () => {
   pickerVisible.value = false
   closeMention()
 })
-
-/* 顶部拖拽拉伸：按住输入框上边缘上下拖，向上拖=变高 */
-let drag = null
-function onGrabDown(e) {
-  drag = { y: e.clientY, h: composerH.value }
-  window.addEventListener('mousemove', onGrabMove)
-  window.addEventListener('mouseup', onGrabUp)
-}
-function onGrabMove(e) {
-  composerH.value = Math.min(300, Math.max(72, drag.h - (e.clientY - drag.y)))
-}
-function onGrabUp() {
-  window.removeEventListener('mousemove', onGrabMove)
-  window.removeEventListener('mouseup', onGrabUp)
-  drag = null
-}
 
 function refreshDraft() {
   draftEmpty.value = serializeComposer(composerEl.value).length === 0
@@ -271,7 +254,6 @@ defineExpose({ fillAndFocus })
 
 <template>
   <div class="editor">
-    <div class="grab-bar" title="拖拽调整输入框高度" @mousedown.prevent="onGrabDown"><i></i></div>
     <div class="tools">
       <button
         type="button" class="ticon-btn" :class="{ on: pickerVisible }"
@@ -309,7 +291,6 @@ defineExpose({ fillAndFocus })
           class="composer"
           :class="{ disabled: !chat.currentId }"
           :contenteditable="chat.currentId ? 'true' : 'false'"
-          :style="{ height: composerH + 'px' }"
           data-placeholder="输入消息，Enter 发送…"
           spellcheck="false"
           @input="onComposerInput"
@@ -317,7 +298,9 @@ defineExpose({ fillAndFocus })
           @blur="closeMention"
           @paste="onPaste"
         ></div>
-        <button type="button" class="send" :disabled="!chat.currentId || draftEmpty" @click="onSend">发送(Enter)</button>
+        <div class="sendrow">
+          <button type="button" class="send" :disabled="!chat.currentId || draftEmpty" @click="onSend">发送(Enter)</button>
+        </div>
       </div>
     </div>
 
@@ -327,19 +310,6 @@ defineExpose({ fillAndFocus })
 
 <style scoped>
 .editor { position: relative; border-top: 1px solid var(--c-border); background: var(--c-panel); padding: 0 12px 10px; }
-.grab-bar {
-  height: 10px; margin: 0 -12px;
-  display: flex; align-items: center; justify-content: center;
-  cursor: ns-resize;
-  transition: background 0.15s;
-}
-.grab-bar:hover { background: #f0f4fb; }
-.grab-bar i {
-  width: 28px; height: 3px; border-radius: 2px;
-  background: var(--c-border-strong);
-  transition: background 0.15s, width 0.15s;
-}
-.grab-bar:hover i { background: var(--c-primary); width: 44px; }
 .tools { display: flex; align-items: center; gap: 10px; padding: 3px 2px 6px; }
 .ticon-btn { border: none; background: none; padding: 0; line-height: 0; }
 .ticon { width: 16px; height: 16px; color: var(--c-text-sub); cursor: pointer; transition: color 0.15s; }
@@ -348,29 +318,26 @@ defineExpose({ fillAndFocus })
 .hint { margin-left: auto; font-size: 10px; color: var(--c-border-strong); }
 .input-row { display: flex; }
 
-/* 输入框 + 悬浮发送按钮（企业微信风格）：按钮叠在输入框右下角，
-   输入框底部留出等高 padding，文字不会滚到按钮底下 */
+/* 输入框 + 下方发送按钮（与 AI 对话输入框同款摆放）：输入框无边框，
+   高度随内容自动撑高，到上限后内部滚动 */
 .input-wrap { position: relative; flex: 1; }
 
-/* 高度由顶部拖拽条控制（contenteditable div） */
 .composer {
   width: 100%;
+  min-height: 48px;
+  max-height: 300px;
   font-family: var(--font-ui);
   font-size: 13px;
   color: var(--c-text);
   line-height: 1.5;
-  padding: 7px 10px 36px;
-  border: 1px solid var(--c-border-strong);
-  border-radius: var(--r-md);
-  background: var(--c-panel);
+  padding: 7px 10px;
+  background: transparent;
   outline: none;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
   cursor: text;
-  transition: border-color 0.15s;
 }
-.composer:focus { border-color: var(--c-primary); }
 .composer.disabled { background: #f5f7fa; cursor: not-allowed; }
 /* @昵称原子片段由 JS 动态插入，拿不到 scoped 属性，必须 :deep */
 .composer :deep(.mention) {
@@ -387,10 +354,8 @@ defineExpose({ fillAndFocus })
   pointer-events: none;
 }
 .composer img { cursor: default; }
+.sendrow { display: flex; justify-content: flex-end; padding-top: 6px; }
 .send {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
   height: 26px;
   padding: 0 14px;
   font-size: 12px;
