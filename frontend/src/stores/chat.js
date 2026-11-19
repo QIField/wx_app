@@ -24,6 +24,29 @@ function msgKey(m) {
   return `f:${m.msg_type || ''}|${m.sender_wxid || ''}|${m.create_time || ''}|${m.content || ''}`
 }
 
+/** 解析消息时间戳 → 毫秒数；无效返回 Infinity（排到最后）。 */
+function timeOf(m) {
+  if (!m.create_time) return Infinity
+  const t = Date.parse(String(m.create_time).replace(' ', 'T'))
+  return Number.isNaN(t) ? Infinity : t
+}
+
+/** 消息按 create_time 升序稳定插入（同时间戳时 id 小的在前）。
+ *  保证 WS 推送乱序/本地乐观气泡提前插入时，最终列表仍按真实时间正序。 */
+function insertSorted(list, msg) {
+  const t = timeOf(msg)
+  const id = msg.id ?? Infinity
+  let lo = 0, hi = list.length
+  while (lo < hi) {
+    const mi = (lo + hi) >> 1
+    const mt = timeOf(list[mi])
+    const mid = list[mi].id ?? Infinity
+    if (mt > t || (mt === t && mid > id)) hi = mi
+    else lo = mi + 1
+  }
+  list.splice(lo, 0, msg)
+}
+
 /** 消息列表去重（同一会话内按 msgKey 合并，保留先出现的那条）。 */
 function dedupeMessages(list) {
   const seen = new Set()
@@ -230,6 +253,13 @@ export const useChatStore = defineStore('chat', {
           await nextTick()
           console.info(`[perf] 打开会话#${id}: 接口=${apiMs.toFixed(0)}ms 合计=${total.toFixed(0)}ms 消息数=${data.messages.length}`)
         }
+      } catch (e) {
+        // 仅最新一轮失败才弹 toast，避免旧请求被取消时干扰用户
+        if (seq === msgListSeq && this.currentId === id) {
+          ElMessage.error(`加载消息失败：${e.message || e}`)
+        }
+        // 不 rethrow——调用方（selectConversation / WebSocket 回调 / 自动重连）不需要关心
+        console.warn('[chat] loadMessages 失败', id, e)
       } finally {
         // 仅最新一轮负责骨架屏收尾：被作废的旧请求不许关掉新一轮的骨架屏
         if (seq === msgListSeq) this.loadingMessages = false
@@ -304,7 +334,7 @@ export const useChatStore = defineStore('chat', {
     /** 发送成功后的公共收尾：乐观上屏（等待期间切走会话不追加）+ 会话摘要更新置顶。 */
     _afterSend(convId, msg, summary) {
       if (this.currentId === convId) {
-        this.currentMessages.push({
+        insertSorted(this.currentMessages, {
           direction: 2,
           operator_name: this.operatorName || '客服',
           // 必须复用 nowStamp()（与后端列表同格式 YYYY-MM-DD HH:MM:SS）：
@@ -454,7 +484,7 @@ export const useChatStore = defineStore('chat', {
         const key = msgKey(incoming)
         const exist = this.currentMessages.find((m) => msgKey(m) === key)
         if (exist) Object.assign(exist, incoming)
-        else this.currentMessages.push(incoming)
+        else insertSorted(this.currentMessages, incoming)
       }
 
       if (d.direction === 1) {

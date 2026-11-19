@@ -133,6 +133,7 @@ export const markConversationRead = (convId) =>
 export const fetchMessages = (convId, beforeId) =>
   http.get(`/conversations/${convId}/messages`, {
     params: beforeId ? { before_id: beforeId } : {},
+    timeout: 30000, // 消息拉取可能含多图/附件，比默认 10s 放宽
   })
 
 /** 群成员名册：@提及选择器数据源（附全拼/首字母，前端本地过滤）。 */

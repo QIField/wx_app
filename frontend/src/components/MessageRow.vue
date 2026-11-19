@@ -8,13 +8,13 @@
  * 残留的微信系统 XML（拍一拍等）。图片点击交给父组件做全屏预览，
  * 气泡右键上抛父层弹操作菜单（复制等，见 ChatPanel）。
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { canReEdit, isSystemXml, quoteInfoOf, transferInfoOf } from '../utils/message'
 import { renderMessageHtml } from '../utils/mention'
 import { onTextMouseDown, onTextDblClick } from '../utils/textSelection'
 import { messageMediaUrlOf } from '../utils/media'
 import { displayNameOf } from '../utils/format'
-import { useImgBox, useImgRetry, useMediaLoad } from '../composables/useMedia'
+import { useImgBox, useImgRetry, useMediaLoad, useImageFallback } from '../composables/useMedia'
 import AnonAvatar from './AnonAvatar.vue'
 import TransferCard from './TransferCard.vue'
 import VoiceBubble from './VoiceBubble.vue'
@@ -65,12 +65,20 @@ function picOf(m) {
   return props.conv?.avatar || null
 }
 function nameOf(m) {
-  // 出方向：业务端发送显示操作人快照；手机端发的没有操作人，标「手机端」区分来源
+  // 出方向三种来源：
+  //   operator_name == '自动报价' → 系统代发
+  //   operator_name 有其他值      → 人工 Web 发，不加后缀
+  //   operator_name 为空          → 手机端发
   if (m.direction === 2) {
-    return m.operator_name || `${m.sender_name || '手机'}（手机端）`
+    if (m.operator_name === '自动报价') return '系统代发'
+    if (m.operator_name) return m.sender_name || '设备'
+    return `${m.sender_name || '手机'}（手机端）`
   }
   return props.conv?.chat_type === 2 ? (m.sender_name || '成员') : displayNameOf(props.conv)
 }
+
+/* 头像 404 兜底：微信 wx.qlogo.cn 链接会过期，加载失败降级到匿名/首字 */
+const { failed: avatarFailed, onError: onAvatarError } = useImageFallback(() => picOf(props.msg))
 
 /* 系统灰条判断：撤回标记 / 兜底系统行 / 残留系统 XML */
 const isSys = computed(
