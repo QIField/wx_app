@@ -13,6 +13,7 @@ import DeviceCards from '../components/DeviceCards.vue'
 import InfoColumn from '../components/InfoColumn.vue'
 import UnreadBadge from '../components/UnreadBadge.vue'
 import RingtoneSettings from '../components/RingtoneSettings.vue'
+import HelpCenter from '../components/HelpCenter.vue'
 
 const props = defineProps({
   me: { type: Object, required: true },
@@ -24,7 +25,7 @@ const contacts = useContactsStore()
 
 const ROLE_TEXT = { developer: '开发者', admin: '管理员', agent: '客服' }
 
-const activeView = ref('chat') // chat | contacts
+const activeView = ref('chat') // chat | contacts | help
 const convListRef = ref(null) // ConvList 实例：用于触发未读定位
 const ringSettingsRef = ref(null) // 设置弹窗实例：左栏底部齿轮打开提示音选择
 
@@ -36,14 +37,13 @@ const { width: listWidth, bind: bindListWidth } = useBoundaryResize({
   storageKey: 'wb.sideListWidth.v1',
 })
 
-/** rail 会话按钮：每次点击都定位下一条未读并打开对应聊天窗口（红点随打开即清）；
- *  从通讯录切回时先切视图，等 ConvList 挂载完成再定位。 */
-async function onChatRailClick() {
-  if (activeView.value !== 'chat') {
+/** rail 会话按钮：只有已经在消息列表页时才定位下一条未读；否则仅切换视图 */
+function onChatRailClick() {
+  if (activeView.value === 'chat') {
+    convListRef.value?.locateUnread()
+  } else {
     activeView.value = 'chat'
-    await nextTick() // ConvList 为 v-if 挂载：实例与滚动容器就绪后才能滚动定位
   }
-  convListRef.value?.locateUnread()
 }
 
 onMounted(async () => {
@@ -92,7 +92,7 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
     </header>
 
     <div class="layout">
-      <!-- 左侧：图标导航栏 + 列表，无缝拼成一块整体面板 -->
+      <!-- 左侧：rail 永远是 4 个按钮（会话/通讯录/帮助/设置），帮助+设置一起贴底 -->
       <div class="side-unit">
         <nav class="rail">
           <button class="rail-btn" :class="{ on: activeView === 'chat' }" title="会话（点击定位下一条未读并打开聊天窗）" @click="onChatRailClick">
@@ -106,22 +106,29 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
           </button>
-          <!-- 设置入口：微信同款放左栏最底部，打开提示音选择弹窗 -->
-          <button class="rail-btn rail-settings" title="设置" aria-label="设置" @click="ringSettingsRef?.open()">
-            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
+          <div class="rail-bottom">
+            <!-- 帮助中心入口 -->
+            <button class="rail-btn" :class="{ on: activeView === 'help' }" title="帮助中心" aria-label="帮助中心" @click="activeView = 'help'">
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            </button>
+            <!-- 设置入口 -->
+            <button class="rail-btn rail-settings" title="设置" aria-label="设置" @click="ringSettingsRef?.open()">
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
         </nav>
-        <aside :ref="bindListWidth" class="col-side" :style="{ width: listWidth + 'px' }">
+        <aside v-show="activeView !== 'help'" :ref="bindListWidth" class="col-side" :style="{ width: listWidth + 'px' }">
           <ConvList ref="convListRef" v-if="activeView === 'chat'" />
           <ContactsPanel v-else />
         </aside>
       </div>
       <main class="col-main">
         <ChatPanel v-if="activeView === 'chat'" />
-        <ContactDetail v-else @enter-chat="activeView = 'chat'" />
+        <ContactDetail v-else-if="activeView === 'contacts'" @enter-chat="activeView = 'chat'" />
+        <HelpCenter v-else />
       </main>
-      <!-- 右侧扩展栏：收起/展开与拖宽由组件自管 -->
-      <InfoColumn />
+      <!-- 右侧扩展栏：帮助视图时隐藏 -->
+      <InfoColumn v-if="activeView !== 'help'" />
     </div>
 
     <!-- 设置弹窗（提示音选择） -->
@@ -135,6 +142,9 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
   flex-direction: column;
   height: 100%;
   background: var(--c-bg);
+  /* 裁掉一切意外溢出：拓展栏收起后骑缝按钮会探出视口右缘 1px，
+   * 不裁的话文档出现横向滚动条（Windows 浮动滚动条还会闪出黑色残影） */
+  overflow: hidden;
 }
 
 /* 深海军蓝顶栏：斜向渐变打底 + 双层极光光晕反向漂移（纯 CSS，不挡交互） */
@@ -197,8 +207,14 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
 }
 .sub { font-size: 10px; color: rgba(255, 255, 255, 0.55); }
 .right { display: flex; align-items: center; gap: 12px; user-select: none; }
-/* 左栏底部设置按钮：复用 rail-btn 样式，margin-top:auto 推到 rail 最底部（微信同款） */
-.rail-settings { margin-top: auto; }
+/* 左栏底部设置按钮组：整体 margin-top:auto 推到 rail 最底部 */
+.rail-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rail-settings { /* 保留类名兼容，但贴底由 rail-bottom 负责 */ }
 .back-btn {
   width: auto; /* 覆盖 .icon-btn 的 28px 固定宽，让文字撑开 */
   display: inline-flex;

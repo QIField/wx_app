@@ -116,7 +116,6 @@ async function onSave() {
         <div class="set-row">
           <div class="rl">
             <div class="rt">AI 智能识别</div>
-            <div class="rs">关闭后进入普通模式：不自动分析新消息，手动查询报价不受影响</div>
           </div>
           <label class="qq-switch sw">
             <input v-model="aiOn" type="checkbox">
@@ -126,7 +125,6 @@ async function onSave() {
         <div class="set-row">
           <div class="rl">
             <div class="rt">自动报价模式</div>
-            <div class="rs">仅侧边预览只在面板展示；自动发送直接回复会话</div>
           </div>
           <div class="radio-group">
             <span class="radio-pill" :class="{ on: quoteMode === 'preview' }" @click="quoteMode = 'preview'">仅侧边预览</span>
@@ -136,14 +134,13 @@ async function onSave() {
         <div class="set-row col">
           <div class="rl">
             <div class="rt">配件黑名单</div>
-            <div class="rs">命中配件不报价、不自动发送（点击标签移除；最多 {{ MAX_BLACKLIST }} 个，单个 ≤ {{ MAX_PART_LEN }} 字）</div>
           </div>
           <div class="blk-tags">
             <span v-for="(p, i) in parts" :key="p" class="blk-tag" @click="removePart(i)">{{ p }} <i>×</i></span>
             <span v-if="!parts.length" class="rs">暂无黑名单配件</span>
           </div>
           <div class="blk-add">
-            <input v-model="partInput" class="input" placeholder="输入配件名后回车加入黑名单" @keyup.enter="addPart">
+            <input v-model="partInput" class="input" placeholder="输入配件名后回车加入" @keyup.enter="addPart">
             <button class="qq-btn-sm add-btn" @click="addPart">添加</button>
           </div>
         </div>
@@ -151,12 +148,11 @@ async function onSave() {
     </div>
 
     <div class="set-sec">
-      <div class="sh">价格</div>
+      <div class="sh">价格系数</div>
       <div class="sb">
-        <div class="rs" style="margin-bottom: 6px;">客户等级价格映射（报价 = 我方价 × 系数）</div>
         <table class="map-table">
           <thead>
-            <tr><th>客户等级</th><th>价格系数</th></tr>
+            <tr><th>客户等级</th><th>系数</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in RATE_LABELS" :key="r.key">

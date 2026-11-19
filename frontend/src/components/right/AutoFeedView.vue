@@ -88,7 +88,7 @@ onUnmounted(() => {
     <div class="strip">
       <div class="strip-row">
         <span class="lbl">AI 智能识别</span>
-        <label class="qq-switch" :title="aiOn ? '已开启：命中询价自动算价' : '已关闭：纯手动普通模式'">
+        <label class="qq-switch" :title="aiOn ? '已开启' : '已关闭'">
           <input v-model="aiOn" type="checkbox" @change="saveConfig({ ai_enabled: aiOn })">
           <span class="track"></span>
         </label>
@@ -115,10 +115,7 @@ onUnmounted(() => {
         :inquiry="q" :class="{ dim: [2, 4].includes(q.status) }"
         @refresh="refresh"
       />
-      <div v-if="loaded && !rows.length" class="qq-empty">
-        监听已开启的好友/群新消息，AI 识别需求后在此输出报价…
-      </div>
-      <div class="footnote">每 {{ POLL_MS / 1000 }} 秒自动刷新 · 新询价由 AI 守门自动分流</div>
+      <div v-if="loaded && !rows.length" class="qq-empty">暂无询价</div>
     </div>
   </div>
 </template>
