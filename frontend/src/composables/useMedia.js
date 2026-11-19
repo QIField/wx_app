@@ -1,5 +1,5 @@
 /** 消息媒体加载辅助：尺寸预占位 / 加载状态 / 失败自动重试（MessageRow 与 QuoteBlock 共用）。 */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 /** 尺寸换算：按显示上限等比缩到盒子（无宽高返回 null，交由 natural 兜底）。 */
 function fitBox(w, h, maxW, maxH) {
@@ -60,4 +60,14 @@ export function useImgRetry() {
     giveUp?.()
   }
   return { withBust, onImgError }
+}
+
+/** 图片加载失败降级：微信 qlogo 等外链头像会过期返回 404，浏览器一定会打红字，
+ *  但我们可以在 @error 触发后切换 UI —— 源 URL 变化时自动重置（避免旧失败粘住新图）。
+ *  返回 { failed, onError }，模板 v-if="src && !failed" + @error="onError" 即可。 */
+export function useImageFallback(source) {
+  const failed = ref(false)
+  watch(source, () => { failed.value = false })
+  function onError() { failed.value = true }
+  return { failed, onError }
 }
