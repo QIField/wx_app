@@ -76,11 +76,11 @@ def test_build_chat_content_text_format(app):
 
 
 def test_build_chat_content_keeps_cs_messages(app):
-    """客服自己发的消息也带（服务方靠它算 is_replied），失败发出的跳过。"""
+    """客服自己发的消息也带（服务方靠它算 is_replied），统一署名【我回复】；失败发出的跳过。"""
     conv = make_conv("group1")
     cs = make_msg(conv.id, "宝马 1198 有货", direction=Message.DIR_OUT, sender="客服小张")
     items = build_chat_content([cs])
-    assert items == [{"type": "input_text", "text": "2026-11-17 10:00:00【客服小张】：宝马 1198 有货"}]
+    assert items == [{"type": "input_text", "text": "2026-11-17 10:00:00【我回复】：宝马 1198 有货"}]
 
     failed = make_msg(conv.id, "这条没发出去", direction=Message.DIR_OUT,
                       sender="客服小张", status=Message.ST_FAILED)
@@ -88,12 +88,24 @@ def test_build_chat_content_keeps_cs_messages(app):
 
 
 def test_build_chat_content_placeholders(app):
-    """图片/语音/文件等无直链，V1 只带占位备注；转发卡片跳过。"""
+    """图片/语音/文件等无直链，V1 只带系统备注条目说明发送者；转发卡片跳过。"""
     conv = make_conv("group1")
     img = make_msg(conv.id, "IMG_001.jpg", msg_type=Message.MSG_IMAGE)
     fwd = make_msg(conv.id, "合并转发", msg_type=Message.MSG_FORWARD)
     items = build_chat_content([img, fwd])
-    assert items == [{"type": "input_text", "text": "2026-11-17 10:00:00【老王】发送了一张图片"}]
+    assert items == [{"type": "input_text",
+                      "text": "2026-11-17 10:00:00【系统备注】：上一条是【老王】发的图片"}]
+
+
+def test_build_chat_content_outgoing_self_reply(app):
+    """接口契约：客服消息统一署名【我回复】，不看设备名称与 sender_name。"""
+    from backend.models.device import Device
+    db.session.add(Device(openid="dev-openid", name="辉哥设备A"))
+    db.session.commit()
+    conv = make_conv("group1")
+    m = make_msg(conv.id, "宝马 1198 有货", direction=Message.DIR_OUT, sender="")
+    items = build_chat_content([m])
+    assert items == [{"type": "input_text", "text": "2026-11-17 10:00:00【我回复】：宝马 1198 有货"}]
 
 
 # ---------- 分流（契约 B） ----------
@@ -121,6 +133,13 @@ def test_dispatch_status_gates(app):
         QuoteInquiry.ST_REVIEW, QuoteInquiry.ST_PENDING,
     ]
     assert rows[0].quoted is False and rows[1].quoted is True
+
+
+def test_dispatch_sender_name_unknown_normalized(app):
+    """AI 输出「未知」署名归 None，不落未知进询价卡片。"""
+    conv = make_conv("group1")
+    rows = dispatch(conv.id, [{"sender_name": "未知", "vin": "VIN1"}], [])
+    assert rows[0].sender_name is None
 
 
 def test_dispatch_broadcasts_inquiry_changed(app, monkeypatch):

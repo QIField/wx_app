@@ -9,7 +9,8 @@ class SyncCursor(db.Model, SoftDeleteMixin):
     收消息每轮只拉 last_sync_time 之后的增量，不重复不遗漏。
     """
 
-    CURSOR_MSG = "msg"  # 收消息游标
+    CURSOR_MSG = "msg"       # incoming 收消息游标（正常 get_message 调用）
+    CURSOR_MSG_OUT = "msg_out"  # outgoing 发出消息游标（from_wxid=设备wxid 过滤）
 
     __tablename__ = "sync_cursor"
 

@@ -22,6 +22,17 @@ def device(app):
     return make_user(open_ids=["dev01"])
 
 
+def test_device_label_outgoing_prefers_device_name(app):
+    """落库署名兜底：发出消息优先设备名称；接收消息与无 openid 退 wxid。"""
+    from backend.models.device import Device
+    dev = Device.query.filter_by(openid="dev01").first()
+    dev.name = "辉哥设备A"
+    db.session.commit()
+    assert message_sync._device_label("dev01", Message.DIR_OUT, "wxid_me") == "辉哥设备A"
+    assert message_sync._device_label("dev01", Message.DIR_IN, "wxid_peer") == "wxid_peer"
+    assert message_sync._device_label("", Message.DIR_OUT, "wxid_me") == "wxid_me"
+
+
 def make_real_item(**over):
     """按 2026-10-29 联调实测结构造一条群消息（RFC 1123 时间、字符串类型）。"""
     raw_json = json.dumps({

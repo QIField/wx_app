@@ -196,6 +196,10 @@ def update_conversation(conversation_id):
 def _fetch_conversation_page(conversation_id, openids, page_size, before_id):
     """会话归属校验 + 消息一页合并为一次 SQL 往返（远程库每次往返 25~35ms）。
 
+    排序以 create_time 为主（真实发送时间），id 为次排序（同时间戳时稳定有序）。
+    用时间戳翻页：before_id 实际传的是上一页最早消息的 create_time + id 组合。
+    翻页条件：create_time < 上一页最小 create_time，或 create_time 相同但 id 更小。
+
     返回 (conv, rows)；conv 为 None 表示归属未命中（跨账号/已删除/无消息兜底交给调用方）。
     """
     conv, rows = None, []
@@ -212,8 +216,21 @@ def _fetch_conversation_page(conversation_id, openids, page_size, before_id):
         )
     )
     if before_id:
-        mq = mq.where(Message.id < before_id)
-    pairs = db.session.execute(mq.order_by(Message.id.desc()).limit(page_size)).all()
+        # before_id 是上一页最早消息的 id，同时拿到它的 create_time 做翻页锚点
+        anchor = db.session.query(Message.create_time, Message.id).filter(
+            Message.id == before_id,
+            Message.conversation_id == conversation_id,
+            Message.deleted_at.is_(None),
+        ).first()
+        if anchor is not None:
+            anchor_time, anchor_id = anchor
+            mq = mq.where(
+                (Message.create_time < anchor_time)
+                | ((Message.create_time == anchor_time) & (Message.id < anchor_id))
+            )
+    pairs = db.session.execute(
+        mq.order_by(Message.create_time.desc(), Message.id.desc()).limit(page_size)
+    ).all()
     if pairs:
         conv, rows = pairs[0][0], [p[1] for p in pairs]
     return conv, rows

@@ -32,6 +32,19 @@ def test_send_text_ok(app, conversation, monkeypatch):
     assert msg.direction == Message.DIR_OUT
 
 
+def test_send_fills_device_label(app, conversation, monkeypatch):
+    """业务端发送落库 sender_name=设备名称（记录层设备区分，展示仍优先操作人快照）。"""
+    from backend.models.device import Device
+    monkeypatch.setattr(
+        send_service.middle_sender, "post_text",
+        lambda *a, **k: {"code": 0, "msg": "success"},
+    )
+    db.session.add(Device(openid=conversation.openid, name="辉哥设备A"))
+    db.session.commit()
+    msg = send_service.send_message(conversation.id, Message.MSG_TEXT, "好的马上安排", {})
+    assert msg.sender_name == "辉哥设备A"
+
+
 def test_send_link_ok(app, conversation, monkeypatch):
     """发链接卡片（报价链接走这里）：payload 字段透传。"""
     captured = {}
