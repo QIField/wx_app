@@ -22,6 +22,9 @@ class Conversation(db.Model, SoftDeleteMixin):
     muted = db.Column(db.SmallInteger, nullable=False, default=0, comment="是否消息免打扰 0否 1是")
     last_msg = db.Column(db.Text, comment="最后一条消息摘要（冗余）")
     last_msg_at = db.Column(db.DateTime, comment="最后一条消息时间")
+    last_analyzed_msg_id = db.Column(
+        db.BigInteger, comment="自动报价已处理到的消息 id（增量分析进度条，null 表示首次分析）",
+    )
     created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.now())
     updated_at = db.Column(
         db.DateTime, nullable=False, server_default=db.func.now(), onupdate=db.func.now()

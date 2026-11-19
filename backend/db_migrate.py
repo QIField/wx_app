@@ -38,6 +38,8 @@ def upgrade_existing_schema():
     _archive_contact_profile()
     # 2026-11-17 自动报价：客户等级列（报价系数 key，存量行回默认普通客户）
     _try_alter("ALTER TABLE contact_remark_config ADD COLUMN level VARCHAR(20) NOT NULL DEFAULT 'normal'")
+    # 2026-11-19 自动报价增量分析：会话记录已处理到的消息 id
+    _try_alter("ALTER TABLE conversation ADD COLUMN last_analyzed_msg_id BIGINT NULL")
 
 
 def _backfill_remark_config():

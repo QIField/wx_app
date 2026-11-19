@@ -18,7 +18,7 @@ from backend.models.contact_remark_config import ContactRemarkConfig
 from backend.models.conversation import Conversation
 from backend.models.quote_inquiry import QuoteInquiry
 from backend.services.quote_context import (
-    build_chat_content, build_empty_check, fetch_recent_messages,
+    build_chat_content, build_empty_check, fetch_recent_messages, split_by_progress,
 )
 from backend.services.quote_dispatch import dispatch, parse_scenarios
 from backend.services.rule_extract import rule_extract, should_trigger
@@ -109,34 +109,79 @@ def _analyze_with_context(conversation_id):
 
 
 def analyze_conversation(conversation_id):
-    """拉窗口 → 普通识别 → AI 兜底 → 分流落表。调用方需持有 app_context。
+    """拉窗口 → 增量切分 → 普通识别 → AI 兜底 → 分流落表。调用方需持有 app_context。
 
-    两层识别（不互斥，先快后慢）：
-    1. 普通识别（正则 + 中间方 OCR）→ 命中则直接用，省 AI token
-    2. 普通识别没结果 → AI extract_parts 兜底
+    增量语义（2026-11-19 V2）：
+    - conv.last_analyzed_msg_id 是"已处理到哪条消息"的进度条
+    - 拉 10 条 → 按进度条切 (context_msgs, new_msgs)
+    - 无 new_msgs → 直接跳过（没新消息）
+    - 触发条件只看 new_msgs
+    - rule_extract 传 focus=new_msgs 的 id（配件/号码只从新消息提）
+    - AI 的 chat_content 加【历史】【新询价】标签 + 系统提示
+    - 分析完成 → 进度条更新到 new_msgs 里最大的 id
     """
     cfg = merged_config(0)
-    messages = fetch_recent_messages(conversation_id)
-
-    # 触发条件前置：无 VIN/长数字/图片 直接跳过（纯表情/逗号/中文不触发）
-    if not should_trigger(messages):
+    conv = Conversation.query.filter_by(id=conversation_id, deleted_at=None).first()
+    if conv is None:
         return
 
-    # Step 1：普通识别（规则驱动，零成本）
-    scenes = rule_extract(messages)
+    messages = fetch_recent_messages(conversation_id)
+    if not messages:
+        return
+
+    # 增量切分
+    context_msgs, new_msgs = split_by_progress(messages, conv.last_analyzed_msg_id)
+
+    # 没有新消息 → 更新进度条到窗口里最大的 id，避免重复分析旧消息
+    if not new_msgs:
+        max_id = max(m.id for m in messages)
+        if conv.last_analyzed_msg_id is None or max_id > conv.last_analyzed_msg_id:
+            conv.last_analyzed_msg_id = max_id
+            from backend.extensions import db
+            db.session.commit()
+        return
+
+    # 触发条件只看 new_msgs
+    if not should_trigger(new_msgs):
+        # 不触发也推进进度条（这些消息已经看过了，以后别再重提）
+        conv.last_analyzed_msg_id = max(m.id for m in new_msgs)
+        from backend.extensions import db
+        db.session.commit()
+        return
+
+    focus_ids = {m.id for m in new_msgs}
+
+    # Step 1：普通识别（传 focus_ids，配件/号码只从新消息提，VIN 全窗口扫）
+    scenes = rule_extract(messages, focus_msg_ids=focus_ids)
 
     # Step 2：普通识别没覆盖 → AI 兜底
     if not scenes:
-        chat_content = build_chat_content(messages)
+        chat_content = build_chat_content(
+            messages, focus_msg_ids=focus_ids, include_hint=True,
+        )
         if not build_empty_check(chat_content):
-            return  # 窗口内无文本、OCR 也没产出，彻底没东西
+            # 窗口内无文本，更新进度条后退出
+            conv.last_analyzed_msg_id = max(m.id for m in new_msgs)
+            from backend.extensions import db
+            db.session.commit()
+            return
         data = qq_client.extract_parts(chat_content)
         scenes = parse_scenarios(data)
 
     if not scenes:
+        # 无论如何推进进度条，避免历史消息反复被分析
+        conv.last_analyzed_msg_id = max(m.id for m in new_msgs)
+        from backend.extensions import db
+        db.session.commit()
         return
 
     rows = dispatch(conversation_id, scenes, cfg["parts_blacklist"])
+
+    # 更新进度条（dispatch 成功才推进，失败了下次可以重跑）
+    conv.last_analyzed_msg_id = max(m.id for m in new_msgs)
+    from backend.extensions import db
+    db.session.commit()
+
     pending = [r for r in rows if r.status == QuoteInquiry.ST_PENDING]
     if pending:
         # 阶段 4：待报价行立即算价回写 price_json（异常内部兜底，不影响分析流程）

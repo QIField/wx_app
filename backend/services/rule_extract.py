@@ -208,6 +208,13 @@ def _extract_from_text_message(msg: Message) -> list[dict]:
     }]
 
 
+def _extract_vin_only_from_message(msg: Message) -> str | None:
+    """只提取 VIN（用于跨消息关联，不受 focus 限制）。"""
+    if msg.msg_type != Message.MSG_TEXT:
+        return None
+    return _extract_vin(msg.content or "")
+
+
 def _extract_from_image_message(msg: Message, all_messages: list[Message], idx: int) -> list[dict]:
     """图片消息 → 场景列表。
 
@@ -299,30 +306,56 @@ def _cross_link_scenes(raw_scenes: list[dict]) -> list[dict]:
 # ==================== 主入口 ====================
 
 
-def rule_extract(messages: list[Message]) -> list[dict]:
+def rule_extract(messages: list[Message], focus_msg_ids: set[int] | None = None) -> list[dict]:
     """普通识别主入口：消息列表 → 标准场景列表。
+
+    focus_msg_ids 增量分析时传入：
+    - VIN 可以从全部消息提取（历史里的 VIN 用于关联新询价）
+    - 配件名和号码只从 focus 消息（新询价）里提取，历史里的一律忽略
+    - focus_msg_ids=None 表示全部消息都是新的（首次分析 / 旧调用兼容）
 
     返回空列表表示普通识别完全没提取到东西，调用方应走 AI 兜底。
     """
+    focus = focus_msg_ids  # None → 全算 focus
     raw_scenes: list[dict] = []
+
+    # 全窗口扫描 VIN（用于跨消息关联，不受 focus 限制）
+    all_vins: list[str] = []
+    for m in messages:
+        v = _extract_vin_only_from_message(m)
+        if v and v not in all_vins:
+            all_vins.append(v)
 
     for i, msg in enumerate(messages):
         if msg.direction != Message.DIR_IN:
             continue
 
+        # 如果指定了 focus 且这条不在 focus 里 → 跳过配件/号码提取
+        in_focus = (focus is None) or (msg.id in focus)
+
         if msg.msg_type == Message.MSG_TEXT:
-            scenes = _extract_from_text_message(msg)
-            raw_scenes.extend(scenes)
+            if in_focus:
+                scenes = _extract_from_text_message(msg)
+                raw_scenes.extend(scenes)
+            # 不在 focus 的历史消息 → 跳过（VIN 已在上面的全窗口扫描里覆盖）
 
         elif msg.msg_type == Message.MSG_IMAGE:
-            scenes = _extract_from_image_message(msg, messages, i)
-            raw_scenes.extend(scenes)
+            if in_focus:
+                # 图片场景的后续文本关联也只在 focus 里找
+                img_scenes = _extract_from_image_message_focus(msg, messages, i, focus)
+                raw_scenes.extend(img_scenes)
 
     if not raw_scenes:
         return []
 
     # 跨行合并
     merged = _cross_link_scenes(raw_scenes)
+
+    # 用全窗口 VIN 补全没 VIN 的场景（历史 VIN 关联新询价配件）
+    if all_vins:
+        for s in merged:
+            if not s.get("vin"):
+                s["vin"] = all_vins[0]  # 取第一个 VIN（通常就是客户的车）
 
     # 过滤：完全空的场景跳过
     result = [
@@ -333,3 +366,41 @@ def rule_extract(messages: list[Message]) -> list[dict]:
     if result:
         log.info("普通识别提取成功 scenes=%d", len(result))
     return result
+
+
+def _extract_from_image_message_focus(
+    msg: Message, all_messages: list[Message], idx: int, focus: set[int] | None,
+) -> list[dict]:
+    """图片消息（focus 内）→ 场景列表。
+
+    与 _extract_from_image_message 区别：后续关联的文本消息也必须在 focus 内。
+    """
+    img_url = (msg.payload or {}).get("img_url") if msg.payload else None
+    vin = recognize_vin(img_url) if img_url else None
+
+    part_names = []
+    part_nos = []
+    sender_name = msg.sender_name
+
+    for j in range(idx + 1, min(idx + 4, len(all_messages))):
+        next_msg = all_messages[j]
+        if next_msg.direction != Message.DIR_IN:
+            break
+        # focus 限制：后续关联的消息也必须在 focus 里
+        if focus is not None and next_msg.id not in focus:
+            continue
+        if next_msg.msg_type == Message.MSG_TEXT:
+            sender_name = sender_name or next_msg.sender_name
+            part_names.extend(_extract_part_names(next_msg.content or ""))
+            part_nos.extend(_extract_part_numbers(next_msg.content or ""))
+
+    if not vin and not part_names and not part_nos:
+        return []
+
+    return [{
+        "vin": vin,
+        "part_name": ",".join(part_names) if part_names else None,
+        "oem_no": ",".join(part_nos) if part_nos else None,
+        "sender_name": sender_name,
+        "inquiry_content": f"[图片]{img_url and img_url[:60] or ''}",
+    }]

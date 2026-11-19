@@ -119,22 +119,25 @@ def test_parse_scenarios_shapes():
 
 
 def test_dispatch_status_gates(app):
-    """守门顺序：黑名单 > quoted 闸门 > is_replied 闸门 > 缺字段(vin/part/oem 全空) > pending。"""
+    """守门顺序：黑名单 > quoted 闸门 > is_replied 闸门 > 缺字段(vin/part/oem 全空)丢弃 > pending。
+
+    注意：空场景（vin/part_name/oem_no 全 None）现在直接丢弃，不入表。
+    """
     conv = make_conv("group1")
     scenes = [
         {"sender_name": "甲", "part_name": "前保险杠总成", "vin": "VIN1", "quoted": False},   # 黑名单
         {"sender_name": "乙", "part_name": "节温器", "vin": "VIN2", "quoted": "true"},        # 跟进旧报价
         {"sender_name": "丙", "part_name": "节温器", "vin": "VIN3", "quoted": False,          # 客服已回复过
          "is_replied": True},
-        {"sender_name": "丁", "quoted": False},                                              # 全缺 vin/part/oem
+        {"sender_name": "丁", "quoted": False},                                              # 全缺 vin/part/oem → 丢弃
         {"sender_name": "戊", "part_name": "节温器", "vin": "VIN5", "quoted": False},         # 正常 VIN+配件
         {"sender_name": "己", "oem_no": "34356865613", "quoted": False},                      # 只有 OE 编号（纯数字零件号）
     ]
     rows = dispatch(conv.id, scenes, ["保险杠"])
+    # 空场景（丁）不入表 → 只有 5 行
     assert [r.status for r in rows] == [
         QuoteInquiry.ST_BLOCKED, QuoteInquiry.ST_REVIEW,
-        QuoteInquiry.ST_REVIEW, QuoteInquiry.ST_REVIEW,
-        QuoteInquiry.ST_PENDING, QuoteInquiry.ST_PENDING,
+        QuoteInquiry.ST_REVIEW, QuoteInquiry.ST_PENDING, QuoteInquiry.ST_PENDING,
     ]
     assert rows[0].quoted is False and rows[1].quoted is True
 
