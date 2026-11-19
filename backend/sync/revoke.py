@@ -34,7 +34,8 @@ def _revoke_text(fields):
 def apply_revoke(openid, fields, revokes):
     """处理一条撤回通知（fields 来自 message_sync._normalize）。
 
-    命中原消息：打标记、挂撤回事件，返回 None；
+    命中原消息：打标记、挂撤回事件；仅当被撤回消息确为 conv 最后一条时
+    才重算 conv.last_msg（否则已有的更新消息摘要不能被旧撤回通知覆盖）。
     未命中：存一条 payload.system 灰条消息，返回其 new_message 推送字典。
     """
     info = fields["revoke"]
@@ -46,13 +47,18 @@ def apply_revoke(openid, fields, revokes):
         payload = dict(original.payload or {})
         payload["revoked"] = True
         original.payload = payload
-        conv.last_msg = _revoke_text(fields)
-        conv.last_msg_at = fields["create_time"]
+        # 仅当被撤回消息仍是 conv 最后一条时，才把摘要换成撤回文案。
+        # 典型竞态：API 撤回 → 新消息 N 到达 → 中间方 revokemsg 迟到。
+        # 此时 original 已被 N 取代为倒数第二条，conv.last_msg 必须保持 N 的摘要。
+        if is_conv_tail(conv.id, original.id):
+            conv.last_msg = _revoke_text(fields)
+            conv.last_msg_at = fields["create_time"]
         if revokes is not None:
             revokes.append({
                 "message_id": original.id,
                 "conversation_id": conv.id,
                 "direction": original.direction,  # 前端区分摘要文案（你撤回/对方撤回）
+                "create_time": fields["create_time"].strftime("%Y-%m-%d %H:%M:%S"),
             })
         return None
 
@@ -79,8 +85,12 @@ def apply_revoke(openid, fields, revokes):
         create_time=fields["create_time"],
     )
     db.session.add(notice)
-    conv.last_msg = notice.content
-    conv.last_msg_at = fields["create_time"]
+    # 兜底灰条自身就是新入库的可见消息，用它的时间做不倒退判断：
+    # 如果 conv 已有更新消息（比如 API 撤回后客户又发了 N，兜底 revokemsg 迟到），
+    # 不能用旧时间的撤回灰条覆盖更新消息的摘要。
+    if notice.create_time >= (conv.last_msg_at or notice.create_time):
+        conv.last_msg = notice.content
+        conv.last_msg_at = notice.create_time
     return {
         "message_id": notice.id,
         "conversation_id": conv.id,
@@ -109,3 +119,18 @@ def _find_original(conversation_id, info):
         if found is not None:
             return found
     return None
+
+
+def is_conv_tail(conversation_id, message_id):
+    """判断指定消息是否为该会话最后一条（create_time desc, id desc）。
+
+    撤回通知可能迟到：如果撤回目标之后已有更新消息入库，被撤回消息
+    就不再是 conv 尾部了，此时不应再用撤回文案覆盖 conv.last_msg。
+    """
+    latest = (
+        Message.query.filter_by(conversation_id=conversation_id)
+        .filter(Message.deleted_at.is_(None))
+        .order_by(Message.create_time.desc(), Message.id.desc())
+        .first()
+    )
+    return latest is not None and latest.id == message_id

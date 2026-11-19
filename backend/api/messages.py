@@ -191,8 +191,12 @@ def revoke_message_api(message_id):
 
     payload["revoked"] = True
     msg.payload = payload
-    conv.last_msg = "你撤回了一条消息"  # 会话摘要同步换灰条文案（与对方撤回路径一致）
-    conv.last_msg_at = msg.create_time or datetime.now()
+    # 仅当被撤回消息仍是 conv 最后一条时，才把摘要换成撤回文案。
+    # 如果撤回后已有更新消息入库（极端竞态），保持最新消息的摘要不变。
+    from backend.sync.revoke import is_conv_tail
+    if is_conv_tail(conv.id, msg.id):
+        conv.last_msg = "你撤回了一条消息"
+        conv.last_msg_at = datetime.now()
     db.session.commit()
 
     from backend.ws import hub
@@ -201,6 +205,7 @@ def revoke_message_api(message_id):
         "conversation_id": msg.conversation_id,
         "direction": Message.DIR_OUT,  # 前端区分摘要文案（你撤回/对方撤回）
         "openid": openid,
+        "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
     return jsonify(code=0, msg="success", data={"message_id": msg.id})
 

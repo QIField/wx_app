@@ -498,12 +498,16 @@ export const useChatStore = defineStore('chat', {
       if (msg) msg.status = d.status
     },
 
-    /** 撤回成功（自己/对方）：打标记，气泡变灰条；会话列表摘要同步换成撤回文案。 */
+    /** 撤回成功（自己/对方）：打标记，气泡变灰条；会话列表摘要同步换成撤回文案 + 时间戳。 */
     onMessageRevoked(d) {
       const msg = this.currentMessages.find((m) => m.id === d.message_id)
       if (msg) msg.payload = { ...(msg.payload || {}), revoked: true }
       const conv = this.conversations.find((c) => c.id === d.conversation_id)
-      if (conv) conv.last_msg = d.direction === 2 ? '你撤回了一条消息' : '对方撤回了一条消息'
+      if (conv) {
+        conv.last_msg = d.direction === 2 ? '你撤回了一条消息' : '对方撤回了一条消息'
+        if (d.create_time) conv.last_msg_at = d.create_time
+        this.sortConversations()
+      }
     },
   },
 })

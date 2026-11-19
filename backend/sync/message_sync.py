@@ -66,8 +66,10 @@ def sync_once(app):
                 log_action(AuditModule.SYNC, "消息同步", f"设备 {openid}",
                            result=AuditLog.RESULT_FAIL, detail=str(exc)[:255])
                 continue
-            broadcast_messages(pushed, openid)
+            # 先推撤回、再推新消息：避免同轮内撤回事件把新消息的会话摘要覆盖回撤回文案
+            # （后端数据库 last_msg 已按真实时间排好，但前端 WS 到达顺序决定最终显示）
             broadcast_revokes(revokes, openid)
+            broadcast_messages(pushed, openid)
             if pushed:  # 新消息涉及的会话缺名称/头像时立即补拉（函数内部自行容错）
                 from backend.sync.profile_sync import refresh_missing_profiles
 
@@ -228,10 +230,12 @@ def _save_message(openid, item, revokes=None):
     # 维护会话：最后一条消息冗余；只有收到的才计未读
     if fields["direction"] == Message.DIR_IN:
         conv.unread_count = (conv.unread_count or 0) + 1
-    conv.last_msg = conversation_service.short_summary(
-        fields["msg_type"], fields["content"]
-    )
-    conv.last_msg_at = fields["create_time"]
+    # 不倒退更新：中间方返回顺序不保证严格按时间，旧消息不能覆盖新摘要
+    if fields["create_time"] >= (conv.last_msg_at or fields["create_time"]):
+        conv.last_msg = conversation_service.short_summary(
+            fields["msg_type"], fields["content"]
+        )
+        conv.last_msg_at = fields["create_time"]
 
     return {
         "message_id": msg.id,
