@@ -104,19 +104,21 @@ onMounted(load)
     <div v-else-if="error" class="qq-empty err">{{ error }}</div>
 
     <template v-else-if="source === 'zpy'">
-      <table v-if="zpyRows.length" class="qq-table">
-        <thead>
-          <tr><th v-for="c in ZPY_COLS" :key="c.key">{{ c.label }}</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="(r, i) in zpyRows" :key="i" :class="{ min: isMin(r) }">
-            <td v-for="c in ZPY_COLS" :key="c.key" :class="{ n: c.key !== '发货说明' }">
-              {{ fmt(r[c.key]) }}
-              <span v-if="c.key === '含税售价' && isMin(r)" class="qq-badge b-green">最低</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="zpyRows.length" class="qq-scroll">
+        <table class="qq-table">
+          <thead>
+            <tr><th v-for="c in ZPY_COLS" :key="c.key">{{ c.label }}</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(r, i) in zpyRows" :key="i" :class="{ min: isMin(r) }">
+              <td v-for="c in ZPY_COLS" :key="c.key" :class="{ n: c.key !== '发货说明' }">
+                {{ fmt(r[c.key]) }}
+                <span v-if="c.key === '含税售价' && isMin(r)" class="qq-badge b-green">最低</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-else-if="loaded" class="qq-empty">兆配云未返回该 OE 的报价</div>
     </template>
 
@@ -139,11 +141,26 @@ onMounted(load)
 </template>
 
 <style scoped>
-.seg { display: flex; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); overflow: hidden; flex: none; }
-.sg { padding: 5px 10px; font-size: 11px; color: var(--c-text-sub); cursor: pointer; background: var(--c-panel); }
-.sg.on { background: var(--c-primary-soft); color: var(--c-primary); font-weight: 600; }
+/* 数据源切换：分段 pill 组 */
+.seg {
+  display: flex; gap: 2px; flex: none;
+  padding: 2px;
+  background: var(--c-bg);
+  border-radius: 999px;
+}
+.sg {
+  padding: 4px 10px; font-size: 11px; color: var(--c-text-sub);
+  cursor: pointer; border-radius: 999px;
+  transition: all 0.15s; user-select: none;
+}
+.sg:hover { color: var(--c-primary); }
+.sg.on {
+  background: var(--c-panel); color: var(--c-primary); font-weight: 600;
+  box-shadow: 0 1px 3px rgba(31, 45, 61, 0.12);
+}
 
+/* 兆配云最低价行：绿色语义高亮 */
 .qq-table tr.min td { background: var(--c-ok-soft); font-weight: 600; }
 /* 单元格内「最低」徽章：比公共款更紧凑、实底绿（表格高亮语义） */
-.qq-table .qq-badge.b-green { padding: 1px 6px; margin-left: 4px; background: var(--c-ok); color: #fff; }
+.qq-table .qq-badge.b-green { padding: 1px 7px; margin-left: 4px; background: var(--c-ok); color: #fff; }
 </style>

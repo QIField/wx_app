@@ -130,44 +130,70 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 日/月报切换：分段 pill 组 */
 .ana-toggle {
-  display: inline-flex; border: 1px solid var(--c-border-strong);
-  border-radius: var(--r-md); overflow: hidden; margin-bottom: 10px;
+  display: inline-flex; gap: 3px;
+  padding: 3px;
+  background: var(--c-bg);
+  border-radius: 999px;
+  margin-bottom: 10px;
 }
-.tg { padding: 5px 14px; font-size: 12px; color: var(--c-text-sub); cursor: pointer; background: var(--c-panel); }
-.tg.on { background: var(--c-primary-soft); color: var(--c-primary); font-weight: 600; }
+.tg {
+  padding: 5px 16px; font-size: 12px; color: var(--c-text-sub);
+  border-radius: 999px; cursor: pointer; user-select: none;
+  transition: all 0.15s;
+}
+.tg:hover { color: var(--c-primary); }
+.tg.on {
+  background: linear-gradient(145deg, #f2594e, var(--c-primary));
+  color: #fff; font-weight: 600;
+  box-shadow: 0 2px 6px rgba(232, 32, 22, 0.28);
+}
 
+/* KPI：车车安乘配统计卡语言——白卡浮起 + 品牌红大数字 */
 .kpis { display: flex; gap: 8px; margin-bottom: 10px; }
 .kpi {
-  flex: 1; text-align: center;
-  background: var(--c-primary-soft); border: 1px solid #c7d8ff;
-  border-radius: var(--r-md); padding: 9px 4px;
+  flex: 1; min-width: 0; text-align: center;
+  background: var(--c-panel); border: 1px solid var(--c-border);
+  border-radius: var(--r-lg); padding: 10px 4px;
+  box-shadow: 0 2px 8px rgba(31, 45, 61, 0.05);
 }
-.kpi .kl { font-size: 10px; color: var(--c-primary-deep); }
-.kpi .kv { font: 700 20px/1.2 var(--f-num); color: var(--c-primary); margin: 2px 0 3px; }
+.kpi .kl { font-size: 10px; color: var(--c-text-sub); }
+.kpi .kv { font: 700 20px/1.2 var(--f-num); color: var(--c-primary); margin: 3px 0 4px; }
 .kpi .kt { font-size: 10px; color: var(--c-text-sub); }
 .kpi .kt.up { color: var(--c-ok); }
 .kpi .kt.down { color: var(--c-danger); }
 
+/* 趋势/TOP 卡片 */
 .panel {
-  border: 1px solid var(--c-border); border-radius: var(--r-md);
-  padding: 10px; margin-bottom: 10px;
+  background: var(--c-panel); border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  padding: 11px; margin-bottom: 10px;
+  box-shadow: 0 2px 8px rgba(31, 45, 61, 0.05);
 }
-.ph { font-weight: 700; font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.ph {
+  font-weight: 700; font-size: 12px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.ph::before {
+  content: ''; width: 3px; height: 12px; flex: none;
+  border-radius: 2px; background: var(--c-primary);
+}
 .ph .sub { font: 10px var(--f-num); color: var(--c-text-sub); font-weight: 400; }
 
 .legend { display: flex; gap: 10px; margin-bottom: 6px; }
 .lg { font-size: 10px; color: var(--c-text-sub); display: inline-flex; align-items: center; gap: 4px; }
-.lg .dot { width: 8px; height: 8px; border-radius: 2px; }
+.lg .dot { width: 8px; height: 8px; border-radius: 3px; }
 .lg .dot.q { background: var(--c-primary); }
-.lg .dot.o { background: #8b5cf6; }
+.lg .dot.o { background: #5588f1; }
 
+/* 双柱：报价=品牌红渐变，OE=车车安乘配图标蓝 */
 .barchart { display: flex; align-items: flex-end; gap: 2px; height: 120px; padding-top: 4px; border-bottom: 1px solid var(--c-border); }
 .col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; }
 .bars { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 1px; }
-.bar { width: 38%; max-width: 12px; border-radius: 2px 2px 0 0; transition: height 0.25s ease; }
-.bar.q { background: var(--c-primary); }
-.bar.o { background: #8b5cf6; }
+.bar { width: 38%; max-width: 12px; border-radius: 3px 3px 0 0; transition: height 0.25s ease; }
+.bar.q { background: linear-gradient(180deg, #f2594e, var(--c-primary)); }
+.bar.o { background: linear-gradient(180deg, #7ba4f5, #5588f1); }
 .lb {
   flex: none; height: 16px;
   font: 9px/16px var(--f-num); color: var(--c-text-sub);
@@ -184,7 +210,7 @@ onMounted(() => {
 .rank-list li:last-child { border-bottom: none; }
 .rank-list .no {
   flex: none; width: 18px; height: 18px;
-  border-radius: var(--r-sm); background: var(--c-bg); color: var(--c-text-sub);
+  border-radius: 6px; background: var(--c-bg); color: var(--c-text-sub);
   font: 700 11px/18px var(--f-num); text-align: center;
 }
 .rank-list .no.top { background: var(--c-primary); color: #fff; }

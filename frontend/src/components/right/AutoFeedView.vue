@@ -86,18 +86,21 @@ onUnmounted(() => {
 <template>
   <div class="auto">
     <div class="strip">
-      <span class="lbl">AI 智能识别</span>
-      <label class="qq-switch" :title="aiOn ? '已开启：命中询价自动算价' : '已关闭：纯手动普通模式'">
-        <input v-model="aiOn" type="checkbox" @change="saveConfig({ ai_enabled: aiOn })">
-        <span class="track"></span>
-      </label>
-      <span class="sep"></span>
-      <span class="sw-label">自动报价模式</span>
-      <select v-model="mode" class="mode-sel" @change="saveConfig({ quote_mode: mode })">
-        <option value="preview">仅侧边预览</option>
-        <option value="auto">识别成功自动发送</option>
-      </select>
-      <span class="mode-chip" :class="modeCls">{{ modeTxt }}</span>
+      <div class="strip-row">
+        <span class="lbl">AI 智能识别</span>
+        <label class="qq-switch" :title="aiOn ? '已开启：命中询价自动算价' : '已关闭：纯手动普通模式'">
+          <input v-model="aiOn" type="checkbox" @change="saveConfig({ ai_enabled: aiOn })">
+          <span class="track"></span>
+        </label>
+        <span class="mode-chip" :class="modeCls">{{ modeTxt }}</span>
+      </div>
+      <div class="strip-row">
+        <span class="sw-label">自动报价模式</span>
+        <select v-model="mode" class="mode-sel" @change="saveConfig({ quote_mode: mode })">
+          <option value="preview">仅侧边预览</option>
+          <option value="auto">识别成功自动发送</option>
+        </select>
+      </div>
     </div>
 
     <div class="feed-head">
@@ -123,21 +126,23 @@ onUnmounted(() => {
 <style scoped>
 .auto { display: flex; flex-direction: column; min-height: 100%; }
 
+/* 配置横幅：红软底（参照车车安乘配「推广商城」横幅），两行布局适配窄面板 */
 .strip {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px;
+  padding: 9px 11px;
   background: var(--c-primary-soft);
-  border: 1px solid #c7d8ff;
-  border-radius: var(--r-md);
+  border: 1px solid #f9c7c5;
+  border-radius: var(--r-lg);
   margin-bottom: 10px;
+  display: flex; flex-direction: column; gap: 8px;
 }
-.lbl { font-size: 11px; color: var(--c-primary-deep); font-weight: 600; }
-.sep { width: 1px; height: 14px; background: #c7d8ff; }
-.sw-label { font-size: 11px; color: var(--c-text-sub); margin-left: 2px; }
+.strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lbl { font-size: 11px; color: var(--c-primary-deep); font-weight: 700; white-space: nowrap; }
+.sw-label { font-size: 11px; color: var(--c-text-sub); white-space: nowrap; }
 .mode-sel {
-  width: 128px; padding: 4px 6px; font-size: 11px;
-  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+  flex: 1; min-width: 0; padding: 4px 6px; font-size: 11px;
+  border: 1px solid #f9c7c5; border-radius: var(--r-md);
   background: var(--c-panel); color: var(--c-text); outline: none; font-family: inherit;
+  transition: border-color 0.15s;
 }
 .mode-sel:focus { border-color: var(--c-primary); }
 
@@ -146,8 +151,17 @@ onUnmounted(() => {
 .mode-chip.auto { background: var(--c-ok-soft); color: var(--c-ok); border: 1px solid rgba(24, 160, 88, 0.35); }
 .mode-chip.off { background: var(--c-bg); color: var(--c-text-sub); border: 1px solid var(--c-border); }
 
-.feed-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
-.feed-head .t { font-weight: 700; font-size: 12px; }
+.feed-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; }
+.feed-head .t {
+  font-weight: 700; font-size: 12px;
+  display: flex; align-items: center; gap: 6px;
+}
+/* 章节标题红色竖条（车车安乘配卡片标题语言） */
+.feed-head .t::before {
+  content: ''; width: 3px; height: 12px; flex: none;
+  border-radius: 2px;
+  background: var(--c-primary);
+}
 .live { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--c-ok); font-family: var(--f-num); }
 .live i { width: 6px; height: 6px; border-radius: 50%; background: var(--c-ok); animation: blink 1.2s infinite; }
 .live.paused { color: var(--c-text-sub); }
@@ -157,20 +171,24 @@ onUnmounted(() => {
   50% { opacity: 0.25; }
 }
 .pause {
-  margin-left: auto; font-size: 11px; padding: 3px 8px;
-  border: 1px solid var(--c-border-strong); border-radius: var(--r-sm);
+  margin-left: auto; font-size: 11px; padding: 3px 9px;
+  border: 1px solid var(--c-border-strong); border-radius: 999px;
   color: var(--c-text-sub); cursor: pointer; background: var(--c-panel);
   transition: all 0.15s;
 }
 .pause:hover { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-soft); }
 
+/* feed 卡片：白卡浮起，hover 轻抬 */
 .feed { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
 .feed > :deep(.card) {
   border: 1px solid var(--c-border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   background: var(--c-panel);
+  box-shadow: 0 2px 8px rgba(31, 45, 61, 0.05);
   overflow: hidden;
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
+.feed > :deep(.card:hover) { border-color: var(--c-border-strong); box-shadow: 0 4px 12px rgba(31, 45, 61, 0.08); }
 .feed > :deep(.card.dim) { opacity: 0.72; }
-.footnote { text-align: center; font-size: 10px; color: var(--c-border-strong); padding: 4px 0 2px; }
+.footnote { text-align: center; font-size: 10px; color: var(--c-text-sub); opacity: 0.7; padding: 4px 0 2px; }
 </style>

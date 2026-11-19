@@ -101,27 +101,40 @@ async function doQuery(text) {
 </template>
 
 <style scoped>
-.sub-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+/* 纵向满高布局：AI 对话子页需要贴到面板底部（原型 .ai-full 同款机制） */
+.manual { display: flex; flex-direction: column; min-height: 100%; }
+.manual > :deep(.ai-chat) { flex: 1 1 auto; }
+
+/* 子 tab：与壳菜单同款分段 pill 组 */
+.sub-tabs {
+  display: flex; gap: 3px;
+  padding: 3px;
+  background: var(--c-bg);
+  border-radius: 999px;
+  margin-bottom: 10px;
+}
 .sub-tabs .st {
   flex: 1; text-align: center;
-  font-size: 11px; padding: 6px 0;
-  border-radius: var(--r-md);
-  border: 1px solid var(--c-border);
-  background: var(--c-panel); color: var(--c-text-sub);
+  font-size: 11px; padding: 5px 4px 6px;
+  border-radius: 999px;
+  color: var(--c-text-sub);
   cursor: pointer; transition: all 0.15s; user-select: none;
+  white-space: nowrap;
 }
+.sub-tabs .st:hover { color: var(--c-primary); background: var(--c-panel); }
 .sub-tabs .st.on {
-  background: var(--c-primary-soft);
-  border-color: var(--c-primary); color: var(--c-primary); font-weight: 600;
+  background: linear-gradient(145deg, #f2594e, var(--c-primary));
+  color: #fff; font-weight: 600;
+  box-shadow: 0 2px 6px rgba(232, 32, 22, 0.28);
 }
 
 /* 查询卡后接结果区，间距由 .res 控制，不吃公共 .qq-box 的 margin-bottom */
 .qq-box { margin-bottom: 0; }
 .type-hint { font-size: 10px; color: var(--c-primary); white-space: nowrap; }
 
-.chips { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+.chips { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
 .chip {
-  font-size: 10px; padding: 3px 8px; border-radius: 999px;
+  font-size: 10px; padding: 3px 9px; border-radius: 999px;
   background: var(--c-panel); border: 1px solid var(--c-border-strong);
   color: var(--c-text-sub); cursor: pointer; transition: all 0.15s;
 }

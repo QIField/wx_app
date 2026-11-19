@@ -206,16 +206,26 @@ async function onSave() {
 <style scoped>
 .view { display: flex; flex-direction: column; }
 
-.set-sec { border: 1px solid var(--c-border); border-radius: var(--r-md); margin-bottom: 10px; overflow: hidden; }
+/* 分区：白卡浮起，标题带红色竖条（车车安乘配卡片标题语言） */
+.set-sec {
+  background: var(--c-panel);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  margin-bottom: 10px; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(31, 45, 61, 0.05);
+}
 .set-sec .sh {
-  padding: 8px 10px;
-  background: #f6f8fc;
+  padding: 9px 11px;
   border-bottom: 1px solid var(--c-border);
   font-weight: 700;
   font-size: 12px;
   display: flex; align-items: center; gap: 6px;
 }
-.set-sec .sb { padding: 10px; }
+.set-sec .sh::before {
+  content: ''; width: 3px; height: 12px; flex: none;
+  border-radius: 2px; background: var(--c-primary);
+}
+.set-sec .sb { padding: 11px; }
 .set-sec.disabled { opacity: 0.72; }
 
 .set-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
@@ -226,10 +236,11 @@ async function onSave() {
 .set-row .rt { font-size: 12px; }
 .set-row .rs { font-size: 10px; color: var(--c-text-sub); margin-top: 1px; }
 
+/* 模式选择：pill 组 */
 .radio-group { display: flex; gap: 6px; }
 .radio-pill {
-  font-size: 11px; padding: 4px 10px;
-  border-radius: var(--r-md);
+  font-size: 11px; padding: 4px 11px;
+  border-radius: 999px;
   border: 1px solid var(--c-border-strong);
   color: var(--c-text-sub); cursor: pointer; user-select: none;
   transition: all 0.15s;
@@ -239,10 +250,10 @@ async function onSave() {
 .blk-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
 .blk-tag {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; padding: 3px 8px;
+  font-size: 11px; padding: 3px 9px;
   background: var(--c-danger-soft);
   border: 1px solid rgba(229, 72, 77, 0.3);
-  border-radius: var(--r-sm); color: var(--c-danger); cursor: pointer;
+  border-radius: 999px; color: var(--c-danger); cursor: pointer;
 }
 .blk-tag i { font-style: normal; opacity: 0.6; font-family: var(--f-num); }
 .blk-tag:hover i { opacity: 1; }
@@ -253,16 +264,17 @@ async function onSave() {
   padding: 7px 10px; font-size: 12px;
   border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
   background: var(--c-panel); color: var(--c-text); outline: none; font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(29, 93, 228, 0.12); }
+.input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 3px rgba(232, 32, 22, 0.1); }
 .input.rate { width: 80px; padding: 4px 8px; font-size: 11px; font-family: var(--f-num); }
 .th-input { width: 74px; padding: 4px 6px; font-size: 11px; font-family: var(--f-num); }
 
 /* 表单行「添加」按钮：比公共 .qq-btn-sm 更高（配合表单输入框） */
-.add-btn { padding: 5px 10px; border-radius: var(--r-md); }
+.add-btn { padding: 5px 10px; }
 
 .map-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.map-table th { text-align: left; color: var(--c-text-sub); font-weight: 600; padding: 4px 6px; background: var(--c-bg); border-bottom: 1px solid var(--c-border); }
+.map-table th { text-align: left; color: var(--c-text-sub); font-weight: 600; padding: 4px 6px; background: var(--c-bg); border-radius: 4px; }
 .map-table td { padding: 5px 6px; border-bottom: 1px dashed var(--c-border); }
 
 .tpl-grid { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -271,6 +283,7 @@ async function onSave() {
   border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
   padding: 8px; cursor: pointer; background: var(--c-panel); transition: all 0.15s;
 }
+.tpl-card:hover { border-color: var(--c-primary); }
 .tpl-card.on { border-color: var(--c-primary); background: var(--c-primary-soft); }
 .tpl-card .tn { font-weight: 700; font-size: 12px; margin-bottom: 3px; }
 .tpl-card .tp {
@@ -285,10 +298,13 @@ async function onSave() {
 }
 
 .save-btn {
-  font-size: 13px; font-weight: 600; padding: 8px 0;
-  border: none; border-radius: var(--r-md);
+  font-size: 13px; font-weight: 600; padding: 9px 0;
+  border: 1px solid var(--c-primary-deep); border-radius: var(--r-md);
   background: var(--c-primary); color: #fff; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(232, 32, 22, 0.28);
+  transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
 }
-.save-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.save-btn:hover:not(:disabled) { background: var(--c-primary-deep); transform: translateY(-1px); }
+.save-btn:active:not(:disabled) { transform: translateY(0); }
 .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

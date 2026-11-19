@@ -113,37 +113,41 @@ async function copyText() {
       </div>
     </div>
 
-    <table v-if="child.length" class="qq-table">
-      <thead>
-        <tr><th>品牌</th><th>我方价</th><th>4S价</th><th>库存</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="(c, i) in child" :key="i" :class="{ me: i === 0 }">
-          <td>{{ c.brand_name }}<span v-if="i === 0" class="qq-badge b-green">推荐</span></td>
-          <td class="n">¥{{ c.cost_price }}</td>
-          <td class="n">¥{{ c.store_price }}</td>
-          <td class="n">
-            <span v-if="c.stock > 0">{{ c.stock }}</span>
-            <span v-else class="qq-badge b-red">缺货</span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-if="child.length" class="qq-scroll">
+      <table class="qq-table">
+        <thead>
+          <tr><th>品牌</th><th>我方价</th><th>4S价</th><th>库存</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(c, i) in child" :key="i" :class="{ me: i === 0 }">
+            <td>{{ c.brand_name }}<span v-if="i === 0" class="qq-badge b-green">推荐</span></td>
+            <td class="n">¥{{ c.cost_price }}</td>
+            <td class="n">¥{{ c.store_price }}</td>
+            <td class="n">
+              <span v-if="c.stock > 0">{{ c.stock }}</span>
+              <span v-else class="qq-badge b-red">缺货</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
-    <table v-if="images && images.length" class="qq-table">
-      <thead>
-        <tr><th>标号</th><th>周边配件（爆炸图）</th><th>OE</th><th>4S价</th><th>用量</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="(it, i) in images" :key="i">
-          <td class="n">{{ it.imageLabel }}</td>
-          <td>{{ it.oeName }}<small class="sub"> / {{ it.stdName }}</small></td>
-          <td class="n">{{ it.oeCode }}</td>
-          <td class="n">¥{{ it.price4s }}</td>
-          <td class="n">×{{ it.count }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-if="images && images.length" class="qq-scroll">
+      <table class="qq-table">
+        <thead>
+          <tr><th>标号</th><th>周边配件（爆炸图）</th><th>OE</th><th>4S价</th><th>用量</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(it, i) in images" :key="i">
+            <td class="n">{{ it.imageLabel }}</td>
+            <td>{{ it.oeName }}<small class="sub"> / {{ it.stdName }}</small></td>
+            <td class="n">{{ it.oeCode }}</td>
+            <td class="n">¥{{ it.price4s }}</td>
+            <td class="n">×{{ it.count }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div class="qacts">
       <button v-if="product" class="qq-btn-sm primary" :disabled="!canSend || sending" :title="chat.currentId ? '' : '请在工作台选中会话'" @click="onSend">
@@ -195,7 +199,7 @@ async function copyText() {
   font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: var(--r-sm);
   cursor: pointer; align-self: center;
 }
-.price-edit:hover { background: #d8e5ff; }
+.price-edit:hover { background: #fbd9d7; }
 .price-edit-row { display: flex; gap: 5px; margin-top: 6px; }
 /* 改价输入框：定宽紧凑款，覆盖公共 .qq-input 的自适应布局 */
 .price-edit-row .qq-input { flex: none; width: 84px; padding: 3px 6px; }

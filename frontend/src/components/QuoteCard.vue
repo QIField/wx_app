@@ -159,7 +159,6 @@ async function copyText() {
 
 <style scoped>
 .card {
-  border-bottom: 1px dashed var(--c-border-strong);
   position: relative;
   animation: card-in 0.3s both;
 }
@@ -169,17 +168,16 @@ async function copyText() {
 }
 .card::before {
   content: '';
-  position: absolute; left: -2px; top: 10px; bottom: 10px; width: 3px;
+  position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px;
   background: var(--c-primary);
   border-radius: 2px;
   opacity: 0;
   transition: opacity 0.15s;
 }
 .card:hover::before, .card.open::before { opacity: 1; }
-.card.open { background: #f8fafd; }
+.card.open, .head:hover { background: #fdf7f6; }
 
-.head { padding: 8px 10px; cursor: pointer; }
-.head:hover { background: #f8fafd; }
+.head { padding: 9px 11px; cursor: pointer; }
 
 .row-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .group {
@@ -187,16 +185,16 @@ async function copyText() {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .chip {
-  flex-shrink: 0; font-size: 10px; padding: 1px 6px; border-radius: 3px;
-  color: var(--c-text-sub); background: #f1f3f7;
+  flex-shrink: 0; font-size: 10px; padding: 2px 8px; border-radius: 999px;
+  color: var(--c-text-sub); background: var(--c-bg);
 }
 .chip.s1 { color: #b45309; background: #fef3c7; }   /* 待人工 */
 .chip.s3 { color: #15803d; background: #dcfce7; }   /* 已报价 */
-.chip.s4 { color: var(--c-text-sub); background: #eef0f4; } /* 已忽略 */
+.chip.s4 { color: var(--c-text-sub); background: var(--c-bg); } /* 已忽略 */
 
 .car {
-  margin: 5px 0;
-  padding: 5px 7px;
+  margin: 6px 0;
+  padding: 5px 8px;
   font-size: 12px; line-height: 1.5;
   color: var(--c-primary-deep);
   background: var(--c-primary-soft);
@@ -215,13 +213,13 @@ async function copyText() {
 .chev { color: var(--c-text-sub); transition: transform 0.15s; }
 .chev.up { transform: rotate(180deg); }
 
-.detail { padding: 2px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+.detail { padding: 2px 11px 11px; display: flex; flex-direction: column; gap: 8px; }
 .err {
   font-size: 11px; color: var(--c-danger);
   background: #fef2f2; border: 1px solid #fecaca;
   border-radius: var(--r-sm); padding: 5px 7px;
 }
-.block { border: 1px solid var(--c-border); border-radius: var(--r-sm); padding: 6px 8px; }
+.block { border: 1px solid var(--c-border); border-radius: var(--r-md); padding: 6px 8px; }
 .blk-title {
   font-size: 11px; font-weight: 600; color: var(--c-text-sub);
   margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;
@@ -270,18 +268,23 @@ async function copyText() {
 .price-input {
   flex: 1; min-width: 0; box-sizing: border-box;
   font-size: 12px; padding: 5px 8px;
-  border: 1px solid var(--c-border); border-radius: var(--r-sm);
-  outline: none;
+  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
 }
-.price-input:focus { border-color: var(--c-primary); }
+.price-input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 3px rgba(232, 32, 22, 0.1); }
 .btn {
   flex-shrink: 0; font-size: 12px; padding: 5px 12px;
-  border-radius: var(--r-sm); border: 1px solid var(--c-border);
+  border-radius: var(--r-md); border: 1px solid var(--c-border-strong);
   background: var(--c-panel); color: var(--c-text); cursor: pointer;
+  transition: all 0.15s;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn.send { background: var(--c-primary); border-color: var(--c-primary); color: #fff; font-weight: 600; }
-.btn.send:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.send {
+  background: var(--c-primary); border-color: var(--c-primary-deep);
+  color: #fff; font-weight: 600;
+  box-shadow: 0 1px 4px rgba(232, 32, 22, 0.25);
+}
+.btn.send:hover:not(:disabled) { background: var(--c-primary-deep); }
 .btn.ignore:hover:not(:disabled) { color: var(--c-danger); border-color: var(--c-danger); }
 .sent-note { margin-top: 6px; font-size: 11px; color: #15803d; }
 </style>

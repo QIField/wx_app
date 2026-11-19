@@ -76,21 +76,23 @@ onMounted(load)
         <div class="ph-box"><div class="pl">累计采购金额</div><div class="pv num">¥{{ summary.total }}</div></div>
       </div>
 
-      <table v-if="rows.length" class="qq-table">
-        <thead>
-          <tr><th>采购单号</th><th>配件</th><th>供应商</th><th>单价</th><th>数量</th><th>日期</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="(r, i) in rows" :key="i">
-            <td class="n">{{ fmt(r.code || r.purchase_no) }}</td>
-            <td>{{ fmt(r.part_name || r.name) }}</td>
-            <td>{{ fmt(r.supplier_name || r.supplier) }}</td>
-            <td class="n">¥{{ fmt(r.price) }}</td>
-            <td class="n">{{ fmt(r.quantity || r.num) }}</td>
-            <td class="n">{{ ts2date(r.ts || r.date) }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="rows.length" class="qq-scroll">
+        <table class="qq-table">
+          <thead>
+            <tr><th>采购单号</th><th>配件</th><th>供应商</th><th>单价</th><th>数量</th><th>日期</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(r, i) in rows" :key="i">
+              <td class="n">{{ fmt(r.code || r.purchase_no) }}</td>
+              <td>{{ fmt(r.part_name || r.name) }}</td>
+              <td>{{ fmt(r.supplier_name || r.supplier) }}</td>
+              <td class="n">¥{{ fmt(r.price) }}</td>
+              <td class="n">{{ fmt(r.quantity || r.num) }}</td>
+              <td class="n">{{ ts2date(r.ts || r.date) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-else class="qq-empty">该 OE 无采购记录</div>
 
       <div v-if="pages > 1" class="pager">
@@ -104,23 +106,27 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* 汇总卡：车车安乘配统计卡语言——白卡浮起 + 品牌红数值 */
 .ph-summary { display: flex; gap: 8px; margin-bottom: 8px; }
 .ph-box {
   flex: 1; text-align: center;
-  background: var(--c-primary-soft);
-  border: 1px solid #c7d8ff;
-  border-radius: var(--r-md); padding: 9px 6px;
+  background: var(--c-panel);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  padding: 10px 6px;
+  box-shadow: 0 2px 8px rgba(31, 45, 61, 0.05);
 }
-.ph-box .pl { font-size: 10px; color: var(--c-primary-deep); margin-bottom: 3px; }
+.ph-box .pl { font-size: 10px; color: var(--c-text-sub); margin-bottom: 4px; }
 .ph-box .pv { font: 700 18px/1 var(--f-num); color: var(--c-primary); }
 
 .pager { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; }
 .pg {
-  font-size: 11px; padding: 3px 9px;
-  border: 1px solid var(--c-border-strong); border-radius: var(--r-sm);
+  font-size: 11px; padding: 3px 10px;
+  border: 1px solid var(--c-border-strong); border-radius: 999px;
   background: var(--c-panel); color: var(--c-text-sub); cursor: pointer;
+  transition: all 0.15s;
 }
-.pg:hover:not(:disabled) { border-color: var(--c-primary); color: var(--c-primary); }
+.pg:hover:not(:disabled) { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-soft); }
 .pg:disabled { opacity: 0.4; cursor: not-allowed; }
 .pinfo { font: 12px var(--f-num); color: var(--c-text-sub); }
 </style>

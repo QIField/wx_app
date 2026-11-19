@@ -167,7 +167,7 @@ function onTextDbl(e) {
     <span v-if="selectable" class="pick" :class="{ on: picked }">
       <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3.4"><path d="M20 6 9 17l-5-5"/></svg>
     </span>
-    <img v-if="picOf(msg)" class="avatar img" :class="{ clk: msg.direction !== 2 }" :src="picOf(msg)" alt="" referrerpolicy="no-referrer" @click="onAvatarClick" />
+    <img v-if="picOf(msg) && !avatarFailed" class="avatar img" :class="{ clk: msg.direction !== 2 }" :src="picOf(msg)" alt="" referrerpolicy="no-referrer" @click="onAvatarClick" @error="onAvatarError" />
     <AnonAvatar v-else-if="isAnon(msg)" :alias="anonAlias(msg)" class="avatar" :class="{ clk: msg.direction !== 2 }" @click="onAvatarClick" />
     <span v-else class="avatar" :class="[msg.direction === 2 ? 'agent' : 'client', { clk: msg.direction !== 2 }]" @click="onAvatarClick">{{ avatarOf(msg) }}</span>
     <div class="body">
@@ -197,7 +197,7 @@ function onTextDbl(e) {
           <img
             class="media emoji fade"
             :class="{ ok: loaded }"
-            :src="mediaUrlOf(msg)"
+            :src="mediaSrc"
             alt="表情"
             referrerpolicy="no-referrer"
             decoding="async"
