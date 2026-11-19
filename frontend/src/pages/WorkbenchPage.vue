@@ -13,7 +13,7 @@ import DeviceCards from '../components/DeviceCards.vue'
 import InfoColumn from '../components/InfoColumn.vue'
 import UnreadBadge from '../components/UnreadBadge.vue'
 import RingtoneSettings from '../components/RingtoneSettings.vue'
-import HelpCenter from '../components/HelpCenter.vue'
+import HelpCenter from '../components/help/HelpCenter.vue'
 
 const props = defineProps({
   me: { type: Object, required: true },
