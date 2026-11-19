@@ -1,7 +1,7 @@
 <script setup>
 /** 中栏：聊天窗 + 输入框。消息行渲染见 MessageRow.vue（气泡/灰条/卡片），输入与发送见 ChatComposer.vue。
  * 侧栏/骨架屏/多选转发状态见 composables/（usePeerSidePanel/useChatSkeleton/useMultiForward）。 */
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { revokeMessage } from '../api'
@@ -55,6 +55,21 @@ function openPreview(url) {
 /* 自定义文本选中引擎：Esc/失焦清选等全局监听（骨架屏的尺寸测量见 useChatSkeleton） */
 onMounted(() => attachTextSelection())
 onUnmounted(() => detachTextSelection())
+
+/* ---------- 输入区高度变化 → 消息区联动滚动 ----------
+   监听 ChatComposer 整体容器（拖拽/表情面板/@浮层/输入法均触达），
+   若用户贴底则实时重新锚定，保持最后一条消息始终可见；
+   非贴底状态不打扰翻历史的视野。 */
+let composerRO = null
+onMounted(() => {
+  const el = composerRef.value?.$el
+  if (!el) return
+  composerRO = new ResizeObserver(() => {
+    if (nearBottom) stickBottom()
+  })
+  composerRO.observe(el)
+})
+onBeforeUnmount(() => composerRO?.disconnect())
 
 /* 骨架屏：进会话先给呼吸占位，行数按聊天区高度铺满 */
 const { skeletonRows } = useChatSkeleton(scroller)
