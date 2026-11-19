@@ -175,8 +175,15 @@ def _car_from_info(info, vin=""):
 
 
 def _split_lines(value):
-    """多件原文拆分：part_name/oem_no 一一对应换行分隔（实测行为）。"""
-    return [t.strip() for t in (value or "").split("\n") if t.strip()]
+    """多件原文拆分：part_name/oem_no 一一对应，按换行或逗号分隔（两种都支持）。
+
+    AI extract_parts 返回换行分隔，rule_extract 用逗号拼接——两种来源都要吃。
+    """
+    if not value:
+        return []
+    # 先换行，再逗号，去掉两端空白和空串
+    parts = re.split(r"[\n,，]", str(value))
+    return [p.strip() for p in parts if p.strip()]
 
 
 def _decode_oe(vin, part):
