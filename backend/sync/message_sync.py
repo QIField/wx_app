@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from backend.adapter import client as middle_client
 from backend.extensions import db
 from backend.models.conversation import Conversation
+from backend.models.device import Device
 from backend.models.message import Message
 from backend.models.sync_cursor import SyncCursor
 from backend.services import conversations as conversation_service
@@ -331,7 +332,8 @@ def _normalize(item, openid=""):
             ),
             "sender_wxid": sender_wxid,
             "sender_name": (
-                "系统" if sys_notice else (item.get("sender_name") or sender_wxid)
+                "系统" if sys_notice
+                else (item.get("sender_name") or _device_label(openid, direction, sender_wxid))
             ),
             "msg_type": msg_type,
             "content": content,
@@ -376,6 +378,17 @@ def _direction_and_sender(item, raw, openid=""):
             content = rest
     direction = Message.DIR_OUT if is_self else Message.DIR_IN
     return peer_wxid, content, sender_wxid, direction
+
+
+def _device_label(openid, direction, sender_wxid):
+    """落库署名兜底：自己发出的消息优先设备名称（记录层跨设备可区分），无名称退 wxid。"""
+    if direction == Message.DIR_OUT and openid:
+        dev = Device.query.filter(
+            Device.openid == openid, Device.deleted_at.is_(None),
+        ).first()
+        if dev and dev.name:
+            return dev.name
+    return sender_wxid
 
 
 def _device_wxid(openid):

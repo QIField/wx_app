@@ -187,13 +187,14 @@ def test_send_image_first_then_text(client, send_spy):
 
 
 def test_send_with_price_rebuilds_text(client, send_spy):
-    """改价发送：话术联动重建（¥88.00），price_json 记改后价，节省百分比重算。"""
+    """改价发送：price_json 记改后价、节省百分比重算；新模板无报价行，话术结构不变。"""
     conv = make_conv("dev01", "group1")
     row = make_priced(conv)
     resp = client.post(f"/api/quote/inquiries/{row.id}/send", json={"price": 88})
     assert resp.status_code == 200
     text = send_spy["text"][0]["content"]
-    assert "报价 ¥88.00" in text and "¥72.16" not in text
+    assert "报价 ¥" not in text  # 新模板价格走选购链接页
+    assert "@老王" in text and "★1、" in text and "选购链接：" in text and "①" in text  # V2 带品牌比价行
     assert row.price_json["pricing"]["final_price"] == "88.00"
     assert row.price_json["pricing"]["items"][0]["save_percent"] == 71  # 1-88/300
 

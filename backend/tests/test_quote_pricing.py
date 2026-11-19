@@ -200,11 +200,15 @@ def test_price_inquiry_full_chain_contract_a(app, mock_api):
     assert pricing["final_price"] == "72.16"  # 88.00 × 0.82
     item = pricing["items"][0]
     assert item["save_percent"] == 94  # 1 - 72.16/1270.00
-    assert "（OE 11538635689）" in pricing["text"]
-    assert "马勒(MAHLE) ¥88.00" in pricing["text"] and "原厂 ¥410.00" in pricing["text"]
-    assert "盖茨(GATES) ¥105.00(缺货)" in pricing["text"]
-    assert "报价 ¥72.16" in pricing["text"] and "4S对照价 ¥1270.00" in pricing["text"]
-    assert "【宝马 进口宝马 X3 20iX 2016款 2.0T】" in pricing["text"]
+    assert "★1、节温器总成 (11538635689)" in pricing["text"]  # V2 模板：★n、配件(OE)
+    assert "马勒(MAHLE) ¥1270" in pricing["text"]  # V2 加回品牌比价行
+    assert "原厂 ¥1270" in pricing["text"]
+    assert "4S对照价" not in pricing["text"]  # 旧模板字段已移除
+    assert "@老王" in pricing["text"]  # 统一 @ 发送者
+    assert VIN in pricing["text"]  # VIN 独立行
+    assert "宝马 进口宝马 X3 20iX 2016 2.0T 手自一体" in pricing["text"]  # 品牌+saleModelName
+    assert "——————————" in pricing["text"] and "选购链接：" in pricing["text"]
+    assert "https://jh.fsbbr.net/wx_quotation?id=" in pricing["text"]
 
 
 def test_product_name_falls_back_to_l_name_zh(app, mock_api, monkeypatch):

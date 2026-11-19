@@ -61,13 +61,19 @@ def notify_inquiry(rows, created=False):
     })
 
 
+def _name_of(s):
+    """AI 输出的发送者署名：空与「未知」都归 None，不落未知进卡片。"""
+    name = (s.get("sender_name") or "").strip()
+    return None if name in ("", "未知") else name
+
+
 def dispatch(conversation_id, scenarios, blacklist):
     """场景落表（同一 conversation 可多条），返回写入行 list。空场景不落。"""
     rows = []
     for s in scenarios:
         row = QuoteInquiry(
             conversation_id=conversation_id,
-            sender_name=(s.get("sender_name") or None),
+            sender_name=_name_of(s),
             vin=(s.get("vin") or None),
             part_name=(s.get("part_name") or None),
             oem_no=(s.get("oem_no") or None),

@@ -1,21 +1,23 @@
 """询价上下文组装：拉最近 N 条消息 → 拼服务方 chat_content 数组。
 
-组装规则（防切割，docs/auto-quote-plan.md 阶段 2）：
+组装规则（防切割，docs/auto-quote-plan.md 阶段 2；署名契约按 ai_api/extract_parts_demand 接口文档）：
 - 最近 10 条，客户消息与客服消息都带（服务方靠客服回复算 is_replied）
 - 文本：`YYYY-MM-DD HH:mm:ss【昵称】：内容` 整条进出，不按字数切
-- 图片/语音/文件/视频：无公网直链路由，V1 只带占位备注条目（媒体直链阶段 5 前补）
+- 客服（发出）消息统一署名【我回复】；客户消息用昵称，缺省退 wxid
+- 图片/语音/文件/视频：无公网直链路由，V1 不传媒体条目，只带
+  `【系统备注】：上一条是【发送者】发的图片` 样式的说明条目（媒体直链阶段 5 前补）
 - 引用消息取摘要前 80 字；业务端合并转发卡片跳过；发送失败的消息跳过
 """
 from backend.models.message import Message
 
 WINDOW_SIZE = 10
 
-_PLACEHOLDER = {
-    Message.MSG_IMAGE: "发送了一张图片",
-    Message.MSG_VOICE: "发送了一条语音",
-    Message.MSG_FILE: "发送了一个文件",
-    Message.MSG_VIDEO: "发送了一段视频",
-    Message.MSG_EMOJI: "发送了一个表情",
+_MEDIA_NOTE = {
+    Message.MSG_IMAGE: "发的图片",
+    Message.MSG_VOICE: "发的语音",
+    Message.MSG_FILE: "发的文件",
+    Message.MSG_VIDEO: "发的视频",
+    Message.MSG_EMOJI: "发的表情",
 }
 
 
@@ -38,15 +40,20 @@ def build_chat_content(messages):
     for m in messages:
         if m.direction == Message.DIR_OUT and m.status == Message.ST_FAILED:
             continue  # 没发出去的消息不进上下文，AI 看见会困惑
-        name = m.sender_name or m.sender_wxid or "未知"
+        name = "我回复" if m.direction == Message.DIR_OUT else (
+            m.sender_name or m.sender_wxid or "未知"
+        )
         when = m.create_time.strftime("%Y-%m-%d %H:%M:%S")
         if m.msg_type == Message.MSG_TEXT:
             out.append({"type": "input_text", "text": f"{when}【{name}】：{m.content or ''}"})
         elif m.msg_type == Message.MSG_QUOTE:
             text = (m.content or "")[:80]
             out.append({"type": "input_text", "text": f"{when}【{name}】(引用)：{text}"})
-        elif m.msg_type in _PLACEHOLDER:
-            out.append({"type": "input_text", "text": f"{when}【{name}】{_PLACEHOLDER[m.msg_type]}"})
+        elif m.msg_type in _MEDIA_NOTE:
+            out.append({
+                "type": "input_text",
+                "text": f"{when}【系统备注】：上一条是【{name}】{_MEDIA_NOTE[m.msg_type]}",
+            })
         # MSG_FORWARD（业务端卡片）与其余未知类型跳过
     return out
 

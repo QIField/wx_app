@@ -13,6 +13,7 @@ from flask import abort
 from backend.adapter import sender as middle_sender
 from backend.extensions import db
 from backend.models.conversation import Conversation
+from backend.models.device import Device
 from backend.models.message import Message
 from backend.models.send_task import SendTask
 from backend.services import conversations as conversation_service
@@ -20,6 +21,14 @@ from backend.services import conversations as conversation_service
 
 class SendDispatchError(Exception):
     """向中间方下发失败（网络错误或接口返回 code != 0）。"""
+
+
+def _device_label(openid):
+    """会话绑定设备的名称；设备未命名或不存在返回 None。"""
+    dev = Device.query.filter(
+        Device.openid == openid, Device.deleted_at.is_(None),
+    ).first()
+    return dev.name if dev and dev.name else None
 
 
 def _text_params(to_wxid, content, p):
@@ -112,12 +121,13 @@ def send_message(conversation_id, msg_type, content, payload, operator=None):
         conversation_id=conv.id,
         msg_type=msg_type,
         direction=Message.DIR_OUT,
+        sender_name=_device_label(conv.openid),  # 记录层设备区分（展示仍优先操作人快照）
         content=_display_content(msg_type, content, payload),
         # ats 是中间方协议字段，里面是 wxid 明文：只用于下发参数，不落库、不回前端
         payload={k: v for k, v in payload.items() if k != "ats"},
         status=Message.ST_SENDING,
         operator_id=operator.id if operator is not None else None,
-        operator_name=operator.name if operator is not None else None,
+        operator_name=operator.name if operator is not None else "自动报价",
         org_name=operator.org_name if operator is not None else None,
     )
     task = SendTask(uuid=str(uuid4()), action=action, status=SendTask.ST_PENDING)

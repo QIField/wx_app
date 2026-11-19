@@ -67,7 +67,7 @@ def price_inquiry(row):
 
     if interrupted:
         # 服务方异常：保持 pending 可重算，已拿到的部分照样带上
-        row.price_json = _assemble(ctx)
+        row.price_json = _assemble(ctx, row)
         return row
 
     has_demand = bool(_split_lines(row.part_name) or _split_lines(row.oem_no))
@@ -76,15 +76,15 @@ def price_inquiry(row):
             # 有件名但定不了 OE（缺 VIN 或译码无结果）→ 人工补
             ctx["error"] = "无法解析 OE（缺 VIN 或译码无结果），转人工"
             row.status = QuoteInquiry.ST_REVIEW
-        row.price_json = _assemble(ctx)  # 纯 VIN 也落车型卡（car 有值、无价格区）
+        row.price_json = _assemble(ctx, row)  # 纯 VIN 也落车型卡（car 有值、无价格区）
         return row
     if all(item["product"] is None for item in ctx["items"]):
         ctx["error"] = "产品库查无此件，转人工"
         row.status = QuoteInquiry.ST_REVIEW
-        row.price_json = _assemble(ctx)
+        row.price_json = _assemble(ctx, row)
         return row
 
-    row.price_json = _assemble(ctx)
+    row.price_json = _assemble(ctx, row)
     log.info("询价报价完成 inquiry=%s 件数=%d 首件价=%s", row.id, len(ctx["items"]),
              ctx["items"][0]["final_price"])
     return row
@@ -119,7 +119,7 @@ def rebuild_quote_text(row, price=None):
         pass
     pricing["items"] = [first] + items[1:]
     pricing["final_price"] = final
-    pricing["text"] = _quote_text(r.get("car"), pricing["items"])
+    pricing["text"] = _quote_text(row, r.get("car"), pricing["items"])
     row.price_json = {**r, "pricing": pricing}
     return pricing["text"]
 
@@ -314,7 +314,7 @@ def _norm_product(row):
 # ---------- 结果组装 ----------
 
 
-def _assemble(ctx):
+def _assemble(ctx, row):
     """计算上下文 → 契约 A r 结构 + pricing 块（price_json 落库形态）。"""
     items = ctx["items"]
     first = next((it for it in items if it["product"]), None)
@@ -327,39 +327,113 @@ def _assemble(ctx):
             "rate": ctx["rate"],
             "final_price": first["final_price"] if first else None,
             "items": items,
-            "text": _quote_text(ctx["car"], items),
+            "text": _quote_text(row, ctx["car"], items),
         },
         "error": ctx["error"],
     }
 
 
-def _quote_text(car, items):
-    """话术模板（对齐原型 quoteText）：车型行 + 逐件（名称 OE / 品牌行 / 报价 / 4S 对照）。
+_QUOTE_LINK_PREFIX = "https://jh.fsbbr.net/wx_quotation?id="
+_QUOTE_LINK_TOKEN = "J9MMjulKQKtVqTtt"  # 占位 token：真实报价单页接入前统一使用
 
-    系数后报价写「报价 ¥xx」行（原型改价联动同款）；查无产品的件不进话术，人工跟进。
+
+def _resolve_real_name(sender_name, conv):
+    """V2：优先用真实名称/备注，不直接用 wxid。
+
+    查找优先级：
+      1. sender_name 有值且不是 wxid → 直接用（AI 提取的昵称/姓名就是真实名）
+      2. 单聊 → Contact 表按 conv.wxid 查 name/备注
+      3. 群聊 sender_name 是 wxid → Contact 查
+      4. 兜底 conv.name → "客户"
+    """
+    from backend.models.contact import Contact
+
+    sn = (sender_name or "").strip()
+
+    # 1. AI 提取的 sender_name 本身就是昵称/姓名（不是 wxid_ 开头），直接用
+    if sn and not sn.startswith("wxid_"):
+        return sn
+
+    # 2. 单聊：用 conv.wxid 查对方真实名/备注
+    if conv and conv.chat_type == Conversation.CHAT_SINGLE and conv.wxid:
+        c = Contact.query.filter(Contact.wxid == conv.wxid, Contact.deleted_at.is_(None)).first()
+        if c and c.name:
+            return c.name.strip()
+
+    # 3. sender_name 是 wxid，Contact 查
+    if sn.startswith("wxid_"):
+        c = Contact.query.filter(Contact.wxid == sn, Contact.deleted_at.is_(None)).first()
+        if c and c.name:
+            return c.name.strip()
+
+    # 4. 兜底
+    if conv and conv.name:
+        return conv.name.strip()
+    return sn or "客户"
+
+
+def _fmt_price(p):
+    """格式化价格：空/0 → 不显示，非数字 → 原值，否则 ¥N。"""
+    if p is None or p == "":
+        return None
+    try:
+        v = float(p)
+    except (TypeError, ValueError):
+        return str(p) or None
+    if v <= 0:
+        return None
+    return f"¥{v:.0f}"
+
+
+def _quote_text(row, car, items):
+    """话术模板（2026-11-19 V2）：
+    @真实名称 + VIN + 车型 + 分隔线 + ★n 配件(OE) + 品牌比价行 + 选购链接。
+
+    - @ 优先查 Contact 表真实名称/备注，不用 wxid
+    - 品牌比价行取 child 里有价格的条目，最多显示 10 个
+    - 查无产品的件不进话术，人工跟进
     """
     blocks = []
-    if car and (car["brandName"] or car["model"]):
-        head = " ".join(t for t in (car["brandName"], car["model"]) if t)
-        if car["yearPattern"]:
-            head += f" {car['yearPattern']}款"
-        if car["displacement"]:
-            head += f" {car['displacement']}"
-        blocks.append(f"【{head}】")
-    for it in items:
-        p = it["product"]
-        if not p:
-            continue
-        name = p["product_name"] or it["part"]
-        blocks.append(f"{name}（OE {it['oe']}）")
-        brands = [
-            f"{c['brand_name']} ¥{c['cost_price']}{'' if c['stock'] > 0 else '(缺货)'}"
-            for c in p["child"] if c["brand_name"] and c["cost_price"]
-        ]
-        if brands:
-            blocks.append(" / ".join(brands))
-        if it["final_price"]:
-            blocks.append(f"报价 ¥{it['final_price']}")
-        if p["store_price"]:
-            blocks.append(f"4S对照价 ¥{p['store_price']}")
+    priced = [it for it in items if it["product"]]
+    has_car = bool(car and (car["brandName"] or car["model"]))
+    if not priced and not has_car:
+        return ""  # 无车型无产品：没有可发内容（转人工场景）
+    conv = db.session.get(Conversation, row.conversation_id)
+    who = _resolve_real_name(row.sender_name, conv)
+    blocks.append(f"@{who}")
+    if row.vin:
+        blocks.append(row.vin)
+    if has_car:
+        if car.get("saleModelName"):
+            head = " ".join(t for t in (car["brandName"], car["saleModelName"]) if t)
+        else:
+            head = " ".join(t for t in (car["brandName"], car["model"]) if t)
+            if car["yearPattern"]:
+                head += f" {car['yearPattern']}款"
+            if car["displacement"]:
+                head += f" {car['displacement']}"
+        blocks.append(head)
+    if priced:
+        blocks.append("—" * 10)
+        for n, it in enumerate(priced, 1):
+            p = it["product"]
+            name = p["product_name"] or it["part"]
+            oe = it.get("oe") or ""
+            blocks.append(f"★{n}、{name} ({oe})")
+            # 品牌比价行（最多 10 个，有价格才显示）
+            child = p.get("child") or []
+            shown = 0
+            circles = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
+            for c in child[:20]:
+                brand = (c.get("brand_name") or "").strip()
+                price = _fmt_price(c.get("store_price"))
+                if not brand or not price:
+                    continue
+                blocks.append(f"  {circles[shown]} {brand} {price}")
+                shown += 1
+                if shown >= 10:
+                    break
+        blocks.append("")
+        blocks.append("选购链接：")
+        blocks.append(_QUOTE_LINK_PREFIX + _QUOTE_LINK_TOKEN)
     return "\n".join(blocks)
