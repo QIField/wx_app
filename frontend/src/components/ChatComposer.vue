@@ -1,127 +1,41 @@
 <script setup>
-/** 输入区：工具栏 + 可拖高输入框 + 表情面板 + 发送（Enter 发送 / Shift+Enter 换行）。
+/** 输入区：工具栏 + 输入框 + 表情面板 + 发送（Enter 发送 / Shift+Enter 换行）。
  *  消息列表/滚动锚定等职责在 ChatPanel，本组件只管"输入与发送"。
  *  撤回消息"重新编辑"由父组件经 ref 调 fillAndFocus 回填聚焦。
  *  输入区用 contenteditable：选表情在光标处显示表情图（微信同款），
- *  发送前 serializeComposer 还原为 `[名称]` 码随 msg_type=1 文本上行。 */
+ *  发送前 serializeComposer 还原为 `[名称]` 码随 msg_type=1 文本上行。
+ *  @提及浮层（状态/定位/名册懒加载/键盘导航）抽在 composables/useMention。 */
 import { nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import EmojiPicker from './EmojiPicker.vue'
 import MentionPicker from './MentionPicker.vue'
+import { useMention } from '../composables/useMention'
 import {
   insertEmojiAtCursor, insertBreakAtCursor, insertPlainTextAtCursor,
   serializeComposer, setComposerFromText,
 } from '../utils/emoji'
-import {
-  caretAnchorX, collectMentionIds, extractMentionQuery, insertMentionAtCursor,
-  matchMembers, removeMentionAtCaret, textBeforeCaret,
-} from '../utils/mention'
+import { collectMentionIds, removeMentionAtCaret } from '../utils/mention'
 
 const chat = useChatStore()
 const composerEl = ref(null)
 const draftEmpty = ref(true)
 const pickerVisible = ref(false)
 
-/* @提及浮层状态：检索词/高亮项/位置都在这里，成员名册缓存放在 chat store。
-   只在群聊生效——单聊 @ 没有意义，还容易误发。 */
-const mentionOpen = ref(false)
-const mentionQuery = ref('')
-const mentionItems = ref([])
-const mentionTotal = ref(0)
-const mentionActive = ref(-1)
-const mentionLoading = ref(false)
-const mentionLeft = ref(4)
-const mentionWidth = ref(300)
-
-watch(() => chat.currentId, () => {
-  pickerVisible.value = false
-  closeMention()
-})
-
 function refreshDraft() {
   draftEmpty.value = serializeComposer(composerEl.value).length === 0
 }
 
-/* ---------------- @提及 ---------------- */
+/* @提及逻辑抽在 useMention，这里只接线（插入片段后回调刷新可发送态） */
+const {
+  mentionOpen, mentionQuery, mentionItems, mentionTotal, mentionActive, mentionLoading,
+  mentionLeft, mentionWidth,
+  closeMention, detectMention, moveMentionActive, setMentionActive, chooseMention,
+} = useMention(composerEl, { afterInsert: refreshDraft })
 
-function closeMention() {
-  mentionOpen.value = false
-  mentionQuery.value = ''
-  mentionItems.value = []
-  mentionActive.value = -1
-  mentionLoading.value = false
-}
-
-/** 浮层贴到 @ 所在位置：靠右时向左翻折，容器太窄时宽度自适应 */
-function placeMentionPop() {
-  const wrap = composerEl.value?.parentElement
-  if (!wrap) return
-  const wrapW = wrap.clientWidth
-  const w = Math.min(320, wrapW - 8)
-  mentionWidth.value = w
-  const x = caretAnchorX()
-  const raw = x == null ? 8 : x - wrap.getBoundingClientRect().left - 14
-  mentionLeft.value = Math.max(4, Math.min(raw, wrapW - w - 4))
-}
-
-/**
- * 每次输入后重算「光标前是否处于 @ 上下文」。
- * 名册懒加载：第一次 @ 才请求接口，之后全部本地过滤（打字不打请求）；
- * 加载期间用户又改了检索词，本轮结果作废，交给更新的那一轮。
- */
-async function detectMention() {
-  const conv = chat.currentConv
-  if (!conv || conv.chat_type !== 2) return closeMention()
-
-  const q = extractMentionQuery(textBeforeCaret(composerEl.value))
-  if (q == null) return closeMention()
-
-  mentionQuery.value = q
-  const convId = conv.id
-  // undefined=没请求过；[]=请求过但名册为空（不再重复请求）
-  if (!chat.membersByConv[convId]) {
-    mentionLoading.value = true
-    mentionOpen.value = true
-    mentionItems.value = []
-    mentionTotal.value = 0
-    placeMentionPop()
-    try {
-      await chat.loadMembers(convId)
-      mentionLoading.value = false
-    } catch (e) {
-      closeMention() // 内含 mentionLoading=false，避免浮层卡在"加载中"
-      ElMessage.error(e.message)
-      return
-    }
-    if (chat.currentId !== convId || mentionQuery.value !== q) return
-  }
-  mentionTotal.value = chat.currentMembers.length
-  mentionItems.value = matchMembers(chat.currentMembers, q)
-  mentionActive.value = mentionItems.value.length ? 0 : -1
-  mentionOpen.value = true
-  await nextTick()
-  placeMentionPop()
-}
-
-function moveMentionActive(delta) {
-  const n = mentionItems.value.length
-  if (!n) return
-  mentionActive.value = (mentionActive.value + delta + n) % n // 环绕，长列表也能从底部跳回顶部
-}
-
-function setMentionActive(i) {
-  if (mentionOpen.value && i >= 0 && i < mentionItems.value.length) mentionActive.value = i
-}
-
-/** 选中成员：把「@检索词」替换成原子片段，光标落到片段之后可继续输入 */
-function chooseMention(member) {
-  if (!member) return
-  insertMentionAtCursor(composerEl.value, member)
-  closeMention()
-  refreshDraft()
-  composerEl.value?.focus()
-}
+watch(() => chat.currentId, () => {
+  pickerVisible.value = false
+})
 
 /* 输入事件：先刷新可发送态，再判断 @ 上下文 */
 function onComposerInput() {
