@@ -101,8 +101,8 @@ async function doQuery(text) {
 </template>
 
 <style scoped>
-/* 纵向满高布局：AI 对话子页需要贴到面板底部（原型 .ai-full 同款机制） */
-.manual { display: flex; flex-direction: column; min-height: 100%; }
+/* 纵向满高布局：子页贴到面板底部，内部自管滚动 */
+.manual { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .manual > :deep(.ai-chat) { flex: 1 1 auto; }
 
 /* 子 tab：与壳菜单同款分段 pill 组 */

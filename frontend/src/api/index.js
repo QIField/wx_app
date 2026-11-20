@@ -246,9 +246,12 @@ export const qqZpy = (number) => http.post('/quote/query/zpy', { number }, { tim
 /** 机汽人平台竞价：{jy_data, xj_data}。 */
 export const qqJqr = (number) => http.post('/quote/query/jqr', { number }, { timeout: 60000 })
 
-/** 采购历史：{total:{purchase_quantity,totalprice}, list:{total,current_page,last_page,data}}。 */
-export const qqPurchaseHistory = (number, page = 1, limit = 10) =>
-  http.post('/quote/query/purchase-history', { number, page, limit }, { timeout: 60000 })
+/** 采购历史：后端默认 limit=9999 一次拉全；{total:{purchase_quantity,totalprice}, list:{total,current_page,last_page,data}}。 */
+export const qqPurchaseHistory = (number, page = 1, limit = null) => {
+  const body = { number, page }
+  if (limit !== null) body.limit = limit
+  return http.post('/quote/query/purchase-history', body, { timeout: 60000 })
+}
 
 /** 报价分析统计：period=day|month → {kpi, prev, trend, days, series, top}。 */
 export const fetchQuoteStats = (period) => http.get('/quote/stats', { params: { period } })
