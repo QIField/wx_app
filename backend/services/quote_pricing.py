@@ -344,36 +344,72 @@ _QUOTE_LINK_PREFIX = "https://jh.fsbbr.net/wx_quotation?id="
 _QUOTE_LINK_TOKEN = "J9MMjulKQKtVqTtt"  # 占位 token：真实报价单页接入前统一使用
 
 
+# 纯 ASCII 字母数字下划线 + @openim/大写字母的 pattern → 很可能是 wxid/账号，不是昵称
+# 真实昵称通常包含中文、emoji 或特殊符号（「是揚啊！」「广州名配🔜林远津」「佛山巴博瑞-烊」）
+_WXID_RE = re.compile(r'^[a-zA-Z0-9_\-]+(@openim)?$')
+
+
+def _looks_like_wxid(s: str) -> bool:
+    """判断一个字符串是否像 wxid/账号（而非真实昵称）。
+
+    wxid 有几种形态：
+      - wxid_xxx 开头的内部 ID
+      - 纯字母数字的账号（kangweiyang001, zhufengyou002, au358m）
+      - 数字串 + @openim（25984982326870927@openim）
+    真实昵称通常带中文或 emoji，不会全 ASCII。
+    """
+    if not s:
+        return False
+    return bool(_WXID_RE.match(s))
+
+
 def _resolve_real_name(sender_name, conv):
-    """V2：优先用真实名称/备注，不直接用 wxid。
+    """V3：优先用真实名称/备注，不直接用 wxid。
 
     查找优先级：
-      1. sender_name 有值且不是 wxid → 直接用（AI 提取的昵称/姓名就是真实名）
-      2. 单聊 → Contact 表按 conv.wxid 查 name/备注
-      3. 群聊 sender_name 是 wxid → Contact 查
-      4. 兜底 conv.name → "客户"
+      1. sender_name 有值且不像 wxid → 直接用（真实昵称/姓名）
+      2. 单聊 → Contact 表按 conv.wxid 查 name
+      3. 群聊 + sender_name 像 wxid → GroupMember 表按 (conv.wxid=群ID, sender_name=成员wxid) 查 nickname
+      4. sender_name 像 wxid → Contact 表按 sender_name 查 name
+      5. 兜底 conv.name → "客户"
     """
     from backend.models.contact import Contact
 
     sn = (sender_name or "").strip()
+    is_wxid = _looks_like_wxid(sn)
 
-    # 1. AI 提取的 sender_name 本身就是昵称/姓名（不是 wxid_ 开头），直接用
-    if sn and not sn.startswith("wxid_"):
+    # 1. sender_name 不像 wxid → 真实昵称/姓名，直接用
+    if sn and not is_wxid:
         return sn
 
-    # 2. 单聊：用 conv.wxid 查对方真实名/备注
+    # 2. 单聊：用 conv.wxid 查对方真实名
     if conv and conv.chat_type == Conversation.CHAT_SINGLE and conv.wxid:
-        c = Contact.query.filter(Contact.wxid == conv.wxid, Contact.deleted_at.is_(None)).first()
+        c = Contact.query.filter(
+            Contact.wxid == conv.wxid, Contact.deleted_at.is_(None),
+        ).first()
         if c and c.name:
             return c.name.strip()
 
-    # 3. sender_name 是 wxid，Contact 查
-    if sn.startswith("wxid_"):
-        c = Contact.query.filter(Contact.wxid == sn, Contact.deleted_at.is_(None)).first()
+    # 3. 群聊 + sender_name 像 wxid → GroupMember 查群内昵称
+    if conv and conv.chat_type == Conversation.CHAT_GROUP and conv.wxid and is_wxid:
+        from backend.models.group_member import GroupMember
+        g = GroupMember.query.filter(
+            GroupMember.chatroom_wxid == conv.wxid,
+            GroupMember.wxid == sn,
+            GroupMember.deleted_at.is_(None),
+        ).first()
+        if g and g.nickname:
+            return g.nickname.strip()
+
+    # 4. sender_name 像 wxid → Contact 查（可能是好友的 wxid）
+    if is_wxid:
+        c = Contact.query.filter(
+            Contact.wxid == sn, Contact.deleted_at.is_(None),
+        ).first()
         if c and c.name:
             return c.name.strip()
 
-    # 4. 兜底
+    # 5. 兜底
     if conv and conv.name:
         return conv.name.strip()
     return sn or "客户"
