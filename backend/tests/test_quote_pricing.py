@@ -215,8 +215,7 @@ def test_price_inquiry_full_chain_contract_a(app, mock_api):
     assert "@老王" in pricing["text"]  # 统一 @ 发送者
     assert VIN in pricing["text"]  # VIN 独立行
     assert "宝马 进口宝马 X3 20iX 2016 2.0T 手自一体" in pricing["text"]  # 品牌+saleModelName
-    assert "——————————" in pricing["text"] and "选购链接：" in pricing["text"]
-    assert "https://jh.fsbbr.net/wx_quotation?id=" in pricing["text"]
+    assert "——————————" in pricing["text"]
 
 
 def test_product_name_falls_back_to_l_name_zh(app, mock_api, monkeypatch):

@@ -342,10 +342,6 @@ def _assemble(ctx, row):
     }
 
 
-_QUOTE_LINK_PREFIX = "https://jh.fsbbr.net/wx_quotation?id="
-_QUOTE_LINK_TOKEN = "J9MMjulKQKtVqTtt"  # 占位 token：真实报价单页接入前统一使用
-
-
 # 纯 ASCII 字母数字下划线 + @openim/大写字母的 pattern → 很可能是 wxid/账号，不是昵称
 # 真实昵称通常包含中文、emoji 或特殊符号（「是揚啊！」「广州名配🔜林远津」「佛山巴博瑞-烊」）
 _WXID_RE = re.compile(r'^[a-zA-Z0-9_\-]+(@openim)?$')
@@ -432,7 +428,7 @@ def _fmt_price(p):
 
 def _quote_text(row, car, items):
     """话术模板（2026-11-19 V2）：
-    @真实名称 + VIN + 车型 + 分隔线 + ★n 配件(OE) + 品牌比价行 + 选购链接。
+    @真实名称 + VIN + 车型 + 分隔线 + ★n 配件(OE) + 品牌比价行。
 
     - @ 优先查 Contact 表真实名称/备注，不用 wxid
     - 品牌比价行取 child 里有价格的条目，最多显示 10 个
@@ -478,7 +474,4 @@ def _quote_text(row, car, items):
                 shown += 1
                 if shown >= 10:
                     break
-        blocks.append("")
-        blocks.append("选购链接：")
-        blocks.append(_QUOTE_LINK_PREFIX + _QUOTE_LINK_TOKEN)
     return "\n".join(blocks)

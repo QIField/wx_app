@@ -193,8 +193,8 @@ def test_send_with_price_rebuilds_text(client, send_spy):
     resp = client.post(f"/api/quote/inquiries/{row.id}/send", json={"price": 88})
     assert resp.status_code == 200
     text = send_spy["text"][0]["content"]
-    assert "报价 ¥" not in text  # 新模板价格走选购链接页
-    assert "@老王" in text and "★1、" in text and "选购链接：" in text and "①" in text  # V2 带品牌比价行
+    assert "报价 ¥" not in text  # V2 模板品牌比价行展示价格
+    assert "@老王" in text and "★1、" in text and "①" in text  # V2 带品牌比价行
     assert row.price_json["pricing"]["final_price"] == "88.00"
     assert row.price_json["pricing"]["items"][0]["save_percent"] == 71  # 1-88/300
 
