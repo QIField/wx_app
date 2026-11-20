@@ -17,6 +17,7 @@ import re
 
 from backend.models.message import Message
 from backend.services.local_ocr import recognize_vin, VIN_CHARS
+from backend.services.part_fallback import extract_part_names_fallback
 from backend.services.part_suffixes import match_part_names, has_any_part_name
 
 log = logging.getLogger(__name__)
@@ -50,40 +51,6 @@ _PREFIX_RE = re.compile(r'^[\s]*[★☆]?[\s]*\d{1,2}[\s]*[、\.．]\s*')
 
 # 括号里的号码
 _BRACKET_NO_RE = re.compile(r'[（(]([^)）]+)[)）]')
-
-# ---------- 启发式配件名 fallback（2026-11-20 层 2 增强） ----------
-# 问题：后缀表只有 ~67% 覆盖率，漏了"前减震""打气泵继电器"这类缩写。
-# 修复：后缀表没命中时，从原文每行剥掉噪音后，剩下的 2-6 字纯中文 → 当作配件名。
-
-# 剥 VIN（17 位）
-_FALLBACK_VIN_RE = re.compile(rf'[{VIN_CHARS}]{{17}}', re.IGNORECASE)
-# 剥带前缀的号码 + 纯 6 位以上数字
-_FALLBACK_OEM_RE = re.compile(r'\b[A-Z]{1,4}\d{5,}\b|\b\d{6,}\b', re.IGNORECASE)
-# 剥 @xxx（@人名）
-_FALLBACK_AT_RE = re.compile(r'@[\w\u4e00-\u9fa5\-]+')
-# 剥 http(s) 链接
-_FALLBACK_URL_RE = re.compile(r'https?://\S+')
-# 剥分隔线（——————、————）
-_FALLBACK_SEP_RE = re.compile(r'^[\s\-—_=·\.★☆]+$|^[\s]*——+[\s]*$')
-# 剥括号里的内容（号码、备注）
-_FALLBACK_BRACKET_RE = re.compile(r'[（(][^)）]*[)）]')
-
-# 明显不是配件名的中文停用词（剥完如果只剩这个就丢掉）
-_NOT_PART_CN_WORDS = frozenset({
-    '选购链接', '链接', '微信号', '微信', '报价', '询价', '多少钱',
-    '原厂', '品牌', '货号', '号码', '价格', '备注', '客户',
-    '宝马', '奔驰', '奥迪', '大众', '丰田', '保时捷', '路虎',
-    '沃尔沃', '本田', '日产', '福特', '别克', '雪佛兰', '凯迪拉克',
-    '雷克萨斯', '英菲尼迪', '讴歌', '马自达', '斯巴鲁', '三菱',
-    '现代', '起亚', '双龙', '特斯拉', '理想', '蔚来', '小鹏', '问界',
-    '年份', '排量', '手自一体', '自动', '手动', '轿车', 'SUV', '越野',
-    '车架号', 'VIN', '车型', '型号', '库存', '现货', '有货', '没货',
-    '缺货', '维修', '保养', '更换', '改装',
-    '原厂件', '副厂', '品牌件', '拆车件', '二手', '全新',
-})
-
-# 剥掉所有噪音后，剩下的是不是"像配件名的纯中文短词"
-_PART_CANDIDATE_CN_RE = re.compile(r'^[\u4e00-\u9fa5]{2,6}$')
 
 # ==================== 工具函数 ====================
 
@@ -242,53 +209,13 @@ def _extract_part_numbers(text: str) -> list[str]:
     return found
 
 
-def _strip_to_part_candidate(line: str) -> str:
-    """剥一行里所有噪音（VIN/OE/@人名/链接/括号/序号/分隔线/品牌车型/数字）。
-
-    剥完如果还剩东西，就是可能的配件名候选。
-    """
-    cur = line.strip()
-    # 1. 剥序号前缀：★2、 数字、
-    cur = _PREFIX_RE.sub('', cur)
-    # 2. 剥 @人名
-    cur = _FALLBACK_AT_RE.sub(' ', cur)
-    # 3. 剥链接
-    cur = _FALLBACK_URL_RE.sub(' ', cur)
-    # 4. 剥括号里的内容
-    cur = _FALLBACK_BRACKET_RE.sub(' ', cur)
-    # 5. 剥 VIN
-    cur = _FALLBACK_VIN_RE.sub(' ', cur)
-    # 6. 剥 OE 号码（前缀+数字、纯 6+ 位数字）
-    cur = _FALLBACK_OEM_RE.sub(' ', cur)
-    # 7. 剥所有数字（VIN/OE 已剥了，但零散数字也剥）
-    cur = re.sub(r'\d+', ' ', cur)
-    # 8. 剥品牌车型停用词（长词优先）
-    for w in sorted(_NOT_PART_CN_WORDS, key=len, reverse=True):
-        cur = re.sub(re.escape(w), ' ', cur)
-    # 9. 剥非中文字符（字母、特殊符号）
-    cur = re.sub(r'[^\u4e00-\u9fa5]', '', cur)
-    return cur.strip()
-
-
-def _looks_like_part_candidate(s: str) -> bool:
-    """剥完噪音后剩的是不是"像配件名"的纯中文短词。
-
-    通过条件：2-6 字纯中文（不含任何其他字符）且不在停用词里。
-    """
-    if not s or not _PART_CANDIDATE_CN_RE.match(s):
-        return False
-    if s in _NOT_PART_CN_WORDS:
-        return False
-    return True
-
-
 def _extract_part_names(text: str) -> list[str]:
-    """文本 → 配件名列表。
+    """文本 → 配件名列表（后缀表 + 启发式 fallback，去重保序）。
 
-    逐行两段式提取：
-      1. 每行先走后缀表严格匹配（match_part_names）— 命中就用
-      2. 该行后缀表没命中 → 启发式 fallback：剥噪音后抠 2-6 字纯中文
-         （捕获后缀表漏的缩写如"前减震""分配阀"）
+    流程：
+      1. 逐行走后缀表严格匹配（match_part_names）
+      2. 再调 part_fallback.extract_part_names_fallback() 抠后缀表漏的缩写
+      3. 合并去重（后缀表命中优先，fallback 补充）
     """
     names: list[str] = []
     seen: set[str] = set()
@@ -297,23 +224,16 @@ def _extract_part_names(text: str) -> list[str]:
         line_clean = _PREFIX_RE.sub('', line).strip()
         if not line_clean:
             continue
-
-        # Step 1: 后缀表严格匹配该行
-        hits = list(match_part_names(line_clean))
-        for name in hits:
+        for name in match_part_names(line_clean):
             if name not in seen:
                 seen.add(name)
                 names.append(name)
 
-        # Step 2: 该行后缀表没命中 → 启发式 fallback
-        if not hits:
-            if _FALLBACK_SEP_RE.match(line_clean):
-                continue  # 跳过纯分隔线
-            candidate = _strip_to_part_candidate(line_clean)
-            if _looks_like_part_candidate(candidate):
-                if candidate not in seen:
-                    seen.add(candidate)
-                    names.append(candidate)
+    # 启发式 fallback：后缀表漏的缩写（"前减震""分配阀"等）
+    for name in extract_part_names_fallback(text):
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
 
     return names
 
