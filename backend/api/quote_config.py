@@ -143,6 +143,10 @@ def put_quote_config():
         db.session.rollback()
         return jsonify(code=400, msg=err), 400
     db.session.commit()
+    # 价格系数变更 → 自动重算 pending/review 询价，让新系数立即生效
+    if any("价格系数" in d for d in diff):
+        from backend.services.quote_pricing import recompute_pending
+        recompute_pending()
     log_action(
         AuditModule.SYSTEM, "保存报价配置",
         f"账号 {g.current_user.name}",

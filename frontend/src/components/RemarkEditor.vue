@@ -23,8 +23,20 @@ const saving = ref(false)
 const err = ref('')
 const draftName = ref('')
 const draftQuote = ref(false)
+const draftLevel = ref('normal')
 const draftTags = ref([])
 const tagInput = ref('')
+
+/** 客户等级（与后端 ContactRemarkConfig.ALLOWED_LEVELS 同步） */
+const LEVEL_LABELS = [
+  { key: 'vip_a', label: 'VIP-A · 月结大客户' },
+  { key: 'vip_b', label: 'VIP-B · 月结' },
+  { key: 'normal', label: '普通客户' },
+]
+
+function levelLabelOf(key) {
+  return LEVEL_LABELS.find((l) => l.key === key)?.label || '普通客户'
+}
 
 async function load() {
   if (!props.targetKey) { cfg.value = null; return }
@@ -49,6 +61,7 @@ watch(() => props.targetKey, () => {
 function startEdit() {
   draftName.value = cfg.value?.remark_name || ''
   draftQuote.value = !!cfg.value?.auto_quote_enabled
+  draftLevel.value = cfg.value?.level || 'normal'
   draftTags.value = [...(cfg.value?.tags || [])]
   tagInput.value = ''
   err.value = ''
@@ -80,6 +93,7 @@ async function saveEdit() {
     cfg.value = await props.save(props.targetKey, {
       remark_name: draftName.value.trim(),
       auto_quote_enabled: draftQuote.value,
+      level: draftLevel.value,
       tags: [...draftTags.value],
     })
     editing.value = false
@@ -107,6 +121,10 @@ async function saveEdit() {
           <span class="quote-chip" :class="{ on: cfg.auto_quote_enabled }">{{ cfg.auto_quote_enabled ? '已开启' : '未开启' }}</span>
         </div>
         <div class="rk-row">
+          <span class="k">客户等级</span>
+          <span class="level-chip" :class="(cfg.level || 'normal')">{{ levelLabelOf(cfg.level) }}</span>
+        </div>
+        <div class="rk-row">
           <span class="k">标签</span>
           <span class="tag-list">
             <span v-for="t in cfg.tags" :key="t" class="chip">{{ t }}</span>
@@ -130,6 +148,17 @@ async function saveEdit() {
           <div class="rk-quote">
             <span class="q-label">自动报价</span>
             <el-switch v-model="draftQuote" />
+          </div>
+          <div class="rk-edit-row">
+            <span class="k">客户等级</span>
+            <el-select v-model="draftLevel" size="small" class="rk-level-select">
+              <el-option
+                v-for="l in LEVEL_LABELS"
+                :key="l.key"
+                :value="l.key"
+                :label="l.label"
+              />
+            </el-select>
           </div>
           <div class="rk-edit-row">
             <span class="tag-list">
@@ -208,6 +237,17 @@ async function saveEdit() {
 
 .rk-quote { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
 .q-label { font-size: 12.5px; }
+
+/* 客户等级查看态标签 */
+.level-chip {
+  font-size: 11px; line-height: 20px; padding: 0 8px; border-radius: 3px;
+  border: 1px solid var(--c-border); background: #f1f3f7; color: var(--c-text-sub);
+}
+.level-chip.vip_a { background: #fff3e6; color: #b35c00; border-color: #ffcf99; font-weight: 600; }
+.level-chip.vip_b { background: #fff7d6; color: #8a6d00; border-color: #ffe07a; font-weight: 600; }
+.level-chip.normal { background: #f1f3f7; color: var(--c-text-sub); border-color: var(--c-border); }
+
+.rk-level-select { min-width: 160px; }
 
 .rk-state { padding: 16px 0; color: var(--c-text-sub); font-size: 12px; }
 </style>

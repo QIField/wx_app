@@ -182,6 +182,10 @@ def _save_config(scope, wxid, body):
         cfg.level = level
     cfg.tags = tags
     db.session.commit()
+    # 客户等级变更 → 自动重算该用户/群相关的 pending/review 询价
+    if any("等级" in d for d in diff):
+        from backend.services.quote_pricing import recompute_pending
+        recompute_pending()
     log_action(
         AuditModule.CONTACT, "保存备注设置",
         f"{'用户' if scope == SCOPE_USER else '群'} {anonymize.alias_of(wxid)}",

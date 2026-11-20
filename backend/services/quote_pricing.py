@@ -34,22 +34,34 @@ _DISP_RE = re.compile(r"\d\.\d\s?[TtLl]")
 # ---------- 编排入口 ----------
 
 
-def price_inquiries(rows):
+def price_inquiries(rows, force=False):
     """批量报价（阶段 2 分流后调用）：逐条计算并回写，单条失败不影响其余。"""
     for row in rows:
         try:
-            price_inquiry(row)
+            price_inquiry(row, force=force)
         except Exception:  # noqa: BLE001 编排失败不拖垮分析流程
             log.exception("询价报价失败 inquiry=%s", row.id)
     db.session.commit()
 
 
-def price_inquiry(row):
+def recompute_pending():
+    """系数/等级变更后：重算所有 pending + review 询价。"""
+    rows = QuoteInquiry.query.filter(
+        QuoteInquiry.status.in_([QuoteInquiry.ST_PENDING, QuoteInquiry.ST_REVIEW]),
+    ).all()
+    if not rows:
+        return 0
+    price_inquiries(rows, force=True)
+    log.info("系数/等级变更后重算询价 %d 条", len(rows))
+    return len(rows)
+
+
+def price_inquiry(row, force=False):
     """单条询价计算报价并回写 price_json（调用方需持有 app_context）。
 
-    幂等：非 pending（已人工/已拦截/已发送）不重算。
+    幂等：非 pending（已人工/已拦截/已发送）不重算，除非 force=True（系数/等级变更后）。
     """
-    if row.status != QuoteInquiry.ST_PENDING:
+    if not force and row.status != QuoteInquiry.ST_PENDING:
         return row
     conv = Conversation.query.filter_by(id=row.conversation_id, deleted_at=None).first()
     if conv is None:
@@ -119,7 +131,7 @@ def rebuild_quote_text(row, price=None):
         pass
     pricing["items"] = [first] + items[1:]
     pricing["final_price"] = final
-    pricing["text"] = _quote_text(row, r.get("car"), pricing["items"])
+    pricing["text"] = _quote_text(row, r.get("car"), pricing["items"], pricing.get("level"), pricing.get("rate"))
     row.price_json = {**r, "pricing": pricing}
     return pricing["text"]
 
@@ -337,7 +349,7 @@ def _assemble(ctx, row):
             "rate": ctx["rate"],
             "final_price": first["final_price"] if first else None,
             "items": items,
-            "text": _quote_text(row, ctx["car"], items),
+            "text": _quote_text(row, ctx["car"], items, ctx["level"], ctx["rate"]),
         },
         "error": ctx["error"],
     }
@@ -427,19 +439,21 @@ def _fmt_price(p):
     return f"¥{v:.0f}"
 
 
-def _quote_text(row, car, items):
-    """话术模板（2026-11-19 V2）：
-    @真实名称 + VIN + 车型 + 分隔线 + ★n 配件(OE) + 品牌比价行。
+def _quote_text(row, car, items, level=None, rate=None):
+    """话术模板（2026-11-20 V4）：
+    @真实名称 + VIN + 车型 + 分隔线 + ★n 配件(OE) + 品牌报价行（已乘系数）。
 
     - @ 优先查 Contact 表真实名称/备注，不用 wxid
-    - 品牌比价行取 child 里有价格的条目，最多显示 10 个
-    - 查无产品的件不进话术，人工跟进
+    - 品牌报价行：child.cost_price × rate → 直接显示卖出价
+    - 不额外加汇总报价行，品牌行就是报价本身
+    - 不写"系数"二字，客户直接看到实付金额
     """
+    rate = rate or 1.0
     blocks = []
     priced = [it for it in items if it["product"]]
     has_car = bool(car and (car["brandName"] or car["model"]))
     if not priced and not has_car:
-        return ""  # 无车型无产品：没有可发内容（转人工场景）
+        return ""
     conv = db.session.get(Conversation, row.conversation_id)
     who = _resolve_real_name(row.sender_name, conv)
     blocks.append(f"@{who}")
@@ -462,14 +476,21 @@ def _quote_text(row, car, items):
             name = p["product_name"] or it["part"]
             oe = it.get("oe") or ""
             blocks.append(f"★{n}、{name} ({oe})")
-            # 品牌比价行（最多 10 个，有价格才显示）
+            # 品牌报价行（已乘系数，直接给客户看实付金额）
             child = p.get("child") or []
             shown = 0
             circles = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
             for c in child[:20]:
                 brand = (c.get("brand_name") or "").strip()
-                price = _fmt_price(c.get("cost_price"))
-                if not brand or not price:
+                raw_cost = c.get("cost_price")
+                if not brand or not raw_cost:
+                    continue
+                try:
+                    sell = float(raw_cost) * rate
+                except (TypeError, ValueError):
+                    continue
+                price = _fmt_price(f"{sell:.2f}")
+                if not price:
                     continue
                 blocks.append(f"  {circles[shown]} {brand} {price}")
                 shown += 1
