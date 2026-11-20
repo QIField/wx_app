@@ -46,6 +46,11 @@ _PART_SUFFIX = (
     '管', '线', '门', '窗', '镜', '灯', '杠', '机', '油', '水', '电',
     '风', '火', '碳', '滤', '活塞', '轴', '承', '簧', '杆', '销',
     '螺栓', '螺母', '卡箍', '卡扣', '支架', '座', '密封',
+    # 通用零件后缀（维修场景高频但上面没覆盖）
+    '螺丝', '螺钉', '垫片', '弹片', '密封圈', '油封', '衬套',
+    '减震器', '避震', '缓冲块', '防尘套', '平衡块', '拉绳', '拉线',
+    '软管', '硬管', '法兰', '节温器', '散热器', '冷凝器', '蒸发箱',
+    '传感器', '执行器', '电磁阀', '喷油嘴', '火花塞', '点火线圈',
 )
 _SUFFIX_ALT = "|".join(re.escape(s) for s in _PART_SUFFIX)
 PART_NAME_RE = re.compile(
@@ -362,16 +367,17 @@ def rule_extract(messages: list[Message], focus_msg_ids: set[int] | None = None)
             if not s.get("vin"):
                 s["vin"] = all_vins[0]  # 取第一个 VIN（通常就是客户的车）
 
-    # 保守过滤：只保留有"强标识"的场景。
-    # 纯 part_name 场景（无 VIN、无号码）交给 AI 处理——rule_extract 没法关联车型/品牌。
-    # 有 VIN 或 有 ≥6 位号码 → rule_extract 自信，留用。
-    def _has_strong_identifier(s: dict) -> bool:
+    # 保守过滤：rule_extract 只留"能算价"的场景。
+    # 能算价 = 有 VIN 或 有 ≥6 位号码（两个至少一个）。
+    # 纯配件名（无 VIN 无号码）→ 交给 AI（rule_extract 没法关联车型算价）。
+    # 注意：有 VIN 时不管有没有配件名都留（客户可能只发 VIN，dispatch 走 pending）。
+    def _has_pricing_hint(s: dict) -> bool:
         if s.get("vin"):
             return True
         raw_no = s.get("oem_no") or ""
         return bool(PART_NO_DIGITS_RE.search(raw_no) or PART_NO_PREFIX_RE.search(raw_no))
 
-    result = [s for s in merged if _has_strong_identifier(s)]
+    result = [s for s in merged if _has_pricing_hint(s)]
 
     if result:
         log.info("普通识别提取成功 scenes=%d", len(result))
