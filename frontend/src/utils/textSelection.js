@@ -194,9 +194,43 @@ export function onTextDblClick(e, msgId) {
   sel = { msgId, text: extractRangeText(range), range, containerEl }
 }
 
-/* ---------- 全局生命周期：Esc 清选 / 失焦清选 ---------- */
+/* ---------- 全局生命周期：Esc 清选 / 失焦清选 / Ctrl+C 复制选中片段 ---------- */
 function onKeydown(e) {
-  if (e.key === 'Escape') clearSelection()
+  if (e.key === 'Escape') { clearSelection(); return }
+  if (isCopyShortcut(e)) handleCopyShortcut(e)
+}
+
+function isCopyShortcut(e) {
+  return (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c'
+}
+
+function handleCopyShortcut(e) {
+  // 焦点在输入框/编辑器里时放行，让浏览器原生复制输入区内容
+  const t = e.target
+  if (t && t.matches?.('input, textarea, [contenteditable="true"]')) return
+  const s = getSelectionState()
+  if (!s) return // 无选中 → 不拦截（user-select:none 时浏览器也不会复制，等于空操作）
+  e.preventDefault()
+  writePlainText(s.text).then(() => clearSelection()).catch(() => { /* 静默，右键菜单会 toast */ })
+}
+
+/** 纯文本剪贴板写入：Clipboard API 优先，execCommand 兜底（同 clipboard.js 逻辑但零依赖） */
+async function writePlainText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    ok ? resolve() : reject(new Error('execCommand copy failed'))
+  })
 }
 
 export function attachTextSelection() {
