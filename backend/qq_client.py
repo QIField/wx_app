@@ -4,18 +4,16 @@
 - openid 服务方独立签发，与中间方设备 openid 不通用，配置 .env QQ_OPENID
 - 统一返回 {code,msg,data}：code=0 成功；401=openid 缺失/未注册/已关闭
 - 上游异常返回 500 Flask HTML（非 JSON）——统一兜底成 QuoteApiError，调用方只管捕获
-- 产品图搜索（独立域名 data.gzbbr.com）：POST OE → 返回图片列表，取 hash 拼 bbrdatatest.freyparts.cn 真实图片地址
+- 产品图：直接用 product_list 返回的 child[].pic 字段（服务方已从开思 CDN 取好），
+  再用 MD5 校验过滤占位图（服务方给的 pic URL 如果对应占位图"禁止拍照"图标也会返回）
 """
+import hashlib
 import json
 import logging
-import threading
 
 import requests
 
 from backend.config import (
-    PRODUCT_PIC_AJAX_URL,
-    PRODUCT_PIC_BASE_URL,
-    PRODUCT_PIC_CACHE_DIR,
     QQ_API_BASE_URL,
     QQ_OPENID,
     QQ_TIMEOUT_SECONDS,
@@ -104,8 +102,17 @@ def product_list(number):
 
 
 def purchase_history(number, page=1, limit=5):
-    """OE → 采购历史（三层嵌套：data.data.{total, list}）。"""
-    return call("purchaseHistory", {"number": number, "page": page, "limit": limit})
+    """OE → 采购历史。
+
+    上游 crm_api/purchaseHistory_list 实测是**三层信封**：
+      外层 {code,msg,data} → call() 拆到 data = {status,msg,data}
+      内层 data = {total, list} ← 这才是业务数据
+    call() 只拆第一层，这里再拆一层内层信封，返回前端期望的 {total, list} 结构。
+    """
+    inner = call("purchaseHistory", {"number": number, "page": page, "limit": limit})
+    if isinstance(inner, dict) and isinstance(inner.get("data"), dict):
+        return inner["data"]
+    return inner  # 兼容：万一上游以后改成两层信封
 
 
 def partno(vin, original_parts_nos):
@@ -148,110 +155,49 @@ def jqr(number):
     return call("jqr", {"number": number})
 
 
-# ---------- 产品图搜索（独立域名，2026-11-20 新增；带 hash 缓存） ----------
+# ---------- 产品图：从 product_list 的 child[].pic 里挑真实图 ----------
 
-_HASH_CACHE_FILE = PRODUCT_PIC_CACHE_DIR / "hash_cache.json"
-_HASH_CACHE_LOCK = threading.Lock()
-_HASH_CACHE = None  # 懒加载，进程内单例
+# 开思系统的占位图"禁止拍照"图标 MD5（2026-11-20 实测：无论 hash 是什么，
+# bbrdatatest.freyparts.cn 对未配置真实图的品牌统一返回这张 16KB JPEG 占位符）
+_PLACEHOLDER_MD5 = "63cfb1f468473fea31bc644ec9a48177"
 
-
-def _load_hash_cache():
-    """从 JSON 文件加载 OE→hash 映射到内存；文件不存在则返回空 dict。"""
-    global _HASH_CACHE
-    with _HASH_CACHE_LOCK:
-        if _HASH_CACHE is not None:
-            return _HASH_CACHE
-        try:
-            if _HASH_CACHE_FILE.exists():
-                with open(_HASH_CACHE_FILE, encoding="utf-8") as f:
-                    _HASH_CACHE = json.load(f)
-            else:
-                _HASH_CACHE = {}
-        except (OSError, ValueError) as exc:
-            log.warning("产品图 hash 缓存损坏，重置：%s", exc)
-            _HASH_CACHE = {}
-        return _HASH_CACHE
+# 所有图片下载共用的 HTTP 头（开思 CDN 对 User-Agent 敏感）
+_PIC_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 
-def _save_hash_cache():
-    """内存 hash 缓存 → JSON 文件（原子写：先写 .tmp 再 rename）。"""
-    global _HASH_CACHE
-    with _HASH_CACHE_LOCK:
-        if not _HASH_CACHE:
-            return
-        try:
-            PRODUCT_PIC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            tmp = _HASH_CACHE_FILE.with_suffix(".json.tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(_HASH_CACHE, f, ensure_ascii=False, indent=2)
-            tmp.replace(_HASH_CACHE_FILE)
-        except OSError as exc:
-            log.warning("产品图 hash 缓存写失败：%s", exc)
+def _is_real_pic(url):
+    """下载一张 pic URL 校验是否为真实产品图（非占位图、非 JSON 错误响应）。
 
-
-def _pic_url(hash_val):
-    """hash → 真实产品图 CDN 地址（bbrdatatest 测试域名，公开可访问）。"""
-    return f"{PRODUCT_PIC_BASE_URL}?id={hash_val}"
-
-
-def search_product_pic(oe_number):
-    """OE 号 → 真实产品图公网 URL（供中间方 post_image 下载发送）。
-
-    链路（带 hash 缓存）：
-    1. 内存命中 → 直接拼 URL 返回（毫秒级）
-    2. 未命中 → POST 开思搜图 → 选主图 hash → 存缓存 → 拼 URL 返回
-
-    失败（搜不到 / 接口异常）返回空串，调用方降级为不发产品图，不影响文字报价。
+    返回 True = 可以用；False = 跳过（占位图 / 下载失败 / JSON 错误）。
     """
-    if not oe_number:
-        return ""
-
-    # ① 查 hash 缓存
-    cache = _load_hash_cache()
-    hash_val = cache.get(oe_number)
-    if hash_val:
-        return _pic_url(hash_val)
-
-    # ② 缓存未命中 → 调开思搜索（需带 X-Requested-With，否则返回 status=411）
+    if not url:
+        return False
     try:
-        resp = requests.post(
-            PRODUCT_PIC_AJAX_URL,
-            data={"number": oe_number},
-            headers={
-                "X-Requested-With": "XMLHttpRequest",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Referer": PRODUCT_PIC_AJAX_URL.split("?")[0].rstrip("/"),
-            },
-            timeout=8,
-        )
-        if resp.status_code != 200:
-            log.warning("产品图搜索 HTTP %s：%s", resp.status_code, oe_number)
-            return ""
-        try:
-            body = resp.json()
-        except ValueError:
-            return ""
-        if body.get("status") != 200:
-            log.warning("产品图搜索 status=%s：%s", body.get("status"), oe_number)
-            return ""
-        data = body.get("data") or []
-        if not data:
-            return ""
-        # 开思无显式主图标记，view_num>0 的就是运营设的首图
-        def _view(p):
-            try:
-                return int(p.get("view_num") or 0)
-            except (TypeError, ValueError):
-                return 0
-        best = max(data, key=_view)
-        hash_val = best.get("hash") or ""
-        if not hash_val:
-            return ""
+        resp = requests.get(url, headers=_PIC_UA, timeout=8)
+        content = resp.content
+        if not content or content[:1] == ord('{'):
+            return False  # JSON 错误响应（比如 status=411）
+        # 占位图 MD5 对比（开思所有未配置真实图的品牌返回同一张禁止拍照图标）
+        md5 = hashlib.md5(content).hexdigest()
+        return md5 != _PLACEHOLDER_MD5
+    except requests.RequestException:
+        return False
 
-        # ③ 存缓存 + 返回
-        cache[oe_number] = hash_val
-        _save_hash_cache()
-        return _pic_url(hash_val)
-    except requests.RequestException as exc:
-        log.warning("产品图搜索失败：%s oe=%s", exc, oe_number)
+
+def pick_product_pic(brand_rows):
+    """从 product_list 的 child 品牌行里挑一张真实可用的产品图。
+
+    遍历所有品牌行的 pic 字段，逐个下载校验 MD5 过滤占位图，
+    取第一张真实产品图。全部是占位图 / 无 pic / 下载失败 → 返回空串。
+
+    调用时机：_norm_product 里组装 product 结构时。
+    """
+    if not brand_rows:
         return ""
+    for row in brand_rows:
+        if not isinstance(row, dict):
+            continue
+        pic = row.get("pic", "")
+        if _is_real_pic(pic):
+            return pic
+    return ""

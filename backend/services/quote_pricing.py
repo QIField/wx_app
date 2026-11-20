@@ -278,8 +278,9 @@ def _norm_product(row):
     """产品组行 → 契约 A product 稳定结构（真实字段名归一，前端只认契约键）。
 
     契约 A product 取首个品牌行为主行（原型「首行高亮推荐」同款），
-    其余品牌行归一进 child 表（前端比价区）；图不再用 bigpic（那是页面 URL 不是图片），
-    改为用 OE 号调 search_product_pic 拿真实 CDN 地址。失败降级为空串不发图。
+    其余品牌行归一进 child 表（前端比价区）；图从 product_list 返回的
+    child[].pic 字段挑（服务方已处理好的 CDN URL），下载校验 MD5 过滤占位图。
+    全部是占位图 → 降级为空串不发图。
     """
     if row is None:
         return None
@@ -291,8 +292,8 @@ def _norm_product(row):
         str(i.get("key") or "").lower(): (i.get("number") or "")
         for i in (main.get("display_number") or []) if isinstance(i, dict)
     }
-    # 用 OE 号搜真实产品图（bigpic 是页面 URL，中间方下载到的是 HTML 所以发送失败）
-    image = qq_client.search_product_pic(nums.get("oe") or "")
+    # 从品牌行里挑第一张真实产品图（MD5 校验过滤占位图）
+    image = qq_client.pick_product_pic(brand_rows)
     child = []
     for c in brand_rows[:10]:
         try:

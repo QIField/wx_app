@@ -66,8 +66,8 @@ def patch_chain(monkeypatch):
             }]},
         ]},
     })
-    # 产品图搜索：返回固定的真实图片 URL（bigpic 是页面 URL，不再直接用）
-    monkeypatch.setattr(qq_client, "search_product_pic", lambda oe: IMAGE)
+    # 产品图：mock pick_product_pic 返回固定真实图 URL（不再绕开服务方调开思）
+    monkeypatch.setattr(qq_client, "pick_product_pic", lambda rows: IMAGE)
     monkeypatch.setattr(auto_quote, "_timer_factory", FakeTimer)
     monkeypatch.setattr(quote_sender, "SEND_ENABLED", True)  # 不依赖本地 .env
     calls = {"image": [], "text": []}

@@ -35,23 +35,8 @@ QQ_API_BASE_URL = os.getenv("QQ_API_BASE_URL", "http://wx_api.fsbbr.net/wechat_x
 QQ_OPENID = os.getenv("QQ_OPENID", "")
 QQ_TIMEOUT_SECONDS = int(os.getenv("QQ_TIMEOUT_SECONDS", "90"))
 
-# 产品图搜索（2026-11-20 修复：product_list 的 bigpic 字段是页面 URL 而非真实图片，
-# 需先调开思图片搜索引擎拿到 hash，再拼真实图片 CDN 地址）
-# - 搜索接口：POST 产品 OE → 返回 [{pic_id, hash, file_path, ...}, ...]
-# - 真实图片：hash → https://bbrdatatest.freyparts.cn/api/pic/show/?id=<hash>
-PRODUCT_PIC_AJAX_URL = os.getenv(
-    "PRODUCT_PIC_AJAX_URL",
-    "https://data.gzbbr.com/admin/Tools.Pic/index?_ajax=1",
-)
-PRODUCT_PIC_BASE_URL = os.getenv(
-    "PRODUCT_PIC_BASE_URL",
-    "https://bbrdatatest.freyparts.cn/api/pic/show/",
-)
 # 媒体缓存目录：中间方下载接口拉回的图片/文件/视频/语音/表情落盘缓存
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR") or (BASE_DIR / "backend" / "media"))
-
-# 产品图 hash 缓存目录：OE号 → 开思 hash 映射，避免每次报价都调搜索接口
-PRODUCT_PIC_CACHE_DIR = MEDIA_DIR / "products"
 
 # 登录令牌：签名密钥与有效期（小时）；SECRET_KEY 不配则开发期用固定值，生产必须在 .env 配置
 SECRET_KEY = os.getenv("SECRET_KEY", "wxcs-dev-secret-key-change-me")
