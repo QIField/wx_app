@@ -101,13 +101,16 @@ def product_list(number):
     return call("productList", {"number": number})
 
 
-def purchase_history(number, page=1, limit=5):
+def purchase_history(number, page=1, limit=9999):
     """OE → 采购历史。
 
     上游 crm_api/purchaseHistory_list 实测是**三层信封**：
       外层 {code,msg,data} → call() 拆到 data = {status,msg,data}
       内层 data = {total, list} ← 这才是业务数据
     call() 只拆第一层，这里再拆一层内层信封，返回前端期望的 {total, list} 结构。
+
+    默认 limit=9999：上游实测 limit≥50 就一次返回全部记录（当前最大 37 条），
+    一次拉全避免前端翻页请求；page 参数保留给少数超大 OE 的场景。
     """
     inner = call("purchaseHistory", {"number": number, "page": page, "limit": limit})
     if isinstance(inner, dict) and isinstance(inner.get("data"), dict):

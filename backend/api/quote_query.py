@@ -201,10 +201,17 @@ def purchase_history():
     number = _require(body, "number")
     try:
         page = int(body.get("page") or 1)
-        limit = max(1, min(int(body.get("limit") or 10), 50))
+        # limit 前端不传 → 用 qq_client 的默认 9999（一次拉全）；传了就尊重
+        raw_limit = body.get("limit")
+        limit = int(raw_limit) if raw_limit is not None else None
+        if limit is not None and limit < 1:
+            raise _MissingParam("limit 必须 ≥ 1")
     except (TypeError, ValueError):
         raise _MissingParam("page/limit 必须是整数") from None
+    kwargs = {"page": page}
+    if limit is not None:
+        kwargs["limit"] = limit
     return jsonify(
         code=0, msg="success",
-        data=qq_client.purchase_history(number, page=page, limit=limit),
+        data=qq_client.purchase_history(number, **kwargs),
     )
