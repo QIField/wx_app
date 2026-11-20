@@ -278,8 +278,8 @@ def _norm_product(row):
     """产品组行 → 契约 A product 稳定结构（真实字段名归一，前端只认契约键）。
 
     契约 A product 取首个品牌行为主行（原型「首行高亮推荐」同款），
-    其余品牌行归一进 child 表（前端比价区）；图用 bigpic（实测真实图片 URL，
-    服务方图片域 data.gzbbr.com——前置确认①产品图来源即此字段）。
+    其余品牌行归一进 child 表（前端比价区）；图不再用 bigpic（那是页面 URL 不是图片），
+    改为用 OE 号调 search_product_pic 拿真实 CDN 地址。失败降级为空串不发图。
     """
     if row is None:
         return None
@@ -291,6 +291,8 @@ def _norm_product(row):
         str(i.get("key") or "").lower(): (i.get("number") or "")
         for i in (main.get("display_number") or []) if isinstance(i, dict)
     }
+    # 用 OE 号搜真实产品图（bigpic 是页面 URL，中间方下载到的是 HTML 所以发送失败）
+    image = qq_client.search_product_pic(nums.get("oe") or "")
     child = []
     for c in brand_rows[:10]:
         try:
@@ -312,7 +314,7 @@ def _norm_product(row):
         "brand_name": main.get("brand_name") or "",
         "cost_price": str(main.get("cost_price") or ""),
         "store_price": str(main.get("store_price") or ""),
-        "image": main.get("bigpic") or main.get("first_image_url") or main.get("pic") or "",
+        "image": image,
         "sell_point": main.get("l_model_zh") or "",
         "child": child,
     }
@@ -469,7 +471,7 @@ def _quote_text(row, car, items):
             circles = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
             for c in child[:20]:
                 brand = (c.get("brand_name") or "").strip()
-                price = _fmt_price(c.get("store_price"))
+                price = _fmt_price(c.get("cost_price"))
                 if not brand or not price:
                     continue
                 blocks.append(f"  {circles[shown]} {brand} {price}")

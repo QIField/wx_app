@@ -42,6 +42,8 @@ PRODUCT_BRAND_MAIN = {
     ],
     "stock": "46",
 }
+# 产品图搜索的 mock 返回值（不再用 bigpic 页面 URL，改用真实图片 CDN 地址）
+MOCK_PRODUCT_PIC_URL = "https://bbrdatatest.freyparts.cn/api/pic/show/?id=mockhash123"
 PRODUCT_GROUP = {
     "no": 1,
     "child": [
@@ -81,7 +83,7 @@ def make_inquiry(conv, vin=None, part_name=None, oem_no=None, status=QuoteInquir
 @pytest.fixture()
 def mock_api(monkeypatch):
     """按实测结构 mock 三个接口，并记录调用参数。"""
-    calls = {"vininfo": [], "partno": [], "product_list": []}
+    calls = {"vininfo": [], "partno": [], "product_list": [], "search_pic": []}
     monkeypatch.setattr(qq_client, "vininfo", lambda vin: calls["vininfo"].append(vin) or VININFO)
     monkeypatch.setattr(
         qq_client, "partno",
@@ -90,6 +92,11 @@ def mock_api(monkeypatch):
     monkeypatch.setattr(
         qq_client, "product_list",
         lambda number: calls["product_list"].append(number) or PRODUCT_LIST,
+    )
+    # 产品图搜索 mock：返回固定的真实图片 URL，同时记录 OE 参数
+    monkeypatch.setattr(
+        qq_client, "search_product_pic",
+        lambda oe: calls["search_pic"].append(oe) or MOCK_PRODUCT_PIC_URL,
     )
     return calls
 
@@ -192,7 +199,8 @@ def test_price_inquiry_full_chain_contract_a(app, mock_api):
     assert r["product"]["display_number"] == {"key": "OE", "value": "11538635689"}
     assert r["product"]["product_name"] == "节温器总成"
     assert r["product"]["store_number"] == "A11538635689"
-    assert r["product"]["image"] == PRODUCT_BRAND_MAIN["bigpic"]
+    assert r["product"]["image"] == MOCK_PRODUCT_PIC_URL  # 真实图片 CDN，不再是 bigpic 页面 URL
+    assert mock_api["search_pic"] == ["11538635689"]  # 产品图搜索走 OE 号
     assert [c["brand_name"] for c in r["product"]["child"]][0] == "马勒(MAHLE)"
     assert r["partImagesList"] is None and r["error"] is None
     pricing = r["pricing"]
@@ -201,9 +209,9 @@ def test_price_inquiry_full_chain_contract_a(app, mock_api):
     item = pricing["items"][0]
     assert item["save_percent"] == 94  # 1 - 72.16/1270.00
     assert "★1、节温器总成 (11538635689)" in pricing["text"]  # V2 模板：★n、配件(OE)
-    assert "马勒(MAHLE) ¥1270" in pricing["text"]  # V2 加回品牌比价行
-    assert "原厂 ¥1270" in pricing["text"]
-    assert "4S对照价" not in pricing["text"]  # 旧模板字段已移除
+    assert "马勒(MAHLE) ¥88" in pricing["text"]  # V3 品牌比价行改我方价（cost_price）
+    assert "原厂 ¥410" in pricing["text"]
+    assert "4S" not in pricing["text"]  # 话术不再出现 4S 价
     assert "@老王" in pricing["text"]  # 统一 @ 发送者
     assert VIN in pricing["text"]  # VIN 独立行
     assert "宝马 进口宝马 X3 20iX 2016 2.0T 手自一体" in pricing["text"]  # 品牌+saleModelName

@@ -39,7 +39,6 @@ export function quoteText(r) {
       .map((c) => `${c.brand_name} ¥${c.cost_price}${c.stock > 0 ? '' : '(缺货)'}`)
     if (brands.length) lines.push(brands.join(' / '))
     if (r._edited && quotePrice(r)) lines.push(`报价 ¥${quotePrice(r)}`)
-    if (p.store_price) lines.push(`4S对照价 ¥${p.store_price}`)
   }
   return lines.filter(Boolean).join('\n') || '（无匹配产品）'
 }

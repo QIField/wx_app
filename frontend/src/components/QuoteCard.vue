@@ -125,7 +125,6 @@ async function copyText() {
           <div class="prod-info">
             <b class="prod-name">{{ product.product_name || '—' }}</b>
             <span class="prod-sub">{{ product.brand_name }} · 库号 {{ product.store_number || '—' }}</span>
-            <span class="prod-sub">4S对照 ¥{{ product.store_price || '—' }}</span>
           </div>
         </div>
         <div v-if="product.child?.length" class="brands">

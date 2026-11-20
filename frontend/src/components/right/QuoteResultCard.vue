@@ -8,7 +8,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../../stores/chat'
-import { quotePrice, quoteText, savePercent } from '../../utils/quoteQuery'
+import { quotePrice, quoteText } from '../../utils/quoteQuery'
 
 const props = defineProps({ r: { type: Object, required: true } })
 const chat = useChatStore()
@@ -24,7 +24,6 @@ const chain = computed(() => props.r.chain || [])
 const images = computed(() => props.r.partImagesList || null)
 const child = computed(() => (product.value && product.value.child) || [])
 const canSend = computed(() => !!chat.currentId && !!product.value && !sentOk.value)
-const percent = computed(() => savePercent(props.r))
 
 const carLine = computed(() => {
   const c = car.value
@@ -101,8 +100,7 @@ async function copyText() {
           <span class="mine num">¥{{ quotePrice(r) }}<small> 起我方价</small></span>
           <button v-if="!sentOk" class="price-edit" title="发送前改价" @click="startEdit">✎</button>
           <span v-if="edited" class="qq-badge b-orange">已改价</span>
-          <span v-if="product.store_price" class="s4 num">4S ¥{{ product.store_price }}</span>
-          <span v-if="percent != null" class="save">省 {{ percent }}%</span>
+
         </div>
         <div v-if="product.sell_point" class="sell">卖点：{{ product.sell_point }}</div>
         <div v-if="editing" class="price-edit-row">
@@ -116,13 +114,12 @@ async function copyText() {
     <div v-if="child.length" class="qq-scroll">
       <table class="qq-table">
         <thead>
-          <tr><th>品牌</th><th>我方价</th><th>4S价</th><th>库存</th></tr>
+          <tr><th>品牌</th><th>我方价</th><th>库存</th></tr>
         </thead>
         <tbody>
           <tr v-for="(c, i) in child" :key="i" :class="{ me: i === 0 }">
             <td>{{ c.brand_name }}<span v-if="i === 0" class="qq-badge b-green">推荐</span></td>
             <td class="n">¥{{ c.cost_price }}</td>
-            <td class="n">¥{{ c.store_price }}</td>
             <td class="n">
               <span v-if="c.stock > 0">{{ c.stock }}</span>
               <span v-else class="qq-badge b-red">缺货</span>
@@ -135,14 +132,13 @@ async function copyText() {
     <div v-if="images && images.length" class="qq-scroll">
       <table class="qq-table">
         <thead>
-          <tr><th>标号</th><th>周边配件（爆炸图）</th><th>OE</th><th>4S价</th><th>用量</th></tr>
+          <tr><th>标号</th><th>周边配件（爆炸图）</th><th>OE</th><th>用量</th></tr>
         </thead>
         <tbody>
           <tr v-for="(it, i) in images" :key="i">
             <td class="n">{{ it.imageLabel }}</td>
             <td>{{ it.oeName }}<small class="sub"> / {{ it.stdName }}</small></td>
             <td class="n">{{ it.oeCode }}</td>
-            <td class="n">¥{{ it.price4s }}</td>
             <td class="n">×{{ it.count }}</td>
           </tr>
         </tbody>
