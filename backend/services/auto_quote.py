@@ -10,6 +10,7 @@
 定时器线程无 Flask 上下文，fire 时经 init_app 存入的 app 包 app_context。
 """
 import logging
+import re
 import threading
 
 from backend import qq_client
@@ -108,6 +109,78 @@ def _analyze_with_context(conversation_id):
             db.session.remove()
 
 
+# ---------- 空壳 scene 检测（2026-11-20 层 1 修复） ----------
+# 问题：普通识别产出 scene 但 part_name 全 None → 挡掉了 AI 兜底。
+# 修复：如果 scenes 全是空壳 且 窗口里有中文配件文字 → 清空 scenes 让 AI 兜底。
+
+
+def _all_scenes_shell(scenes) -> bool:
+    """所有 scene 都缺 part_name → 空壳（只有 VIN/OE 没配件名）。
+
+    True 条件：scenes 非空 且 每个 scene 的 part_name strip 后都为空。
+    """
+    if not scenes:
+        return False
+    return all(
+        not (s.get("part_name") or "").strip()
+        for s in scenes
+    )
+
+
+# 剥 VIN（17 位大写字母+数字，不含 O/I/Q）
+_STRIP_VIN_RE = re.compile(r'[A-HJ-NPR-Z0-9]{17}', re.IGNORECASE)
+# 剥带前缀的号码（LR025632、GDB12345）
+_STRIP_OEM_PREFIX_RE = re.compile(r'\b[A-Z]{1,4}\d{5,}\b', re.IGNORECASE)
+# 剥纯数字（≥6 位）
+_STRIP_OEM_DIGITS_RE = re.compile(r'\b\d{6,}\b')
+# 剥品牌车型词（避免把"宝马 530Li"误判成配件名）
+_BRAND_CAR_WORDS = frozenset({
+    '宝马', '奔驰', '奥迪', '大众', '丰田', '保时捷', '路虎', '沃尔沃',
+    '本田', '日产', '福特', '别克', '雪佛兰', '凯迪拉克', '雷克萨斯',
+    '英菲尼迪', '讴歌', '马自达', '斯巴鲁', '三菱', '现代', '起亚', '双龙',
+    'MINI', 'Jeep', '特斯拉', '理想', '蔚来', '小鹏', '问界', '方程豹',
+    '轿车', 'SUV', '越野车', 'MPV', '皮卡', '跑车', '新能源车', '电车', '混动',
+    'VIN', '车架号', '年份', '排量', '手自一体', '自动', '手动',
+})
+
+
+def _strip_noise_line(line: str) -> str:
+    """剥一行里的 VIN/OE/纯数字/品牌车型，剩下的就是可能的配件名片段。"""
+    cur = line
+    for pat in (_STRIP_VIN_RE, _STRIP_OEM_PREFIX_RE, _STRIP_OEM_DIGITS_RE):
+        cur = pat.sub(' ', cur)
+    # 剥品牌车型词
+    for w in sorted(_BRAND_CAR_WORDS, key=len, reverse=True):
+        cur = re.sub(re.escape(w), ' ', cur, flags=re.IGNORECASE)
+    # 剥 ★数字、①②③、序号前缀等
+    cur = re.sub(r'^[\s]*[★☆]?[\s]*\d{1,2}[\s]*[、\.．]\s*', '', cur)
+    cur = re.sub(r'[①②③④⑤⑥⑦⑧⑨⑩]+', ' ', cur)
+    # 剥括号里的内容（通常是号码）
+    cur = re.sub(r'[（(][^)）]*[)）]', ' ', cur)
+    return cur.strip()
+
+
+def _has_part_text_in_window(messages, focus_ids) -> bool:
+    """窗口里有没有"像配件名的中文短词"（后缀表漏的缩写）。
+
+    做法：对 focus 消息的每行 → 剥 VIN/OE/品牌车型 → 看剩下的
+    是否包含 2-4 个连续中文字符（"前减震"3字、"打气泵"3字 都是典型配件缩写）。
+    """
+    for m in messages:
+        if m.id not in focus_ids:
+            continue
+        from backend.models.message import Message
+        if m.direction != Message.DIR_IN or m.msg_type != Message.MSG_TEXT:
+            continue
+        for raw_line in (m.content or "").splitlines():
+            cleaned = _strip_noise_line(raw_line)
+            # 找 2-4 个连续中文字符
+            m = re.search(r'[\u4e00-\u9fa5]{2,4}', cleaned)
+            if m:
+                return True
+    return False
+
+
 def analyze_conversation(conversation_id):
     """拉窗口 → 增量切分 → 普通识别 → AI 兜底 → 分流落表。调用方需持有 app_context。
 
@@ -153,6 +226,16 @@ def analyze_conversation(conversation_id):
 
     # Step 1：普通识别（传 focus_ids，配件/号码只从新消息提，VIN 全窗口扫）
     scenes = rule_extract(messages, focus_msg_ids=focus_ids)
+
+    # 层 1 修复（2026-11-20）：空壳 scene 检测
+    # 普通识别产出了 scene，但 part_name 全 None（后缀表漏了配件名）
+    # 且窗口里有中文配件缩写 → 扔掉空壳，让 Step 2 AI 兜底接管
+    if _all_scenes_shell(scenes) and _has_part_text_in_window(messages, focus_ids):
+        log.info(
+            "普通识别产出空壳 scene（part_name 全 None），强制走 AI 兜底 conv=%s",
+            conversation_id,
+        )
+        scenes = []  # 清空后 Step 2 的 if not scenes 自然触发
 
     # Step 2：普通识别没覆盖 → AI 兜底
     if not scenes:
