@@ -97,15 +97,15 @@ def on_new_message(conversation_id):
 
 def _analyze_with_context(conversation_id):
     """定时器线程入口：无 Flask 上下文，包一层。失败只记日志。"""
-    try:
-        with _app.app_context():
+    with _app.app_context():
+        try:
             analyze_conversation(conversation_id)
-    except Exception:  # noqa: BLE001
-        log.exception("自动报价分析失败 conv=%s", conversation_id)
-    finally:
-        from backend.extensions import db
+        except Exception:  # noqa: BLE001
+            log.exception("自动报价分析失败 conv=%s", conversation_id)
+        finally:
+            from backend.extensions import db
 
-        db.session.remove()
+            db.session.remove()
 
 
 def analyze_conversation(conversation_id):
