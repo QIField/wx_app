@@ -10,6 +10,8 @@
   [{"vin": str|None, "part_name": str|None, "oem_no": str|None,
     "sender_name": str|None, "inquiry_content": str|None, ...}, ...]
 """
+from __future__ import annotations
+
 import logging
 import re
 

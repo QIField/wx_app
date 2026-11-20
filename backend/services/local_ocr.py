@@ -3,6 +3,8 @@
 降级策略：本地 OCR → 校验通过即返回 → 校验失败/异常 → 腾讯云 OCR。
 只在中间方调用链里做这件事，不引入任何第三方 OCR 依赖。
 """
+from __future__ import annotations
+
 import logging
 import re
 
