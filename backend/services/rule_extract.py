@@ -1,4 +1,4 @@
-"""普通识别模块（规则驱动，不调 AI）。
+﻿"""普通识别模块（规则驱动，不调 AI）。
 
 职责：消息窗口 → 正则/OCR 提取 → 标准场景列表（与 AI extract_parts 输出格式一致）。
 
@@ -15,6 +15,7 @@ import re
 
 from backend.models.message import Message
 from backend.services.local_ocr import recognize_vin, VIN_CHARS
+from backend.services.part_suffixes import match_part_names, has_any_part_name
 
 log = logging.getLogger(__name__)
 
@@ -39,23 +40,8 @@ PART_NO_PREFIX_RE = re.compile(
     rf'(?<![{VIN_CHARS}])([A-Z]{{1,4}})(\d{{5,}})(?![{VIN_CHARS}])', re.IGNORECASE
 )
 
-# 配件名候选：2-6 个汉字开头 + 可选配件后缀词
-# 常见配件后缀（汽车维修场景）
-_PART_SUFFIX = (
-    '板', '链', '胶', '套', '轮', '泵', '器', '盖', '壳', '垫', '带',
-    '管', '线', '门', '窗', '镜', '灯', '杠', '机', '油', '水', '电',
-    '风', '火', '碳', '滤', '活塞', '轴', '承', '簧', '杆', '销',
-    '螺栓', '螺母', '卡箍', '卡扣', '支架', '座', '密封',
-    # 通用零件后缀（维修场景高频但上面没覆盖）
-    '螺丝', '螺钉', '垫片', '弹片', '密封圈', '油封', '衬套',
-    '减震器', '避震', '缓冲块', '防尘套', '平衡块', '拉绳', '拉线',
-    '软管', '硬管', '法兰', '节温器', '散热器', '冷凝器', '蒸发箱',
-    '传感器', '执行器', '电磁阀', '喷油嘴', '火花塞', '点火线圈',
-)
-_SUFFIX_ALT = "|".join(re.escape(s) for s in _PART_SUFFIX)
-PART_NAME_RE = re.compile(
-    "([\u4e00-\u9fa5]{2,8}(?:" + _SUFFIX_ALT + "))"
-)
+# 配件名匹配已迁移至 part_suffixes 模块（两步法，绕开正则贪婪问题）。
+# 直接使用：from backend.services.part_suffixes import match_part_names, has_any_part_name
 
 # 剥序号前缀：★数字、数字、数字、
 _PREFIX_RE = re.compile(r'^[\s]*[★☆]?[\s]*\d{1,2}[\s]*[、\.．]\s*')
@@ -103,7 +89,7 @@ def should_trigger(messages: list[Message]) -> bool:
     触发（任一满足）：
       - 客户发图片消息
       - 客户文本含 VIN / ≥6位数字 / 带前缀号码
-      - 客户文本含 recognizable 配件名（PART_NAME_RE 命中）
+      - 客户文本含 recognizable 配件名（两步法匹配命中）
     不触发：纯表情、纯标点、纯无意义文字、极短闲聊
     """
     for m in messages:
@@ -118,7 +104,7 @@ def should_trigger(messages: list[Message]) -> bool:
             continue
         if _has_vin(text) or _has_long_digits(text):
             return True
-        if PART_NAME_RE.search(text):
+        if has_any_part_name(text):
             return True
     return False
 
@@ -179,8 +165,7 @@ def _extract_part_names(text: str) -> list[str]:
         line = _PREFIX_RE.sub('', line).strip()
         if not line:
             continue
-        for m in PART_NAME_RE.finditer(line):
-            name = m.group(1)
+        for name in match_part_names(line):
             if name not in seen:
                 seen.add(name)
                 names.append(name)
