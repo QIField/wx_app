@@ -33,6 +33,8 @@ def test_get_default(client):
         "parts_blacklist": [],
         "price_map": {"vip_a": "0.75", "vip_b": "0.82", "normal": "0.90"},
         "ai_enabled": True,
+        "ai_enabled_at": None,
+        "ai_enabled_at_dt": None,
         "quote_mode": "preview",
     }
 

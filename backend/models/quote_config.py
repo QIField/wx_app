@@ -46,6 +46,10 @@ class QuoteConfig(db.Model, SoftDeleteMixin):
         db.Boolean, nullable=False, default=True,
         comment="AI 执行开关（仅 global 行，全局总闸）；关=纯手动普通模式",
     )
+    ai_enabled_at = db.Column(
+        db.DateTime, nullable=True,
+        comment="AI 最近一次从关→开的时间闸门；仅 >= 此时间的消息才触发 AI，避免补拉历史或开关前消息被误分析",
+    )
     quote_mode = db.Column(
         db.String(10), nullable=False, default="preview",
         comment="自动报价模式（仅 global 行）：preview=仅侧边预览 / auto=自动发送",

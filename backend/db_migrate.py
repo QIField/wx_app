@@ -42,6 +42,8 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE conversation ADD COLUMN last_analyzed_msg_id BIGINT NULL")
     # 2026-11-21 群成员群内备注：chatroom_member_detail.remark 落库
     _try_alter("ALTER TABLE group_member ADD COLUMN member_remark VARCHAR(100) NULL")
+    # 2026-11-21 AI 开关时间闸门：关→开记时间戳，闸门前历史消息不触发 AI
+    _try_alter("ALTER TABLE quote_config ADD COLUMN ai_enabled_at DATETIME NULL")
 
 
 def _backfill_remark_config():

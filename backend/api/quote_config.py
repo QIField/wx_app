@@ -6,6 +6,8 @@
   触发，无登录人上下文，语义见 models/quote_config.py 模块注释）。
 - 读侧容错：price_map 缺键时回落默认系数，保证阶段 4 计算永远拿得到全三档。
 """
+from datetime import datetime
+
 from flask import Blueprint, g, jsonify, request
 
 from backend.extensions import db
@@ -35,10 +37,13 @@ def merged_config(user_id=0):
     price_map = dict(DEFAULT_PRICE_MAP)
     if g_row:
         price_map.update(g_row.price_map or {})
+    gate_dt = g_row.ai_enabled_at if g_row else None
     return {
         "parts_blacklist": list(g_row.parts_blacklist or []) if g_row else [],
         "price_map": price_map,
         "ai_enabled": bool(g_row.ai_enabled) if g_row else True,
+        "ai_enabled_at": gate_dt.isoformat() if gate_dt else None,
+        "ai_enabled_at_dt": gate_dt,  # datetime 对象，供业务代码直接比时间
         "quote_mode": (g_row.quote_mode if g_row else None) or "preview",
     }
 
@@ -107,6 +112,11 @@ def _save_global(body, diff):
         cur = bool(row.ai_enabled) if row.ai_enabled is not None else True
         if cur != val:
             diff.append("AI开关开→关" if not val else "AI开关关→开")
+            # 时间闸门：关→开 写当前时间；开→关 清空（下次再开重新计时）
+            if val and not cur:
+                row.ai_enabled_at = datetime.now()
+            elif not val and cur:
+                row.ai_enabled_at = None
         row.ai_enabled = val
     if "quote_mode" in body:
         mode = str(body.get("quote_mode") or "").strip()

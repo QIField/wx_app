@@ -51,15 +51,31 @@ def _remark_enabled(scope_type, wxid):
     return bool(row.auto_quote_enabled) if row else False
 
 
-def is_eligible(conversation_id):
-    """群会话只看群开关、单聊只看用户开关（群>用户），再 AND 全局执行开关。"""
+def is_eligible(conversation_id, message_time=None):
+    """群会话只看群开关、单聊只看用户开关（群>用户），再 AND 全局执行开关。
+
+    message_time（datetime，可选）：若有值且 ai_enabled_at 闸门已生效
+    （AI 最近从关→开），则 message_time < ai_enabled_at 的历史消息直接跳过。
+    这层闸门挡掉补拉历史消息、AI 开关开启前已入库的旧消息。
+    """
     conv = Conversation.query.filter_by(id=conversation_id, deleted_at=None).first()
     if conv is None:
         return False
     scope = "group" if conv.chat_type == Conversation.CHAT_GROUP else "user"
     if not _remark_enabled(scope, conv.wxid):
         return False
-    return bool(merged_config(0)["ai_enabled"])
+    cfg = merged_config(0)
+    if not cfg["ai_enabled"]:
+        return False
+    # 时间闸门：AI 关→开后产生的 ai_enabled_at
+    gate_at = cfg.get("ai_enabled_at_dt")
+    if gate_at and message_time and message_time < gate_at:
+        log.debug(
+            "跳过闸门前历史消息 conv=%s msg_time=%s gate_at=%s",
+            conversation_id, message_time, gate_at,
+        )
+        return False
+    return True
 
 
 # ---------- 去抖计时 ----------
@@ -84,10 +100,14 @@ def cancel_timer(conversation_id):
         timer.cancel()
 
 
-def on_new_message(conversation_id):
-    """消息同步钩子入口：资格不过直接跳过；过了就重置计时。"""
+def on_new_message(conversation_id, message_time=None):
+    """消息同步钩子入口：资格不过直接跳过；过了就重置计时。
+
+    message_time（datetime，可选）：该消息的原始 create_time，用于与
+    ai_enabled_at 闸门比较——闸门前的历史消息不触发 AI。
+    """
     try:
-        if not is_eligible(conversation_id):
+        if not is_eligible(conversation_id, message_time=message_time):
             return
         reset_timer(conversation_id)
     except Exception:  # noqa: BLE001 触发器不影响收信
@@ -203,7 +223,9 @@ def analyze_conversation(conversation_id):
     if conv is None:
         return
 
-    messages = fetch_recent_messages(conversation_id)
+    # 时间闸门：只拉 AI 开启时间之后的消息（闸门之前的历史消息不再参与分析）
+    gate_dt = cfg.get("ai_enabled_at_dt")
+    messages = fetch_recent_messages(conversation_id, min_time=gate_dt)
     if not messages:
         return
 

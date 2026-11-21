@@ -35,16 +35,18 @@ _AI_HINT = (
 )
 
 
-def fetch_recent_messages(conversation_id, limit=WINDOW_SIZE):
-    """该会话最近 limit 条消息，返回正序（旧→新）。"""
-    rows = (
-        Message.query.filter(
-            Message.conversation_id == conversation_id, Message.deleted_at.is_(None),
-        )
-        .order_by(Message.id.desc())
-        .limit(limit)
-        .all()
+def fetch_recent_messages(conversation_id, limit=WINDOW_SIZE, min_time=None):
+    """该会话最近 limit 条消息，返回正序（旧→新）。
+
+    min_time（datetime）：只拉 create_time >= min_time 的消息，用于 AI 开关
+    时间闸门——开关前的历史消息不再参与分析。None 表示不过滤。
+    """
+    q = Message.query.filter(
+        Message.conversation_id == conversation_id, Message.deleted_at.is_(None),
     )
+    if min_time is not None:
+        q = q.filter(Message.create_time >= min_time)
+    rows = q.order_by(Message.id.desc()).limit(limit).all()
     return list(reversed(rows))
 
 

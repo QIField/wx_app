@@ -133,9 +133,10 @@ def broadcast_messages(pushed, openid=""):
     for saved in pushed:
         if saved["direction"] == Message.DIR_IN:
             # 自动报价触发器（阶段 2）：内部自带资格判定与异常兜底，不影响收信
+            # 传消息原始 create_time，用于 AI 开关时间闸门过滤历史消息
             from backend.services.auto_quote import on_new_message
 
-            on_new_message(saved["conversation_id"])
+            on_new_message(saved["conversation_id"], message_time=saved["create_time"])
         info = sender_maps.get(saved["conversation_id"], {}).get(saved["sender_wxid"] or "")
         hub.broadcast("new_message", {
             "message_id": saved["message_id"],

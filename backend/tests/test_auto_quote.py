@@ -415,3 +415,66 @@ def test_vin_cross_link_same_sender_works(app):
 
     # 老王的询价应该带上老王自己发的 VIN
     assert any(s.get("vin") == "WBAWX3100G0L69597" and s.get("sender_name") == "老王" for s in scenes)
+
+
+# ---------- AI 开关时间闸门（2026-11-21）----------
+
+
+def test_time_gate_blocks_messages_before_enable(app, monkeypatch):
+    """闸门生效时：message_time < ai_enabled_at 的历史消息不触发资格。"""
+    conv = make_conv("gate1", chat_type=Conversation.CHAT_GROUP)
+    make_remark("group", "gate1", enabled=True)
+
+    gate_time = datetime(2026, 11, 21, 10, 0, 0)
+    monkeypatch.setattr(
+        auto_quote.auto_quote if hasattr(auto_quote, "auto_quote") else auto_quote,
+        "merged_config",
+        lambda *a, **kw: {
+            "ai_enabled": True, "ai_enabled_at_dt": gate_time, "ai_enabled_at": gate_time.isoformat(),
+            "parts_blacklist": [], "price_map": {}, "quote_mode": "preview",
+        },
+    )
+
+    old = datetime(2026, 11, 20, 8, 0, 0)   # 闸门之前 → 不放行
+    assert auto_quote.is_eligible(conv.id, message_time=old) is False
+
+    new = datetime(2026, 11, 21, 11, 0, 0)  # 闸门之后 → 放行
+    assert auto_quote.is_eligible(conv.id, message_time=new) is True
+
+
+def test_time_gate_blocks_old_message_from_triggering_timer(app, monkeypatch):
+    """闸门生效时：on_new_message 收到闸门前的旧消息 → 不起计时器。"""
+    monkeypatch.setattr(auto_quote, "_timer_factory", FakeTimer)
+    FakeTimer.started_count = 0
+
+    conv = make_conv("gate2", chat_type=Conversation.CHAT_GROUP)
+    make_remark("group", "gate2", enabled=True)
+
+    gate_time = datetime(2026, 11, 21, 10, 0, 0)
+    monkeypatch.setattr(auto_quote, "merged_config", lambda *a, **kw: {
+        "ai_enabled": True, "ai_enabled_at_dt": gate_time, "ai_enabled_at": gate_time.isoformat(),
+        "parts_blacklist": [], "price_map": {}, "quote_mode": "preview",
+    })
+
+    # 闸门前的补拉消息 → 不起计时器
+    auto_quote.on_new_message(conv.id, message_time=datetime(2026, 11, 20, 8, 0, 0))
+    assert conv.id not in auto_quote._timers  # 无计时器
+
+    # 闸门后的新消息 → 正常起计时
+    auto_quote.on_new_message(conv.id, message_time=datetime(2026, 11, 21, 11, 0, 0))
+    assert conv.id in auto_quote._timers
+
+
+def test_no_gate_when_ai_enabled_at_is_none(app, monkeypatch):
+    """闸门未生效（ai_enabled_at_dt=None）时，任何消息时间都放行——开关从初始 True 直接用的场景。"""
+    conv = make_conv("gate3", chat_type=Conversation.CHAT_GROUP)
+    make_remark("group", "gate3", enabled=True)
+
+    monkeypatch.setattr(auto_quote, "merged_config", lambda *a, **kw: {
+        "ai_enabled": True, "ai_enabled_at_dt": None, "ai_enabled_at": None,
+        "parts_blacklist": [], "price_map": {}, "quote_mode": "preview",
+    })
+
+    # 任何时间都放行
+    assert auto_quote.is_eligible(conv.id, message_time=datetime(2020, 1, 1)) is True
+    assert auto_quote.is_eligible(conv.id) is True  # 无时间参数也放行
