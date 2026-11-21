@@ -282,51 +282,68 @@ def _resolve_items(row):
     return items
 
 
+def _kaisi_price_of(child):
+    """child 品牌行 → 开思价 float；空/非法/0 → None。
+
+    _norm_product 已归一 retail_price 取值链为 price → store_cass_price → 空。
+    """
+    try:
+        f = float(child.get("retail_price") or 0)
+    except (TypeError, ValueError):
+        return None
+    return f if f > 0 else None
+
+
 def _price_item(item, rate):
     """件 → 报价行：OE 查产品档案 → 系数价。查无档案 product=None。
 
     每条品牌行（child）现在带：
-      - retail_price / retail_price_fmt  — product_list.price 市场参考价
-      - sell_price  / sell_price_fmt    — cost_price × rate 我方实际报价
+      - retail_price / retail_price_fmt  — 开思价（优先 price，降级 store_cass_price）
+      - sell_price  / sell_price_fmt    — retail_price × rate 我方实际报价
       - image                            — 每个品牌自己的产品图
       - product_name / oe / partent_number — 品牌级完整信息
-    顶层 final_price 仍取首品牌 sell_price（兼容旧字段）。
+    顶层 final_price 取首个有有效开思价的 child（兼容旧字段）。
+
+    开思价缺失 → sell_price 也空，话术模板按 sell_price_fmt 自动过滤这条不报。
     """
     data = qq_client.product_list(item["oe"])
     product = _norm_product(_first_product(data, item["oe"]))
 
-    # 逐品牌计算我方报价（cost × rate），追加 retail/sell 格式化字段
+    # 逐品牌计算我方报价（开思价 × rate）
     if product:
         for c in product.get("child") or []:
-            try:
-                cost_f = float(c.get("cost_price") or 0)
-                sell_f = cost_f * rate
-            except (TypeError, ValueError):
-                sell_f = None
+            kaisi = _kaisi_price_of(c)
+            sell_f = kaisi * rate if kaisi else None
             c["sell_price"] = f"{sell_f:.2f}" if sell_f is not None else ""
             c["sell_price_fmt"] = f"¥{sell_f:.0f}" if sell_f and sell_f > 0 else ""
-            try:
-                retail_f = float(c.get("retail_price") or 0)
-                c["retail_price_fmt"] = f"¥{retail_f:.0f}" if retail_f > 0 else ""
-            except (TypeError, ValueError):
-                c["retail_price_fmt"] = ""
+            c["retail_price_fmt"] = f"¥{kaisi:.0f}" if kaisi else ""
 
-    # 顶层兼容字段（首品牌为准）
-    cost = final = store = None
-    if product and product["cost_price"]:
-        try:
-            cost = float(product["cost_price"])
-            store = float(product["store_price"] or 0)
-            final = f"{cost * rate:.2f}"
-        except (TypeError, ValueError):
-            cost = final = None
-    save = max(0, round((1 - cost * rate / store) * 100)) if (cost and final and store > 0) else None
+    # 顶层 final_price + save_percent（取首个有有效开思价的 child）
+    final = store = None
+    if product:
+        for fc in product.get("child") or []:
+            kaisi = _kaisi_price_of(fc)
+            if kaisi:
+                final = f"{kaisi * rate:.2f}"
+                try:
+                    store = float(fc.get("store_price") or 0) or None
+                except (TypeError, ValueError):
+                    store = None
+                break
+    final_val = float(final) if final else None
+    save = (max(0, round((1 - final_val / store) * 100))
+            if (final_val and store and store > 0) else None)
+
+    # 顶层保留 cost_price / store_price（契约兼容，取首 child 原值）
+    head = (product.get("child") or [None])[0] if product else None
+    top_cost = f"{float(head['cost_price']):.2f}" if head and head.get("cost_price") else ""
+    top_store = f"{store:.2f}" if store else ""
 
     return {
         **item,  # 含 oe_name / price4s（来自 partno 译码层）
         "product": product,
-        "cost_price": f"{cost:.2f}" if cost is not None else "",
-        "store_price": f"{store:.2f}" if store else "",
+        "cost_price": top_cost,
+        "store_price": top_store,
         "final_price": final,
         "save_percent": save,
     }
@@ -407,10 +424,11 @@ def _norm_product(row):
             # ★ 新增字段：每个品牌自己的完整信息
             "product_name": c.get("name") or c.get("l_name_zh") or c.get("l_name_zh_default") or "",
             "product_id": c.get("product_id"),
-            "retail_price": str(c.get("price") or ""),           # product_list.price 零售参考价
+            "retail_price": str(c.get("price") or c.get("store_cass_price") or ""),  # 开思价：优先 price，降级 store_cass_price；实测两者通常相同
             "image": c.get("pic") or c.get("bigpic") or "",      # 每个品牌自己的产品图
             "oe": dn.get("oe") or "",                            # 这个品牌实际对应的 OE（≠ 查询用的 OE）
             "partent_number": dn.get("partent") or "",
+            "quote_product_remark": c.get("quote_product_remark") or "",  # 快捷报价备注名，模板优先显示
         })
     return {
         "product_id": main.get("product_id"),
@@ -629,10 +647,11 @@ def _quote_text(row, car, items, level=None, rate=None):
                     sell = c.get("sell_price_fmt") or ""
                     if not sell:
                         continue
-                    # 格式：品牌｜产品名｜ —— 不管跟 title 是否重复都显示产品名
-                    p_name = (c.get("product_name") or "").strip()
-                    if p_name:
-                        brand_display = f"{brand}｜{p_name}｜"
+                    # 名称优先用 quote_product_remark（开思自定义备注名），
+                    # 为空则不显示名称段 —— 直接品牌｜¥价格
+                    remark = (c.get("quote_product_remark") or "").strip()
+                    if remark:
+                        brand_display = f"{brand}｜{remark}｜"
                     else:
                         brand_display = f"{brand}｜"
                     rows.append((brand_display, sell))

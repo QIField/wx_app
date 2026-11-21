@@ -26,7 +26,7 @@ from backend.sync import send_service
 
 VIN = "WBAWX3100G0L69597"
 IMAGE = "https://data.gzbbr.com/pic/1.jpg"
-FINAL = "86.59"  # 成本 96.21 × 普通系数 0.90
+FINAL = "94.50"  # 开思价 105.00 × 普通系数 0.90
 
 SCENES = [{"sender_name": "老王", "part_name": "节温器", "vin": VIN, "quoted": False}]
 
@@ -60,7 +60,7 @@ def patch_chain(monkeypatch):
         "data": {"total": 1, "data": [  # 三层信封：data → 分页器 → 组行列表
             {"no": "P1", "child": [{
                 "product_id": 1, "name": "节温器总成", "brand_name": "博世",
-                "cost_price": "96.21", "store_price": "300.00", "stock": 5,
+                "cost_price": "96.21", "price": "105.00", "store_price": "300.00", "stock": 5,
                 "bigpic": IMAGE, "l_name_zh": "节温器总成", "l_model_zh": "",
                 "display_number": [{"key": "OE", "number": "11538635689"}],
             }]},

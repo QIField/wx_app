@@ -47,9 +47,11 @@ MOCK_PRODUCT_PIC_URL = "https://bbrdatatest.freyparts.cn/api/pic/show/?f=mockpic
 PRODUCT_GROUP = {
     "no": 1,
     "child": [
-        PRODUCT_BRAND_MAIN,
-        {"brand_name": "原厂", "cost_price": "410.00", "store_price": "1270.00", "stock": "3"},
-        {"brand_name": "盖茨(GATES)", "cost_price": "105.00", "store_price": "1270.00", "stock": "0"},
+        {**PRODUCT_BRAND_MAIN, "price": "99.99"},                            # 菲尔：开思价 99.99，采购价 88.00
+        {"brand_name": "原厂", "cost_price": "410.00", "store_price": "1270.00",
+         "stock": "3", "price": "459.99"},                                   # 原厂：开思价 459.99
+        {"brand_name": "盖茨(GATES)", "cost_price": "105.00", "store_price": "1270.00",
+         "stock": "0", "price": "114.00"},                                   # 盖茨：开思价 114.00
     ],
 }
 PRODUCT_LIST = {"status": 0, "msg": "success", "data": {"data": [PRODUCT_GROUP], "no_exist_oe": []}}
@@ -210,14 +212,15 @@ def test_price_inquiry_full_chain_contract_a(app, mock_api):
     assert r["partImagesList"] is None and r["error"] is None
     pricing = r["pricing"]
     assert pricing["level"] == "vip_b" and pricing["rate"] == 0.82
-    assert pricing["final_price"] == "72.16"  # 88.00 × 0.82
+    assert pricing["final_price"] == "81.99"  # 开思价 99.99 × 0.82
     item = pricing["items"][0]
-    assert item["save_percent"] == 94  # 1 - 72.16/1270.00
+    assert item["save_percent"] == 94  # 1 - 81.99/1270.00
     assert "★1、节温器 (11538635689)" in pricing["text"]
-    # V9 话术：品牌｜产品名｜¥价格，按我方报价升序，直接贴不对齐
-    assert "① 马勒(MAHLE)｜节温器总成｜¥72" in pricing["text"]
-    assert "② 盖茨(GATES)｜¥86" in pricing["text"]
-    assert "③ 原厂｜¥336" in pricing["text"]
+    # V10 话术：quote_product_remark 优先，空则只显示品牌｜¥价格，按 sell_price 升序
+    # 菲尔 81.99 → 盖茨 93.48 → 原厂 377.19
+    assert "① 马勒(MAHLE)｜¥82" in pricing["text"]
+    assert "② 盖茨(GATES)｜¥93" in pricing["text"]
+    assert "③ 原厂｜¥377" in pricing["text"]
     assert "4S" not in pricing["text"]
     assert "@老王" in pricing["text"]              # 统一 @ 发送者
     assert VIN in pricing["text"]                  # VIN 独立行
@@ -312,3 +315,103 @@ def test_price_inquiries_batch_resilient(app, mock_api, monkeypatch):
     monkeypatch.setattr(qq_client, "product_list", flaky)
     quote_pricing.price_inquiries([bad, good])
     assert bad.price_json["error"] and good.price_json["product"]["product_id"] == 91328
+
+
+# ---------- 开思价（price）× 折扣 主路径验证 ----------
+
+
+def test_quote_base_on_kaisi_price_not_cost(app, mock_api, monkeypatch):
+    """新逻辑：sell_price = product_list.price（开思价）× rate，而非 cost_price × rate。
+
+    实测 product_list 品牌行的 price 字段对应 price_id=2 "开思、维修厂、连锁维修厂价"。
+    开思价通常比我方采购价高 ~10-20%，所以同样 rate 下 sell_price 应更高。
+    """
+    # 构造带 price（开思价）字段的 mock 品牌行，price > cost_price
+    # 菲尔真实数据参考：cost=88.20, price=99.99, store=1220
+    kaisi_group = {
+        "no": 1,
+        "child": [
+            {**PRODUCT_BRAND_MAIN, "price": "99.99", "store_price": "1270.00"},
+            {"brand_name": "原厂", "cost_price": "410.00", "store_price": "1270.00",
+             "stock": "3", "price": "459.99"},
+        ],
+    }
+    monkeypatch.setattr(qq_client, "product_list", lambda n: {
+        "status": 0, "msg": "success",
+        "data": {"data": [kaisi_group], "no_exist_oe": []},
+    })
+
+    conv = make_conv("group1")
+    make_remark("group", "group1", ContactRemarkConfig.LEVEL_VIP_B)  # vip_b 0.82
+    row = make_inquiry(conv, oem_no="11538635689")
+    quote_pricing.price_inquiry(row)
+
+    pricing = row.price_json["pricing"]
+    items = pricing["items"]
+    child = items[0]["product"]["child"]
+
+    # 首品牌：开思价 99.99 × 0.82 = 81.99（旧逻辑 88.00 × 0.82 = 72.16，明显更高）
+    assert child[0]["sell_price"] == "81.99", f"开思价×折扣应高于采购价×折扣，got {child[0]['sell_price']}"
+    assert child[0]["retail_price"] == "99.99"
+    assert child[0]["sell_price_fmt"] == "¥82"
+
+    # 顶层 final_price 也用开思价 × 折扣
+    assert pricing["final_price"] == "81.99"
+
+    # 第二品牌：开思价 459.99 × 0.82 = 377.19
+    assert child[1]["sell_price"] == "377.19"
+
+    # save_percent: 1 - 81.99/1270 ≈ 93.5 → 94
+    assert items[0]["save_percent"] == 94
+
+
+def test_fallback_to_store_cass_price_when_price_missing(app, mock_api, monkeypatch):
+    """第一级降级：price 缺失时用 store_cass_price 当开思价。"""
+    conv = make_conv("group1")
+    make_remark("group", "group1", ContactRemarkConfig.LEVEL_NORMAL)  # normal 0.90
+    row = make_inquiry(conv, oem_no="11538635689")
+
+    # 菲尔 child 没有 price，但有 store_cass_price → retail_price 应取 store_cass_price
+    group = {**PRODUCT_GROUP, "child": [
+        {**PRODUCT_BRAND_MAIN, "store_cass_price": "105.00"},  # 无 price，用 store_cass_price
+    ]}
+    monkeypatch.setattr(qq_client, "product_list", lambda n: {
+        "status": 0, "msg": "success",
+        "data": {"data": [group], "no_exist_oe": []},
+    })
+
+    quote_pricing.price_inquiry(row)
+    child = row.price_json["product"]["child"]
+    assert child[0]["retail_price"] == "105.00"   # 取了 store_cass_price
+    assert child[0]["sell_price"] == "94.50"      # 105.00 × 0.90
+
+
+def test_skip_child_when_no_kaisi_price_at_all(app, mock_api, monkeypatch):
+    """price 和 store_cass_price 都空 → sell_price 也空 → 话术模板跳过这条不报。"""
+    conv = make_conv("group1")
+    make_remark("group", "group1", ContactRemarkConfig.LEVEL_NORMAL)
+    row = make_inquiry(conv, oem_no="11538635689")
+
+    # 两条都没有 price / store_cass_price → 都应跳过
+    group = {
+        "no": 1,
+        "child": [
+            {"brand_name": "无名品牌", "cost_price": "50.00", "store_price": "300.00", "stock": "5"},
+        ],
+    }
+    monkeypatch.setattr(qq_client, "product_list", lambda n: {
+        "status": 0, "msg": "success",
+        "data": {"data": [group], "no_exist_oe": []},
+    })
+
+    quote_pricing.price_inquiry(row)
+    child = row.price_json["product"]["child"]
+    assert child[0]["retail_price"] == ""
+    assert child[0]["sell_price"] == ""
+    assert child[0]["sell_price_fmt"] == ""
+    # final_price 应为 None（没有有效开思价的 child）
+    assert row.price_json["pricing"]["final_price"] is None
+    # 话术：无 sell_price_fmt 的 child 被跳过，只出 ★标题
+    assert "无名品牌" not in row.price_json["pricing"]["text"]
+    # 顶层 final_price 为 None 时 save_percent 也无
+    assert row.price_json["pricing"]["final_price"] is None
