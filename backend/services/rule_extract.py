@@ -19,6 +19,7 @@ from backend.models.message import Message
 from backend.services.local_ocr import recognize_vin, VIN_CHARS
 from backend.services.part_fallback import extract_part_names_fallback
 from backend.services.part_suffixes import match_part_names, has_any_part_name
+from backend.services.text_utils import normalize_spaced_digits
 
 log = logging.getLogger(__name__)
 
@@ -61,10 +62,14 @@ def _has_vin(text: str) -> bool:
 
 
 def _has_long_digits(text: str) -> bool:
-    """文本里是否出现 ≥6 位连续数字（含纯数字和前缀+数字两种）。"""
-    if PART_NO_DIGITS_RE.search(text or ""):
+    """文本里是否出现 ≥6 位连续数字（含纯数字和前缀+数字两种）。
+
+    先做空格归一化（"264 200 3201" → "2642003201"），否则空格会打断连续数字导致漏判。
+    """
+    normalized = normalize_spaced_digits(text or "")
+    if PART_NO_DIGITS_RE.search(normalized):
         return True
-    if PART_NO_PREFIX_RE.search(text or ""):
+    if PART_NO_PREFIX_RE.search(normalized):
         return True
     return False
 
@@ -180,7 +185,10 @@ def _extract_part_numbers(text: str) -> list[str]:
 
     处理顺序：括号里的号码 → 带前缀的号码 → 纯数字 ≥6 位。
     括号内容可能嵌 VIN，已被跳过。
+
+    先做空格归一化（"264 200 3201" → "2642003201"），否则空格会打断连续数字导致漏判。
     """
+    normalized = normalize_spaced_digits(text or "")
     found = []
     seen = set()
 
@@ -191,7 +199,7 @@ def _extract_part_numbers(text: str) -> list[str]:
             found.append(token)
 
     # 1. 括号里的号码（如 (LR025632)、(1234567)）
-    for m in _BRACKET_NO_RE.finditer(text or ""):
+    for m in _BRACKET_NO_RE.finditer(normalized):
         token = m.group(1).strip()
         if PART_NO_PREFIX_RE.fullmatch(token):
             _add(token)
@@ -199,11 +207,11 @@ def _extract_part_numbers(text: str) -> list[str]:
             _add(re.sub(r'\D', '', token))  # 只保留数字部分
 
     # 2. 带前缀的号码（LR025632）
-    for m in PART_NO_PREFIX_RE.finditer(text or ""):
+    for m in PART_NO_PREFIX_RE.finditer(normalized):
         _add(m.group(1) + m.group(2))
 
     # 3. 纯数字 ≥6 位
-    for m in PART_NO_DIGITS_RE.finditer(text or ""):
+    for m in PART_NO_DIGITS_RE.finditer(normalized):
         _add(m.group(1))
 
     return found
@@ -269,7 +277,13 @@ def _extract_from_text_message(msg: Message) -> list[dict]:
 
 
 def _extract_vin_only_from_message(msg: Message) -> str | None:
-    """只提取 VIN（用于跨消息关联，不受 focus 限制）。"""
+    """只提取 VIN（用于跨消息关联，不受 focus 限制）。
+
+    只扫客户 IN 方向消息 — 客服 OUT 消息里可能复述客户之前的 VIN，
+    如果也扫进来会导致"客户 A 的 VIN 补到客户 B 的询价"这种张冠李戴。
+    """
+    if msg.direction != Message.DIR_IN:
+        return None
     if msg.msg_type != Message.MSG_TEXT:
         return None
     return _extract_vin(msg.content or "")
@@ -380,11 +394,19 @@ def rule_extract(messages: list[Message], focus_msg_ids: set[int] | None = None)
     raw_scenes: list[dict] = []
 
     # 全窗口扫描 VIN（用于跨消息关联，不受 focus 限制）
-    all_vins: list[str] = []
+    # 每条记录 {vin, sender_name, msg_id} — sender 匹配 + 时序约束才能安全补全
+    all_vins: list[dict] = []
     for m in messages:
         v = _extract_vin_only_from_message(m)
-        if v and v not in all_vins:
-            all_vins.append(v)
+        if not v:
+            continue
+        # 去重：同一个 VIN 只收最早那条（消息 id 最小的）
+        if not any(x["vin"] == v for x in all_vins):
+            all_vins.append({
+                "vin": v,
+                "sender_name": m.sender_name,
+                "msg_id": m.id,
+            })
 
     for i, msg in enumerate(messages):
         if msg.direction != Message.DIR_IN:
@@ -396,6 +418,8 @@ def rule_extract(messages: list[Message], focus_msg_ids: set[int] | None = None)
         if msg.msg_type == Message.MSG_TEXT:
             if in_focus:
                 scenes = _extract_from_text_message(msg)
+                for s in scenes:
+                    s["_msg_id"] = msg.id  # 内部字段：记录 scene 来自哪条消息
                 raw_scenes.extend(scenes)
             # 不在 focus 的历史消息 → 跳过（VIN 已在上面的全窗口扫描里覆盖）
 
@@ -403,6 +427,8 @@ def rule_extract(messages: list[Message], focus_msg_ids: set[int] | None = None)
             if in_focus:
                 # 图片场景的后续文本关联也只在 focus 里找
                 img_scenes = _extract_from_image_message_focus(msg, messages, i, focus)
+                for s in img_scenes:
+                    s["_msg_id"] = msg.id
                 raw_scenes.extend(img_scenes)
 
     if not raw_scenes:
@@ -411,11 +437,26 @@ def rule_extract(messages: list[Message], focus_msg_ids: set[int] | None = None)
     # 跨行合并
     merged = _cross_link_scenes(raw_scenes)
 
-    # 用全窗口 VIN 补全没 VIN 的场景（历史 VIN 关联新询价配件）
+    # 用全窗口 VIN 补全没 VIN 的场景 —— 四个安全条件缺一不可：
+    #   1. 方向过滤：VIN 只来自客户 IN 消息（扫的时候已经保证）
+    #   2. sender 匹配：客户 A 的 VIN 只补客户 A 的询价
+    #   3. 时序约束：VIN 消息 id < 询价消息 id（先发 VIN 后发询价）
+    #   4. ★ 关键：scene 自己没给 OE 号 —— OE 号是自包含询价，有 OE 说明客户要独立查价，
+    #      补 VIN 反而把两条独立询价绑在一起。只有"纯配件名 + 无 OE"才需要 VIN 去译码。
     if all_vins:
         for s in merged:
-            if not s.get("vin"):
-                s["vin"] = all_vins[0]  # 取第一个 VIN（通常就是客户的车）
+            if s.get("vin"):
+                continue
+            # 条件 4：有 OE 号（≥6 位连续数字）→ 不补，OE 自己就能查 product_list
+            raw_oem = s.get("oem_no") or ""
+            if raw_oem and (PART_NO_DIGITS_RE.search(raw_oem) or PART_NO_PREFIX_RE.search(raw_oem)):
+                continue
+            scene_sender = s.get("sender_name") or ""
+            scene_msg_id = s.get("_msg_id") or 0
+            for vin_info in all_vins:
+                if vin_info["sender_name"] == scene_sender and vin_info["msg_id"] < scene_msg_id:
+                    s["vin"] = vin_info["vin"]
+                    break
 
     # 保守过滤：rule_extract 只留"能算价"的场景。
     # 能算价 = 有 VIN 或 有 ≥6 位号码（两个至少一个）。
@@ -470,3 +511,4 @@ def _extract_from_image_message_focus(
         "sender_name": sender_name,
         "inquiry_content": f"[图片]{img_url and img_url[:60] or ''}",
     }]
+

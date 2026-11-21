@@ -271,3 +271,147 @@ def test_analyze_dispatch_and_flow(app, monkeypatch):
     auto_quote._analyze_with_context(conv.id)  # 服务异常：日志兜底不抛
 
     assert QuoteInquiry.query.filter_by(conversation_id=conv.id).count() == 1
+
+
+# ====================================================================
+# 号码空格归一化修复（2026-11-21）
+# 问题："264 200 3201" 这种空格分隔的号码无法被识别，
+#       因为正则只匹配连续数字，空格打断后每段都不够 6 位。
+# 修复：在号码提取前先将每行内空格分隔的数字片段合并。
+# ====================================================================
+
+
+class TestSpacedDigitNormalization:
+    """带空格格式号码的识别测试。"""
+
+    def test_extract_part_numbers_spaced_multiline(self):
+        """核心测试用例：多行带空格号码批量识别。"""
+        from backend.services.rule_extract import _extract_part_numbers
+        from backend.services.text_utils import normalize_spaced_digits
+
+        text = "264 200 3201\n238 501 9400"
+        # 归一化验证
+        norm = normalize_spaced_digits(text)
+        assert norm == "2642003201\n2385019400"
+        # 号码提取验证
+        numbers = _extract_part_numbers(text)
+        assert numbers == ["2642003201", "2385019400"]
+
+    def test_extract_part_numbers_spaced_with_prefix(self):
+        """带前缀的号码 + 空格分隔。"""
+        from backend.services.rule_extract import _extract_part_numbers
+
+        text = "LR025 632"
+        numbers = _extract_part_numbers(text)
+        assert numbers == ["LR025632"]
+
+    def test_extract_part_numbers_spaced_mixed(self):
+        """正常号码 + 带空格号码混合输入。"""
+        from backend.services.rule_extract import _extract_part_numbers
+
+        text = "11538635689\n264 200 3201"
+        numbers = _extract_part_numbers(text)
+        assert "11538635689" in numbers
+        assert "2642003201" in numbers
+
+    def test_extract_part_numbers_no_false_merge_brand(self):
+        """不会误伤车型词："宝马 530Li" 里的 530 不会被拼接。"""
+        from backend.services.rule_extract import _extract_part_numbers
+
+        text = "宝马 530Li 报价"
+        numbers = _extract_part_numbers(text)
+        # 530 和 3 不会被拼成 5303（中间是字母 L，不是空格+数字）
+        assert numbers == []
+
+    def test_extract_part_numbers_standalone_still_works(self):
+        """原有正常格式号码识别不受影响。"""
+        from backend.services.rule_extract import _extract_part_numbers
+
+        assert _extract_part_numbers("11538635689") == ["11538635689"]
+        assert _extract_part_numbers("LR025632") == ["LR025632"]
+        assert _extract_part_numbers("节温器 LR025632") == ["LR025632"]
+
+    def test_has_long_digits_detects_spaced(self):
+        """触发条件检测：带空格号码能正确触发识别流程。"""
+        from backend.services.rule_extract import _has_long_digits
+
+        assert _has_long_digits("264 200 3201") is True
+        assert _has_long_digits("11538635689") is True
+        assert _has_long_digits("短号 123") is False
+
+    def test_rule_extract_with_spaced_numbers(self, app):
+        """完整 rule_extract 流程：带空格号码消息 → 能提取出 oem_no。"""
+        from backend.services.rule_extract import rule_extract
+
+        conv = make_conv("group_spaced", chat_type=Conversation.CHAT_GROUP)
+        msg = make_msg(conv.id, "264 200 3201\n238 501 9400")
+
+        scenes = rule_extract([msg])
+        assert len(scenes) >= 1
+        oem_nos = scenes[0].get("oem_no") or ""
+        assert "2642003201" in oem_nos
+        assert "2385019400" in oem_nos
+
+    def test_strip_noise_handles_spaced(self):
+        """噪音剥离：带空格号码能被正确剥离，不会残留成伪配件名。"""
+        from backend.services.auto_quote import _strip_noise_line
+
+        # 带空格号码应该被完全剥离，剩下空串或纯空白
+        result = _strip_noise_line("264 200 3201")
+        # 号码被剥离后只剩空白
+        assert result == ""
+
+        # 混合场景：配件名 + 带空格号码 → 号码被剥离，配件名保留
+        result = _strip_noise_line("节温器 264 200 3201")
+        assert "节温器" in result
+
+
+# ====================================================================
+# VIN 自动补全安全修复（2026-11-21）
+# 问题：客服 OUT 消息里复述的 VIN 也被扫进 all_vins，
+#       导致"客户 A 的 VIN 补到客户 B 的询价"张冠李戴。
+#       且 all_vins[0] 无脑补，不区分 sender。
+# 修复：方向过滤（只扫 IN）+ sender 匹配 + 时序约束。
+# ====================================================================
+
+
+def test_vin_cross_link_out_direction_ignored(app):
+    """客服 OUT 消息里的 VIN 不得被扫进 all_vins。"""
+    from backend.services.rule_extract import _extract_vin_only_from_message
+    from backend.models.message import Message
+
+    conv = make_conv("group_vin", chat_type=Conversation.CHAT_GROUP)
+    m_out = make_msg(conv.id, "好的 VIN 是 WBAWX3100G0L69597", direction=Message.DIR_OUT)
+    assert _extract_vin_only_from_message(m_out) is None
+
+    m_in = make_msg(conv.id, "我的 VIN 是 WBAWX3100G0L69597", direction=Message.DIR_IN)
+    assert _extract_vin_only_from_message(m_in) == "WBAWX3100G0L69597"
+
+
+def test_vin_cross_link_sender_isolation(app):
+    """客户 A 的 VIN 不得补到客户 B 的询价上（多人群聊场景）。"""
+    conv = make_conv("group_multi_vin", chat_type=Conversation.CHAT_GROUP)
+    msg_a_vin = make_msg(conv.id, "WBAWX3100G0L69597", sender="客户A")
+    msg_a_inq = make_msg(conv.id, "节温器多少钱", sender="客户A")
+    msg_b_inq = make_msg(conv.id, "空气滤芯多少钱", sender="客户B")
+
+    from backend.services.rule_extract import rule_extract
+    scenes = rule_extract([msg_a_vin, msg_a_inq, msg_b_inq])
+
+    for s in scenes:
+        if s.get("sender_name") == "客户B":
+            # 客户 B 没发过 VIN，也没带号码 → scene 里不该有 VIN
+            assert not s.get("vin"), f"客户B 不应被补 VIN，实际={s.get('vin')!r}"
+
+
+def test_vin_cross_link_same_sender_works(app):
+    """同一 sender：先发 VIN 后发询价 → VIN 正确关联（设计目标不能被破坏）。"""
+    conv = make_conv("group_same", chat_type=Conversation.CHAT_GROUP)
+    msg_vin = make_msg(conv.id, "我的 VIN 是 WBAWX3100G0L69597", sender="老王")
+    msg_inq = make_msg(conv.id, "节温器多少钱", sender="老王")
+
+    from backend.services.rule_extract import rule_extract
+    scenes = rule_extract([msg_vin, msg_inq])
+
+    # 老王的询价应该带上老王自己发的 VIN
+    assert any(s.get("vin") == "WBAWX3100G0L69597" and s.get("sender_name") == "老王" for s in scenes)

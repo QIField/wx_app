@@ -233,3 +233,28 @@ def test_purchase_history_bad_args(client):
     assert client.post("/api/quote/query/purchase-history", json={}).status_code == 400
     assert client.post("/api/quote/query/purchase-history",
                        json={"number": OE, "page": "x"}).status_code == 400
+
+
+# ---------- 带空格号码的类型识别（2026-11-21 修复） ----------
+
+
+def test_detect_type_oe_with_spaces():
+    """手动查询输入带空格的 OE 号（如 "11 53 8 635 689"）→ 正确识别为 oe。"""
+    from backend.api.quote_query import _detect_type
+
+    # 用户可能从 PDF/图片 OCR 粘贴来的带空格格式
+    assert _detect_type("11 53 8 635 689") == "oe"
+    assert _detect_type("11 538 635689") == "oe"
+    # 正常格式不受影响
+    assert _detect_type("11538635689") == "oe"
+    # 纯数字且不足 6 位 → name
+    assert _detect_type("12345") == "name"
+
+
+def test_manual_search_oe_with_spaces(client, upstream):
+    """端到端：带空格 OE 号查询 → 自动归一化后走 OE 直查链路。"""
+    resp = search(client, {"q": "11 53 8 635 689"})
+    data = resp.get_json()["data"]
+    assert resp.status_code == 200 and data["type"] == "oe"
+    assert "product_list" in upstream
+    assert data["car"] is None and data["product"] is not None
