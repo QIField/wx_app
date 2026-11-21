@@ -48,16 +48,17 @@ def call(module, action, params=None, uuid=None, openid=""):
     """调中间方接口：拼公共参数、发 POST、统一解析返回。
 
     - module：接口模块段（send_api / messag_api / login_api / group_api / contacts_api）
-    - action：模块下方法名，形如 post_text_message / get_post_text_message
+    - action：模块下方法名，形如 post_text_message / get_post_text_message / setFriendRemark
     - 真实 URL 三段式：{BASE}/wx_app/{module}/{action}
     - openid：设备标识，多设备同步按账号绑定传入；演示模式下忽略
-    - uuid 由调用方传入（发送闭环里下发和确认用同一个）；不传则自动生成
+    - uuid：不传或 None 则自动生成（任务型接口：下发→轮询，前后用同一个 uuid）；
+      传 False 则跳过（纯同步命令型接口：setFriendRemark 这类，不需要后续查询）；
+      传具体字符串则原样用（发送闭环里下发和确认要共用一个 uuid）。
     每次调用（含四类失败场景）自动记 middle_call_log，见 services/middle_log.py。
     """
-    form = {
-        "openid": openid or "",
-        "uuid": uuid or str(uuid_lib.uuid4()),
-    }
+    form = {"openid": openid or ""}
+    if uuid is not False:
+        form["uuid"] = uuid or str(uuid_lib.uuid4())
     if params:
         form.update(params)
 
@@ -67,11 +68,11 @@ def call(module, action, params=None, uuid=None, openid=""):
         if action.startswith("get_"):
             body = {
                 "code": 0, "msg": "success (demo)",
-                "data": [{"uuid": form["uuid"], "processing_result": '{"ret": 200, "msg": "操作成功"}'}],
+                "data": [{"uuid": form.get("uuid"), "processing_result": '{"ret": 200, "msg": "操作成功"}'}],
             }
         else:
             body = {"code": 0, "msg": "success (demo)"}
-        middle_log.log_call(module, action, uuid=form["uuid"], openid=form["openid"],
+        middle_log.log_call(module, action, uuid=form.get("uuid"), openid=form["openid"],
                             params=params, resp_code=body.get("code"),
                             response_body=str(body), success=1)
         return body
