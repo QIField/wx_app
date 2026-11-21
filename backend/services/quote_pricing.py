@@ -129,6 +129,21 @@ def rebuild_quote_text(row, price=None):
             first["save_percent"] = max(0, round((1 - float(final) / store) * 100))
     except (TypeError, ValueError):
         pass
+    # ★ 同步更新首产品的首品牌 child sell_price/sell_price_fmt
+    # （_quote_text 现已从 brand-level 读价，不是 item-level）
+    product = first.get("product")
+    if product:
+        children = list(product.get("child") or [])
+        if children:
+            c0 = dict(children[0])
+            c0["sell_price"] = final
+            try:
+                c0["sell_price_fmt"] = f"¥{float(final):.0f}" if float(final) > 0 else ""
+            except (TypeError, ValueError):
+                c0["sell_price_fmt"] = ""
+            children[0] = c0
+            product = {**product, "child": children}
+            first["product"] = product
     pricing["items"] = [first] + items[1:]
     pricing["final_price"] = final
     pricing["text"] = _quote_text(row, r.get("car"), pricing["items"], pricing.get("level"), pricing.get("rate"))
@@ -198,39 +213,105 @@ def _split_lines(value):
     return [p.strip() for p in parts if p.strip()]
 
 
-def _decode_oe(vin, part):
-    """VIN+配件名 → 标准 OE（partno 按名译码，实测接受名称）。译不出返回空串。"""
+def _decode_oes(vin, part):
+    """VIN+配件名 → 全部匹配的 OE 列表（partno 按名译码可能返回多行：前下摆臂→左+右）。
+
+    返回 list[dict]，每项：
+      {oe, oe_name, price4s}   oe 去空格紧凑码，oe_name=partno 的 oeName 语义名（左前下摆臂）
+    译不出返回空 list。
+    """
     data = qq_client.partno(vin, part)
     rows = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
-    info = rows[0] if rows and isinstance(rows[0], dict) else {}
-    # oeCode 带空格（"11 53 8 635 689"）、译码输出可能补 A 前缀——
-    # product_list 接受 OE/store/PARTENT 且服务侧归一化，原样传即可，只去空格
-    return (info.get("oeCodeTrim") or info.get("oeCode") or "").replace(" ", "").strip()
+    results = []
+    for info in rows:
+        if not isinstance(info, dict):
+            continue
+        oe = (info.get("oeCodeTrim") or info.get("oeCode") or "").replace(" ", "").strip()
+        if oe:
+            results.append({
+                "oe": oe,
+                "oe_name": info.get("oeName") or "",
+                "price4s": info.get("price4s") or "",
+            })
+    return results
+
+
+def _decode_oe(vin, part):
+    """单 OE 兼容包装（manual-search 编排层仍取首个；自动报价已改走 _decode_oes 展开）。"""
+    rows = _decode_oes(vin, part)
+    return rows[0]["oe"] if rows else ""
 
 
 def _resolve_items(row):
-    """询价行 → 待价件列表 [{part, oe}]。OE 优先用 AI 提取值，缺了按名译码。
+    """询价行 → 待价件列表 [{part, oe, oe_name?, price4s?}]。
 
-    多件换行分隔；无法定 OE 的件跳过（全部跳过时由调用方转人工）。
+    多件换行分隔；OE 优先用 AI 提取值（1:1 对应 part_name），
+    缺 OE 时走 _decode_oes 按名译码 → partno 返回几个 OE 就展开成几条 item
+    （例：前下摆臂 → 左A1643303407 + 右A1643303507 两条独立报价）。
+
+    译码失败也要产出占位 item（oe="0"），确保话术里能列出 ★标题
+    （Block B 里 ★3、前分动箱 (0) 这种形态）。
+    全部 item 都译不出 OE/查无档案时由调用方转人工。
     """
     parts = _split_lines(row.part_name)
     oems = _split_lines(row.oem_no)
     items = []
     for i, part in enumerate(parts):
-        oe = oems[i] if i < len(oems) else ""
-        if not oe and row.vin:
-            oe = _decode_oe(row.vin.strip(), part)
-        if oe:
-            items.append({"part": part, "oe": oe})
+        oe_direct = oems[i] if i < len(oems) else ""
+        if oe_direct:
+            # AI 已给 OE → 直接用（不展开，避免 partno 二次调用）
+            items.append({"part": part, "oe": oe_direct})
+        elif row.vin:
+            decoded = _decode_oes(row.vin.strip(), part)
+            if decoded:
+                for d in decoded:
+                    items.append({
+                        "part": part,
+                        "oe": d["oe"],
+                        "oe_name": d["oe_name"],
+                        "price4s": d["price4s"],
+                    })
+            else:
+                # partno 译码失败 → 占位 item，oe="0"，确保话术里能出 ★标题
+                items.append({"part": part, "oe": "0"})
+        else:
+            # 无 VIN → 占位 item
+            items.append({"part": part, "oe": "0"})
     if not items and oems:  # AI 只提取了编号没给件名
         items = [{"part": oe, "oe": oe} for oe in oems]
     return items
 
 
 def _price_item(item, rate):
-    """件 → 报价行：OE 查产品档案 → 系数价。查无档案 product=None。"""
+    """件 → 报价行：OE 查产品档案 → 系数价。查无档案 product=None。
+
+    每条品牌行（child）现在带：
+      - retail_price / retail_price_fmt  — product_list.price 市场参考价
+      - sell_price  / sell_price_fmt    — cost_price × rate 我方实际报价
+      - image                            — 每个品牌自己的产品图
+      - product_name / oe / partent_number — 品牌级完整信息
+    顶层 final_price 仍取首品牌 sell_price（兼容旧字段）。
+    """
     data = qq_client.product_list(item["oe"])
     product = _norm_product(_first_product(data, item["oe"]))
+
+    # 逐品牌计算我方报价（cost × rate），追加 retail/sell 格式化字段
+    if product:
+        for c in product.get("child") or []:
+            try:
+                cost_f = float(c.get("cost_price") or 0)
+                sell_f = cost_f * rate
+            except (TypeError, ValueError):
+                sell_f = None
+            c["sell_price"] = f"{sell_f:.2f}" if sell_f is not None else ""
+            c["sell_price_fmt"] = f"¥{sell_f:.0f}" if sell_f and sell_f > 0 else ""
+            try:
+                retail_f = float(c.get("retail_price") or 0)
+                c["retail_price_fmt"] = f"¥{retail_f:.0f}" if retail_f > 0 else ""
+            except (TypeError, ValueError):
+                c["retail_price_fmt"] = ""
+
+    # 顶层兼容字段（首品牌为准）
     cost = final = store = None
     if product and product["cost_price"]:
         try:
@@ -240,8 +321,9 @@ def _price_item(item, rate):
         except (TypeError, ValueError):
             cost = final = None
     save = max(0, round((1 - cost * rate / store) * 100)) if (cost and final and store > 0) else None
+
     return {
-        **item,
+        **item,  # 含 oe_name / price4s（来自 partno 译码层）
         "product": product,
         "cost_price": f"{cost:.2f}" if cost is not None else "",
         "store_price": f"{store:.2f}" if store else "",
@@ -312,11 +394,23 @@ def _norm_product(row):
             stock = int(c.get("stock") if c.get("stock") is not None else 0)
         except (TypeError, ValueError):
             stock = 0
+        dn = {
+            str(i.get("key") or "").lower(): (i.get("number") or "")
+            for i in (c.get("display_number") or []) if isinstance(i, dict)
+        }
         child.append({
+            # 原有字段（保持契约兼容）
             "brand_name": c.get("brand_name") or "",
             "cost_price": str(c.get("cost_price") or ""),
             "store_price": str(c.get("store_price") or ""),
             "stock": stock,
+            # ★ 新增字段：每个品牌自己的完整信息
+            "product_name": c.get("name") or c.get("l_name_zh") or c.get("l_name_zh_default") or "",
+            "product_id": c.get("product_id"),
+            "retail_price": str(c.get("price") or ""),           # product_list.price 零售参考价
+            "image": c.get("pic") or c.get("bigpic") or "",      # 每个品牌自己的产品图
+            "oe": dn.get("oe") or "",                            # 这个品牌实际对应的 OE（≠ 查询用的 OE）
+            "partent_number": dn.get("partent") or "",
         })
     return {
         "product_id": main.get("product_id"),
@@ -440,20 +534,31 @@ def _fmt_price(p):
 
 
 def _quote_text(row, car, items, level=None, rate=None):
-    """话术模板（2026-11-20 V4）：
-    @真实名称 + VIN + 车型 + 分隔线 + ★n 配件(OE) + 品牌报价行（已乘系数）。
+    """话术模板（2026-11-21 V7）：品牌按 sell_price 升序，品牌名+产品名+价格三列对齐。
 
-    - @ 优先查 Contact 表真实名称/备注，不用 wxid
-    - 品牌报价行：child.cost_price × rate → 直接显示卖出价
-    - 不额外加汇总报价行，品牌行就是报价本身
-    - 不写"系数"二字，客户直接看到实付金额
+    ────────────────── 头部 ──────────────────
+    @真实名称 + VIN + 车型（saleModelName 已含品牌则不再重复拼接）
+
+    ────────────────── ★ 区块（所有 item 都显示，无产品的只出标题） ──────────────────
+    ★n、{oe_name 或 product_name} ({oe})
+    ① {brand}[({product_name 若 ≠ brand 且 ≠ title})]    {sell}
+    ② ...
+
+    改动（对比 V5）：
+    - 分隔线 10→16 字符；品牌行无缩进
+    - 品牌按 sell_price 升序排序
+    - ★块间加空行（首块除外）
+    - 无 product 的 item 也显示 ★标题 + OE
+    - 括号条件恢复 V5：p_name != brand AND p_name != title 才追加
+    - 每个 ★块内按 brand_display 最大宽度左填充，价格列对齐
     """
     rate = rate or 1.0
     blocks = []
-    priced = [it for it in items if it["product"]]
     has_car = bool(car and (car["brandName"] or car["model"]))
-    if not priced and not has_car:
+    if not items and not has_car:
         return ""
+
+    # 头部
     conv = db.session.get(Conversation, row.conversation_id)
     who = _resolve_real_name(row.sender_name, conv)
     blocks.append(f"@{who}")
@@ -461,7 +566,8 @@ def _quote_text(row, car, items, level=None, rate=None):
         blocks.append(row.vin)
     if has_car:
         if car.get("saleModelName"):
-            head = " ".join(t for t in (car["brandName"], car["saleModelName"]) if t)
+            # saleModelName 已含品牌（"奔驰 GLC 300 L 4MATIC 2020 ..."），不再重复拼 brandName
+            head = car["saleModelName"]
         else:
             head = " ".join(t for t in (car["brandName"], car["model"]) if t)
             if car["yearPattern"]:
@@ -469,31 +575,73 @@ def _quote_text(row, car, items, level=None, rate=None):
             if car["displacement"]:
                 head += f" {car['displacement']}"
         blocks.append(head)
-    if priced:
-        blocks.append("—" * 10)
-        for n, it in enumerate(priced, 1):
-            p = it["product"]
-            name = p["product_name"] or it["part"]
-            oe = it.get("oe") or ""
-            blocks.append(f"★{n}、{name} ({oe})")
-            # 品牌报价行（已乘系数，直接给客户看实付金额）
+
+    # ★ 区块（按配件类型固定优先级排序）
+    if items:
+        # 优先级：半轴类 → 分动箱类 → 油底壳类 → 其他（保持原序）
+        _PRIORITY = [
+            ("半轴", "传动轴"),    # 0
+            ("分动箱",),          # 1
+            ("油底壳",),          # 2
+        ]
+        def _part_rank(it):
+            text = (it.get("part") or it.get("oe_name") or "").lower()
+            for rank, kws in enumerate(_PRIORITY):
+                if any(kw in text for kw in kws):
+                    return rank
+            return 99
+        items_sorted = sorted(items, key=_part_rank)
+
+        blocks.append("—" * 16)
+        circles = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
+        for n, it in enumerate(items_sorted, 1):
+            # ★块间空行（首块不加）
+            if n > 1:
+                blocks.append("")
+
+            p = it.get("product") or {}
+            # ★ 标题：优先 partno 的 oe_name（更贴近客户询价词），其次 product_name，最后原 part
+            title = (it.get("oe_name")
+                     or p.get("product_name")
+                     or it.get("part")
+                     or "")
+            oe = (it.get("oe")
+                  or (p.get("display_number", {}) or {}).get("value")
+                  or "")
+            blocks.append(f"★{n}、{title} ({oe})")
+
+            # 有产品档案 → 列出品牌报价（按我方报价升序 + 价格列对齐）；无档案 → 标题后结束
             child = p.get("child") or []
-            shown = 0
-            circles = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
-            for c in child[:20]:
-                brand = (c.get("brand_name") or "").strip()
-                raw_cost = c.get("cost_price")
-                if not brand or not raw_cost:
-                    continue
-                try:
-                    sell = float(raw_cost) * rate
-                except (TypeError, ValueError):
-                    continue
-                price = _fmt_price(f"{sell:.2f}")
-                if not price:
-                    continue
-                blocks.append(f"  {circles[shown]} {brand} {price}")
-                shown += 1
-                if shown >= 10:
-                    break
+            if child:
+                def _sort_key(c):
+                    try:
+                        return float(c.get("sell_price") or 0)
+                    except (TypeError, ValueError):
+                        return float("inf")
+                child_sorted = sorted(child, key=_sort_key)
+
+                # 先算所有品牌行，拿到最大 brand_display 宽度用于对齐
+                rows = []  # [(brand_display, sell), ...]
+                for c in child_sorted:
+                    brand = (c.get("brand_name") or "").strip()
+                    if not brand:
+                        continue
+                    sell = c.get("sell_price_fmt") or ""
+                    if not sell:
+                        continue
+                    # 格式：品牌｜产品名｜ —— 不管跟 title 是否重复都显示产品名
+                    p_name = (c.get("product_name") or "").strip()
+                    if p_name:
+                        brand_display = f"{brand}｜{p_name}｜"
+                    else:
+                        brand_display = f"{brand}｜"
+                    rows.append((brand_display, sell))
+                    if len(rows) >= 10:
+                        break
+
+                # 输出：品牌｜产品名｜¥价格（直接贴，不对齐）
+                shown = 0
+                for bd, sell in rows:
+                    blocks.append(f"{circles[shown]} {bd}{sell}")
+                    shown += 1
     return "\n".join(blocks)

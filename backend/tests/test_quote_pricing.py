@@ -139,7 +139,11 @@ def test_decode_by_name_via_partno(app, mock_api):
     row = make_inquiry(conv, vin=VIN, part_name="节温器")
     items = quote_pricing._resolve_items(row)
     assert mock_api["partno"] == [(VIN, "节温器")]
-    assert items == [{"part": "节温器", "oe": "11538635689"}]  # oeCodeTrim 去空格
+    # 多 OE 展开后 item 现在携带 partno 层的 oe_name / price4s
+    assert items == [{
+        "part": "节温器", "oe": "11538635689",
+        "oe_name": "节温器", "price4s": "1270.0",
+    }]
 
 
 def test_multi_part_lines_split(app, monkeypatch):
@@ -154,9 +158,10 @@ def test_multi_part_lines_split(app, monkeypatch):
 
 
 def test_name_without_vin_cannot_decode(app):
+    """缺 VIN + AI 没给 oem_no → 占位 item oe="0"（Block B 里 ★3 形态）。"""
     conv = make_conv()
     row = make_inquiry(conv, part_name="节温器")
-    assert quote_pricing._resolve_items(row) == []
+    assert quote_pricing._resolve_items(row) == [{"part": "节温器", "oe": "0"}]
 
 
 # ---------- 系数（契约 C 同口径：群看群/单聊看用户） ----------
@@ -208,17 +213,19 @@ def test_price_inquiry_full_chain_contract_a(app, mock_api):
     assert pricing["final_price"] == "72.16"  # 88.00 × 0.82
     item = pricing["items"][0]
     assert item["save_percent"] == 94  # 1 - 72.16/1270.00
-    assert "★1、节温器总成 (11538635689)" in pricing["text"]
-    # V4 话术：品牌行直接显示乘系数后的卖出价
-    assert "马勒(MAHLE) ¥72" in pricing["text"]   # 88 × 0.82 = 72.16
-    assert "原厂 ¥336" in pricing["text"]          # 410 × 0.82 = 336.2
-    assert "盖茨(GATES) ¥86" in pricing["text"]     # 105 × 0.82 = 86.1
-    assert "4S" not in pricing["text"]             # 话术不再出现 4S 价
+    assert "★1、节温器 (11538635689)" in pricing["text"]
+    # V9 话术：品牌｜产品名｜¥价格，按我方报价升序，直接贴不对齐
+    assert "① 马勒(MAHLE)｜节温器总成｜¥72" in pricing["text"]
+    assert "② 盖茨(GATES)｜¥86" in pricing["text"]
+    assert "③ 原厂｜¥336" in pricing["text"]
+    assert "4S" not in pricing["text"]
     assert "@老王" in pricing["text"]              # 统一 @ 发送者
     assert VIN in pricing["text"]                  # VIN 独立行
-    assert "宝马 进口宝马 X3 20iX 2016 2.0T 手自一体" in pricing["text"]  # 品牌+saleModelName
+    # V7: saleModelName 已含品牌，不再重复拼 brandName
+    assert "进口宝马 X3 20iX 2016 2.0T 手自一体" in pricing["text"]
+    assert "宝马 进口宝马" not in pricing["text"]  # 不再出现 "宝马 宝马..." 重复
     assert "系数" not in pricing["text"]           # 话术不出现"系数"二字
-    assert "——————————" in pricing["text"]
+    assert "————————————————" in pricing["text"]   # 分隔线 16 字符
 
 
 def test_product_name_falls_back_to_l_name_zh(app, mock_api, monkeypatch):
@@ -243,16 +250,20 @@ def test_no_exist_oe_goes_review(app, mock_api, monkeypatch):
     assert row.status == QuoteInquiry.ST_REVIEW
     assert "查无此件" in row.price_json["error"]
     assert row.price_json["product"] is None
-    assert row.price_json["pricing"]["text"] == ""
+    # V6: 无产品档案的 item 也显示 ★标题 + OE（Block B 里 ★3-★5 的形态）
+    assert "★1、11538635689" in row.price_json["pricing"]["text"]
+    assert "————————————————" in row.price_json["pricing"]["text"]
 
 
-def test_decode_fail_goes_review(app, mock_api):
-    """有件名但缺 VIN（译码不可用）→ review 人工补。"""
+def test_decode_fail_goes_review(app, mock_api, monkeypatch):
+    """有件名但缺 VIN → 占位 item oe="0" → 查无档案 → review 人工补。"""
     conv = make_conv()
     row = make_inquiry(conv, part_name="节温器")
+    # 真实产品库查 "0" 肯定没档案，mock 对齐这个行为
+    monkeypatch.setattr(qq_client, "product_list", lambda n: NO_PRODUCT_LIST)
     quote_pricing.price_inquiry(row)
     assert row.status == QuoteInquiry.ST_REVIEW
-    assert "无法解析 OE" in row.price_json["error"]
+    assert "产品库查无此件" in row.price_json["error"]
 
 
 def test_vin_only_keeps_pending_car_card(app, mock_api):
