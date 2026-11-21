@@ -1,4 +1,4 @@
-"""快捷报价服务客户端（对接契约 docs/quick-quote-api.md，2026-11-17 实测版）。
+﻿"""快捷报价服务客户端（对接契约 docs/quick-quote-api.md，2026-11-17 实测版）。
 
 - 全部 POST + application/x-www-form-urlencoded（服务不支持 JSON body）
 - openid 服务方独立签发，与中间方设备 openid 不通用，配置 .env QQ_OPENID
@@ -6,6 +6,7 @@
 - 上游异常返回 500 Flask HTML（非 JSON）——统一兜底成 QuoteApiError，调用方只管捕获
 - 产品图：直接用 product_list 返回的 child[].pic 字段（服务方已从开思 CDN 取好），
   再用 MD5 校验过滤占位图（服务方给的 pic URL 如果对应占位图"禁止拍照"图标也会返回）
+- 2026-11-21：call() 加重试（网络抖动 / HTTP 5xx 自动短退避 2 次）
 """
 import hashlib
 import json
@@ -18,6 +19,7 @@ from backend.config import (
     QQ_OPENID,
     QQ_TIMEOUT_SECONDS,
 )
+from backend.utils.retry import call_with_retry
 
 log = logging.getLogger(__name__)
 
@@ -50,11 +52,24 @@ def _build_form(params, openid):
     return form
 
 
+# 可重试的 QuoteApiError：仅网络抖动 / 上游瞬时 5xx；鉴权 / 业务失败 / 4xx 一律不重试
+_RETRYABLE_MARKERS = ("超时", "不可达", "HTTP 5")
+
+
+def _is_retryable(exc):
+    """QuoteApiError 消息命中网络/5xx 关键词才重试。"""
+    if not isinstance(exc, QuoteApiError):
+        return False
+    msg = str(exc)
+    return any(m in msg for m in _RETRYABLE_MARKERS)
+
+
 def call(key, params=None, *, timeout=None, openid=None):
     """统一调用入口：POST form → 校验 code → 返回 data（结构契约见文档各接口详规）。
 
     - key 见 ENDPOINTS；params 只传业务参数，openid 自动注入
     - 任何失败抛 QuoteApiError，成功返回 data（list / dict / str 三种形态按接口不同）
+    - 网络抖动 / 上游 5xx 自动短退避重试（默认首呼 + 2 次）
     """
     endpoint = ENDPOINTS.get(key)
     if endpoint is None:
@@ -62,30 +77,34 @@ def call(key, params=None, *, timeout=None, openid=None):
     url = QQ_API_BASE_URL.rstrip("/") + "/" + endpoint
     form = _build_form(params, openid or QQ_OPENID)
     seconds = timeout or QQ_TIMEOUT_SECONDS
-    try:
-        resp = requests.post(url, data=form, timeout=seconds)
-    except requests.Timeout:
-        raise QuoteApiError(f"快捷报价服务超时（{seconds}s）：{key}") from None
-    except requests.RequestException as exc:
-        raise QuoteApiError(f"快捷报价服务不可达：{exc}") from None
 
-    if resp.status_code == 401:
+    def _post():
         try:
-            msg = resp.json().get("msg") or "鉴权失败"
+            resp = requests.post(url, data=form, timeout=seconds)
+        except requests.Timeout:
+            raise QuoteApiError(f"快捷报价服务超时（{seconds}s）：{key}") from None
+        except requests.RequestException as exc:
+            raise QuoteApiError(f"快捷报价服务不可达：{exc}") from None
+
+        if resp.status_code == 401:
+            try:
+                msg = resp.json().get("msg") or "鉴权失败"
+            except ValueError:
+                msg = "鉴权失败"
+            raise QuoteApiError(f"快捷报价鉴权失败：{msg}")
+        if resp.status_code >= 500:
+            # 实测：上游异常返回 Flask HTML 错误页，统一兜底
+            raise QuoteApiError(f"快捷报价服务异常（HTTP {resp.status_code}）：{key}")
+        try:
+            body = resp.json()
         except ValueError:
-            msg = "鉴权失败"
-        raise QuoteApiError(f"快捷报价鉴权失败：{msg}")
-    if resp.status_code >= 500:
-        # 实测：上游异常返回 Flask HTML 错误页，统一兜底
-        raise QuoteApiError(f"快捷报价服务异常（HTTP {resp.status_code}）：{key}")
-    try:
-        body = resp.json()
-    except ValueError:
-        raise QuoteApiError(f"快捷报价服务返回非 JSON（HTTP {resp.status_code}）：{key}") from None
-    if not isinstance(body, dict) or body.get("code") != 0:
-        msg = body.get("msg") if isinstance(body, dict) else None
-        raise QuoteApiError(f"快捷报价业务失败：{msg or '未知错误'}")
-    return body.get("data")
+            raise QuoteApiError(f"快捷报价服务返回非 JSON（HTTP {resp.status_code}）：{key}") from None
+        if not isinstance(body, dict) or body.get("code") != 0:
+            msg = body.get("msg") if isinstance(body, dict) else None
+            raise QuoteApiError(f"快捷报价业务失败：{msg or '未知错误'}")
+        return body.get("data")
+
+    return call_with_retry(_post, _is_retryable)
 
 
 # ---------- 便捷包装（阶段 2+ 编排层调用；参数名对齐文档各接口详规） ----------

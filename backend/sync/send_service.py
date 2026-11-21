@@ -1,22 +1,37 @@
-"""发送消息编排：先落库再下发，最终结果由 confirm_worker 轮询收尾。
+﻿"""发送消息编排：先落库再下发，最终结果由 confirm_worker 轮询收尾。
 
 流程（已确认的《发送消息闭环》流程图）：
 客户端 POST → 写 message(发送中) + send_task(待下发，带 uuid)
   → 调中间方 post_xxx → 成功：task=已下发
                       → 失败：task=失败 + message=失败，抛 SendDispatchError
+
+2026-11-21：中间方下发内部加重试（网络抖动 / code=500 短退避 2 次），
+外部 quote_sender 层的 _dispatch_and_mark 不感知——仍只看 SendDispatchError。
 """
+import logging
 from datetime import datetime
 from uuid import uuid4
 
 from flask import abort
 
 from backend.adapter import sender as middle_sender
+from backend.adapter.client import MiddleApiError
 from backend.extensions import db
 from backend.models.conversation import Conversation
 from backend.models.device import Device
 from backend.models.message import Message
 from backend.models.send_task import SendTask
 from backend.services import conversations as conversation_service
+from backend.utils.retry import call_with_retry
+
+log = logging.getLogger(__name__)
+
+
+def _is_dispatch_retryable(exc):
+    """下发重试条件：仅中间方 code=500（业务内部错误）或 code=None（网络/超时）。"""
+    if not isinstance(exc, MiddleApiError):
+        return False
+    return exc.code is None or exc.code == 500
 
 
 class SendDispatchError(Exception):
@@ -140,9 +155,13 @@ def send_message(conversation_id, msg_type, content, payload, operator=None):
 
     try:
         post_fn = getattr(middle_sender, fn_name)
-        post_fn(uuid=task.uuid, openid=conv.openid or "", **task.request_payload)
+        # 短退避重试：仅中间方 code=500 / 网络抖动重试，其余直接上抛
+        call_with_retry(
+            post_fn, _is_dispatch_retryable,
+            uuid=task.uuid, openid=conv.openid or "", **task.request_payload,
+        )
         task.status = SendTask.ST_DISPATCHED
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 最终兜底：任何失败都当下发失败
         task.status = SendTask.ST_FAILED
         msg.status = Message.ST_FAILED
         db.session.commit()
