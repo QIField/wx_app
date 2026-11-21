@@ -80,22 +80,25 @@ def send_manual(row, text, operator):
 
 
 def _dispatch_and_mark(row, text, image, operator=None, fail_label="自动发送失败"):
-    """图前文后下发并按结果置状态：成功置已报价+广播；下发失败转 review 记原因。
+    """图前文后下发并按结果置状态：成功置已报价+广播；话术下发失败转 review 记原因。
 
     operator=None 系统代发（自动报价）；人工传登录人（消息快照记操作人）。
+
+    产品图为可选项：开思 CDN 偶发下载超时时静默跳过继续发话术——报价话术才是
+    核心交付物，图片失败不应让整单进人工。
     """
     r = row.price_json or {}
     pushed, conv, failed = [], None, None
+    conv = db.session.get(Conversation, row.conversation_id)
+
+    # 图片可选：失败仅记 warning，不阻塞话术
+    if image:
+        img_msg = _dispatch_image(row.conversation_id, image, operator)
+        if img_msg is not None:
+            pushed.append(_pushed(img_msg, conv))
+
+    # 话术必须：失败进 review
     try:
-        conv = db.session.get(Conversation, row.conversation_id)
-        if image:
-            pushed.append(_pushed(
-                send_service.send_message(
-                    row.conversation_id, Message.MSG_IMAGE, "",
-                    {"img_url": image}, operator=operator,
-                ),
-                conv,
-            ))
         pushed.append(_pushed(
             send_service.send_message(
                 row.conversation_id, Message.MSG_TEXT, text, {}, operator=operator,
@@ -106,7 +109,7 @@ def _dispatch_and_mark(row, text, image, operator=None, fail_label="自动发送
         failed = str(exc)
 
     if failed is not None:
-        row.status = QuoteInquiry.ST_REVIEW  # 契约 B：发送失败 → 人工处理
+        row.status = QuoteInquiry.ST_REVIEW
         row.price_json = {**r, "error": f"{fail_label}：{failed}"}
         return False
 
@@ -116,6 +119,23 @@ def _dispatch_and_mark(row, text, image, operator=None, fail_label="自动发送
     log.info("报价已发送 inquiry=%s conv=%s 带图=%s 系统代发=%s",
              row.id, row.conversation_id, bool(image), operator is None)
     return True
+
+
+def _dispatch_image(conv_id, image_url, operator):
+    """尝试发报价产品图。成功返回 Message，失败返回 None 并记 warning。
+
+    产品图为开思 CDN URL，中间方需下载后转发——偶发 30-50s 超时是预期内风险，
+    调用方不应因图片失败而阻塞话术下发。
+    """
+    try:
+        return send_service.send_message(
+            conv_id, Message.MSG_IMAGE, "",
+            {"img_url": image_url}, operator=operator,
+        )
+    except SendDispatchError as exc:
+        log.warning("报价产品图下发失败，降级继续发话术 conv=%s err=%s",
+                    conv_id, str(exc))
+        return None
 
 
 def _pushed(msg, conv):

@@ -55,12 +55,21 @@ function confirmEdit() {
 async function onSend() {
   if (!canSend.value || sending.value) return
   sending.value = true
+  let imgWarn = ''
   try {
     const img = ((product.value && product.value.image) || '').trim()
-    if (img) await chat.sendMedia(2, '', { img_url: img, path: '' }) // 产品决议：图在前
+    if (img) {
+      try {
+        await chat.sendMedia(2, '', { img_url: img, path: '' })
+      } catch (imgErr) {
+        // 产品图偶发下载超时（开思 CDN），跳过继续发话术
+        imgWarn = '（产品图发送失败，仅发话术）'
+        console.warn('[报价] 产品图发送失败，降级发话术：', imgErr.message || imgErr)
+      }
+    }
     await chat.sendText(quoteText(props.r))
     sentOk.value = true
-    ElMessage.success('报价已发送至当前会话')
+    ElMessage.success(imgWarn ? `报价已发送${imgWarn}` : '报价已发送至当前会话')
   } catch (e) {
     ElMessage.error(e.message || '发送失败')
   } finally {

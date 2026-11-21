@@ -127,7 +127,7 @@ def test_no_product_or_text_stays_pending(app):
 
 
 def test_dispatch_failure_goes_review(app, sender_spy, monkeypatch):
-    """下发失败：转 review（契约 B「发送失败」出口），error 记原因，不广播。"""
+    """图片下发失败降级发话术，话术也失败才进 review。"""
     conv = make_conv()
     row = make_inquiry(conv)
     set_global_mode("auto")
@@ -135,11 +135,25 @@ def test_dispatch_failure_goes_review(app, sender_spy, monkeypatch):
     def boom(**kw):
         raise send_service.SendDispatchError("网络不可达")
 
+    # 图片失败但话术成功 → 仍然已报价（图片是可选项，话术是核心交付）
     monkeypatch.setattr(send_service.middle_sender, "post_image", boom)
-    assert quote_sender.auto_send_pending([row]) == 0
-    assert row.status == QuoteInquiry.ST_REVIEW
-    assert "自动发送失败" in row.price_json["error"]
-    assert sender_spy["broadcast"] == []  # 图文都没发出去，无广播
+    assert quote_sender.auto_send_pending([row]) == 1
+    assert row.status == QuoteInquiry.ST_SENT  # 话术发出去了
+    assert len(sender_spy["text"]) == 1  # 话术确实发了
+    assert len(sender_spy["image"]) == 0  # 图片失败没发
+    # 只广播话术一条（图片失败不广播）
+    events = [d for e, d in sender_spy["broadcast"] if e == "new_message"]
+    assert [m["msg_type"] for m in events] == [1]
+
+    # 话术也失败 → 进 review
+    def boom_also_text(**kw):
+        raise send_service.SendDispatchError("网络不可达")
+
+    row2 = make_inquiry(conv)
+    monkeypatch.setattr(send_service.middle_sender, "post_text", boom_also_text)
+    assert quote_sender.auto_send_pending([row2]) == 0
+    assert row2.status == QuoteInquiry.ST_REVIEW
+    assert "自动发送失败" in row2.price_json["error"]
 
 
 def test_batch_resilient(app, sender_spy, monkeypatch):

@@ -247,7 +247,7 @@ def test_send_forbidden_when_send_disabled(client, send_spy, monkeypatch):
 
 
 def test_send_dispatch_failure_goes_review(client, send_spy, monkeypatch):
-    """下发失败：502 + 转 review（契约 B 出口），error 记原因，不置已报价。"""
+    """图片下发失败降级发话术，话术也失败才 502 + 转 review。"""
     conv = make_conv("dev01", "group1")
     row = make_priced(conv)
     from backend.sync import send_service
@@ -255,11 +255,19 @@ def test_send_dispatch_failure_goes_review(client, send_spy, monkeypatch):
     def boom(**kw):
         raise send_service.SendDispatchError("网络不可达")
 
+    # 图片失败但话术成功 → 200 已报价（图片降级）
     monkeypatch.setattr(send_service.middle_sender, "post_image", boom)
     resp = client.post(f"/api/quote/inquiries/{row.id}/send")
-    assert resp.status_code == 502
-    assert row.status == QuoteInquiry.ST_REVIEW
-    assert "发送失败" in row.price_json["error"]
+    assert resp.status_code == 200  # 话术发出去了
+    assert row.status == QuoteInquiry.ST_SENT
+
+    # 话术也失败 → 502 + 转 review
+    row2 = make_priced(conv)
+    monkeypatch.setattr(send_service.middle_sender, "post_text", boom)
+    resp2 = client.post(f"/api/quote/inquiries/{row2.id}/send")
+    assert resp2.status_code == 502
+    assert row2.status == QuoteInquiry.ST_REVIEW
+    assert "发送失败" in row2.price_json["error"]
 
 
 def test_ignore_moves_to_ignored_and_conflict_on_sent(client):
