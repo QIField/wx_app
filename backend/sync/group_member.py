@@ -46,6 +46,7 @@ def save_members(openid, chatroom_wxid, members):
             wxid=wxid,
             nickname=by_wxid[wxid].get("nickname") or None,
             member_remark=by_wxid[wxid].get("member_remark") or None,
+            avatar=by_wxid[wxid].get("avatar") or None,
         ))
     for wxid, m in by_wxid.items():
         row = existing.get(wxid)
@@ -57,6 +58,9 @@ def save_members(openid, chatroom_wxid, members):
             changed = True
         if not row.member_remark and m.get("member_remark"):
             row.member_remark = m["member_remark"]
+            changed = True
+        if not row.avatar and m.get("avatar"):
+            row.avatar = m["avatar"]
             changed = True
     return changed or bool(created)
 

@@ -72,7 +72,7 @@ def collect_group_results(openid=None):
                 done.append(task_uuid)
             continue
         done.append(task_uuid)
-        info = parse_group_info(record)
+        info = parse_group_info(record, dev_openid, wxid)
         if info:
             apply_group_info(conv_id, wxid, info)
     for task_uuid in done:
@@ -200,26 +200,12 @@ def refresh_groups_now(openid, groups):
         if record is None:
             _fail_counts[key] = _fail_counts.get(key, 0) + 1
             continue
-        info = parse_group_info(record)
+        info = parse_group_info(record, openid, conv.wxid)
         if info:
             apply_group_info(conv.id, conv.wxid, info)
-            _refresh_member_avatars_now(conv)  # 名册刚落，立即补头像避免等兜底轮
         else:
             # 已出结果但 ret != 200：接口真实失败，计入失败数交给限流/兜底
             _fail_counts[key] = _fail_counts.get(key, 0) + 1
-
-
-def _refresh_member_avatars_now(conv):
-    """消息触发路径：收割完单群名册后立即补该群成员头像（一次批量约 4 秒）。
-
-    每群最多 20 人/次，超出的与失败都留给 30 分钟兜底轮，不阻塞收消息。
-    """
-    try:
-        if group_member.refresh_avatars_of_device(conv.openid, chatroom_wxid=conv.wxid):
-            db.session.commit()
-            broadcast("conv_updated", {"conversation_id": conv.id})
-    except Exception:  # noqa: BLE001 补头像失败不影响收消息主链路
-        db.session.rollback()
 
 
 def apply_group_info(conv_id, wxid, info):
@@ -247,13 +233,12 @@ def apply_group_info(conv_id, wxid, info):
         broadcast("conv_updated", {"conversation_id": conv.id})
 
 
-def parse_group_info(record):
+def parse_group_info(record, openid="", wxid=""):
     """任务记录 → {nickname, avatar, members, remark}。
 
-    2026-10-30 实测 processing_result.data：
-    nickName=群名, smallHeadImgUrl=群头像,
-    remark=群备注（来自 chatroom_info）,
-    memberList=成员（wxid+nickName；头像为空，走 brief_info 补拉）。
+    chatroom_info 的 memberList 头像全是 null（实测），传 openid + wxid 时
+    额外调 chatroom_member_list 补头像——一次调完群资料+成员头像，省掉
+    原来兜底轮里单独跑 refresh_avatars_of_device 这一步。
     """
     data_raw = unwrap_result(record)
     if data_raw is None:
@@ -267,6 +252,9 @@ def parse_group_info(record):
                 "nickname": pick(row, ("nickName", "nickname", "displayName")),
                 "member_remark": pick(row, ("remark", "memberRemark", "displayName")),
             })
+    # 补成员头像：chatroom_info.memberList 头像全 null，chatroom_member_list 有值
+    if openid and wxid and members:
+        _fill_member_avatars(openid, wxid, members)
     return {
         "nickname": pick(data, ("nickName", "nickname", "chatroom_name", "name")),
         "avatar": pick(data, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "avatar")),
@@ -275,10 +263,44 @@ def parse_group_info(record):
     }
 
 
+def _fill_member_avatars(openid, wxid, members):
+    """chatroom_member_list 批量补成员头像，已补过的不再覆盖。
+
+    单群失败不影响其他群的 collect_group_results，所以内部吞异常；
+    查不到结果时 members 里保持无头像状态，不写回。
+    用 query_record 带重试：刚等完 chatroom_info 结果立刻下发
+    chatroom_member_list，结果通常 2-4 秒生成，等一次就够。
+    """
+    task_uuid = new_task_uuid()
+    try:
+        client.call("group_api", "chatroom_member_list",
+                    {"chatroom_id": wxid}, task_uuid, openid=openid or "")
+        record = query_record("group_api", "get_chatroom_member_list", task_uuid, openid,
+                              retries=3)
+    except Exception:  # noqa: BLE001 单群补头像失败静默
+        return
+    if not record:
+        return
+    raw = unwrap_result(record)
+    if not isinstance(raw, dict):
+        return
+    new_list = raw.get("memberList") or []
+    wxid_avatar = {}
+    for m in new_list:
+        if isinstance(m, dict) and m.get("wxid"):
+            wxid_avatar[m["wxid"]] = pick(m, ("bigHeadImgUrl", "smallHeadImgUrl"))
+    for m in members:
+        if not m.get("avatar"):
+            m["avatar"] = wxid_avatar.get(m.get("wxid"))
+
+
 def query_chatroom_info(chatroom_id, openid=""):
-    """同步取单个群资料（仅临时调试用；正式链路走两段流水线）。"""
+    """同步取单个群资料（同步等待中间方结果，用于 contact_api.fetch_groups）。
+
+    传 openid 时 parse_group_info 自动补成员头像（chatroom_member_list）。
+    """
     task_uuid = new_task_uuid()
     client.call("group_api", "chatroom_info", {"chatroom_id": chatroom_id},
                 task_uuid, openid=openid)
     record = query_record("group_api", "get_chatroom_info", task_uuid, openid)
-    return parse_group_info(record)
+    return parse_group_info(record, openid, chatroom_id)

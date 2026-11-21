@@ -88,7 +88,11 @@ def test_login_api_enqueues_bound_device(app, client, monkeypatch):
 
 
 def test_sync_device_full_routes_four_steps(app, monkeypatch):
-    """登录全量：通讯录 → 群收割/补发 → 好友资料 → 群成员头像，全部只作用于该设备。"""
+    """登录全量：通讯录 → 群收割/补发 → 好友资料，全部只作用于该设备。
+
+    群成员头像已在 group_profile 收割 chatroom_info 时通过 chatroom_member_list
+    一次性补齐，不再单独跑 refresh_avatars_of_device。
+    """
     calls = []
     monkeypatch.setattr(contact_sync, "sync_contacts_of_device",
                         lambda o: calls.append(("contacts", o)))
@@ -98,8 +102,6 @@ def test_sync_device_full_routes_four_steps(app, monkeypatch):
                         lambda openid=None: calls.append(("dispatch", openid)))
     monkeypatch.setattr(friend_profile, "sync_friend_profiles_of_device",
                         lambda o: calls.append(("friend", o)))
-    monkeypatch.setattr(group_member, "refresh_avatars_of_device",
-                        lambda o: calls.append(("avatars", o)) or False)
 
     profile_sync.sync_device_full("o1")
 
@@ -108,7 +110,6 @@ def test_sync_device_full_routes_four_steps(app, monkeypatch):
         ("collect", "o1"),
         ("dispatch", "o1"),
         ("friend", "o1"),
-        ("avatars", "o1"),
     ]
 
 
@@ -125,7 +126,6 @@ def test_sync_device_full_fills_missing_contact(app, monkeypatch):
     monkeypatch.setattr(friend_profile, "sync_friend_profiles_of_device", lambda o: None)
     monkeypatch.setattr(group_profile, "collect_group_results", lambda openid=None: None)
     monkeypatch.setattr(group_profile, "dispatch_group_tasks", lambda openid=None: None)
-    monkeypatch.setattr(group_member, "refresh_avatars_of_device", lambda o: False)
 
     profile_sync.sync_device_full("o1")
 
@@ -146,7 +146,6 @@ def test_sync_device_full_fills_missing_single(app, monkeypatch):
     monkeypatch.setattr(friend_profile, "query_brief_infos",
                         lambda wxids, openid="": {"wxid_a": {
                             "nickname": "李师傅", "head_img_url": "http://a/1.jpg"}})
-    monkeypatch.setattr(group_member, "refresh_avatars_of_device", lambda o: False)
 
     profile_sync.sync_device_full("o1")
 
@@ -162,7 +161,6 @@ def test_sync_device_full_dispatches_missing_group(app, monkeypatch):
     db.session.commit()
     monkeypatch.setattr(contact_sync, "sync_contacts_of_device", lambda o: None)
     monkeypatch.setattr(friend_profile, "sync_friend_profiles_of_device", lambda o: None)
-    monkeypatch.setattr(group_member, "refresh_avatars_of_device", lambda o: False)
     calls = []
     monkeypatch.setattr(group_profile.client, "call",
                         lambda *a, **k: calls.append(a) or {})

@@ -21,7 +21,11 @@ from backend.sync.group_profile import missing_profile
 
 
 def sync_profiles(app):
-    """定时任务入口：先通讯录，再群名，再好友资料，互不影响（各自 try）。"""
+    """定时任务入口：先通讯录，再群名（顺带成员头像），再好友资料，互不影响（各自 try）。
+
+    群成员头像已在 group_profile 收割 chatroom_info 时通过 chatroom_member_list
+    一次性补齐，不再需要单独的 refresh_avatars_of_device 兜底步骤。
+    """
     with app.app_context():
         try:
             contact_sync.sync_contacts()
@@ -36,33 +40,9 @@ def sync_profiles(app):
         except Exception as exc:  # noqa: BLE001
             app.logger.warning("好友资料解析失败: %s", exc)
         try:
-            refresh_group_member_avatars(app)
-        except Exception as exc:  # noqa: BLE001
-            app.logger.warning("群成员头像补拉失败: %s", exc)
-        try:
             sync_group_member_remarks(app)
         except Exception as exc:  # noqa: BLE001
             app.logger.warning("群成员备注同步失败: %s", exc)
-
-
-def refresh_group_member_avatars(app):
-    """群成员头像兜底补拉：逐设备补缺额，有更新就广播前端刷新。
-
-    已判定离线的设备跳过，等在线检测翻身自动恢复。
-    """
-    from backend.services.devices import pollable_devices
-    from backend.sync import group_member
-
-    for openid in pollable_devices():
-        try:
-            if group_member.refresh_avatars_of_device(openid):
-                db.session.commit()
-                from backend.ws import hub
-
-                hub.broadcast("conv_updated", {"reason": "group_member_avatars"})
-        except Exception as exc:  # noqa: BLE001 单设备失败不影响其他设备
-            db.session.rollback()
-            app.logger.warning("群成员头像补拉失败(设备 %s): %s", openid, exc)
 
 
 def sync_group_member_remarks(app):
@@ -119,9 +99,11 @@ def refresh_missing_profiles(openid, conv_ids):
 
 
 def sync_device_full(openid):
-    """登录触发的单设备全量资料同步：复刻 30 分钟兜底轮四条链路，只作用于该设备。
+    """登录触发的单设备全量资料同步：复刻 30 分钟兜底轮三条链路，只作用于该设备。
 
-    顺序：通讯录全量入库+补资料 → 群资料收割+补发 → 好友列表+补资料 → 群成员头像补额。
+    顺序：通讯录全量入库+补资料 → 群资料收割+补发 → 好友列表+补资料。
+    群成员头像已在 group_profile 收割 chatroom_info 时通过 chatroom_member_list
+    一次性补齐，不再需要单独步骤。
     单步失败只记审计，不阻断后续步骤；与兜底轮共用同一队列，不会并发。
     """
     _safe_step(openid, "通讯录同步",
@@ -129,23 +111,12 @@ def sync_device_full(openid):
     _safe_step(openid, "群资料解析", lambda: _sync_device_groups(openid))
     _safe_step(openid, "好友资料解析",
                lambda: friend_profile.sync_friend_profiles_of_device(openid))
-    _safe_step(openid, "群成员头像补拉",
-               lambda: _refresh_device_member_avatars(openid))
 
 
 def _sync_device_groups(openid):
     """单设备群资料：收割该设备上轮结果 + 补发该设备缺失群（结果下轮收割）。"""
     group_profile.collect_group_results(openid=openid)
     group_profile.dispatch_group_tasks(openid=openid)
-
-
-def _refresh_device_member_avatars(openid):
-    """补该设备缺头像的群成员；有更新才提交并广播。"""
-    if group_member.refresh_avatars_of_device(openid):
-        db.session.commit()
-        from backend.ws import hub
-
-        hub.broadcast("conv_updated", {"reason": "group_member_avatars"})
 
 
 def _safe_step(openid, action, fn):

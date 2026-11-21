@@ -273,7 +273,12 @@ def test_refresh_avatars_skips_permanently_failed(app, monkeypatch):
 # ---------- 消息触发路径：收割后立即补头像 ----------
 
 def test_refresh_groups_now_fills_avatars_immediately(app, group_conv, monkeypatch):
-    """消息触发收割群资料后，立即补该群成员头像（不再等 30 分钟兜底）。"""
+    """消息触发收割群资料时，chatroom_member_list 直接补成员头像（一次性到位）。
+
+    旧版流程是 parse 群资料 → save_members → _refresh_member_avatars_now 用
+    brief_info 二次补头像；新版在 parse_group_info 里直接调 chatroom_member_list
+    补进 members，save_members 写 DB 时带上 avatar，少一次 brief_info 调用。
+    """
     record = {
         "uuid": "u1",
         "processing_result": (
@@ -282,15 +287,28 @@ def test_refresh_groups_now_fills_avatars_immediately(app, group_conv, monkeypat
             ' "memberList": [{"wxid": "wxid_a", "nickName": "成员甲"}]}}'
         ),
     }
-    monkeypatch.setattr(group_profile, "query_record",
-                        lambda module, action, u, openid="", retries=5: record)
+    member_record = {
+        "uuid": "u2",
+        "processing_result": (
+            '{"ret": 200, "msg": "操作成功", "data": {"memberList": ['
+            '{"wxid": "wxid_a", "nickName": "成员甲",'
+            ' "bigHeadImgUrl": "http://a/a.jpg", "smallHeadImgUrl": "http://a/a.jpg"}]}}'
+        ),
+    }
+
+    def _mock_query(module, action, u, openid="", retries=5):
+        if action == "get_chatroom_info":
+            return record
+        if action == "get_chatroom_member_list":
+            return member_record
+        return None
+
+    def _mock_query_once(module, action, u, openid=""):
+        return _mock_query(module, action, u, openid)
+
+    monkeypatch.setattr(group_profile, "query_record", _mock_query)
+    monkeypatch.setattr(group_profile, "query_record_once", _mock_query_once)
     monkeypatch.setattr(group_profile.client, "call", lambda *a, **k: {})
-    monkeypatch.setattr(
-        group_member, "query_brief_infos",
-        lambda wxids, openid="": {
-            "wxid_a": {"nickname": "成员甲", "head_img_url": "http://a/a.jpg"},
-        },
-    )
 
     group_profile.refresh_groups_now(group_conv.openid, [group_conv])
 

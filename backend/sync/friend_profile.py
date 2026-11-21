@@ -98,10 +98,14 @@ def apply_friend_info(conv, info):
 
 
 def fetch_friend_wxids(openid):
-    """fetch_contacts_list 下发 → 查询 → friends wxid 列表（2026-10-29 实测）。"""
+    """fetch_contacts_list_cache 下发 → 查询 → friends wxid 列表。
+
+    用 cache 版而非 fetch_contacts_list：实测两者返回完全相同（纯字符串数组），
+    cache 版从中间方本地拿更快，省中间方机器资源。
+    """
     task_uuid = new_task_uuid()
-    client.call("contacts_api", "fetch_contacts_list", {}, task_uuid, openid=openid)
-    record = query_record("contacts_api", "get_fetch_contacts_list", task_uuid, openid)
+    client.call("contacts_api", "fetch_contacts_list_cache", {}, task_uuid, openid=openid)
+    record = query_record("contacts_api", "get_fetch_contacts_list_cache", task_uuid, openid)
     data_raw = unwrap_result(record)
     if data_raw is None:
         return []
