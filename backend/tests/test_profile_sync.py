@@ -272,6 +272,7 @@ def test_query_brief_infos_parses_real_structure(app, monkeypatch):
     assert infos == {"wxid_1815ubzp53ft12": {
         "nickname": "法国红酒",
         "head_img_url": "https://wx.qlogo.cn/mmhead/x/0",
+        "remark": None,
     }}
 
 

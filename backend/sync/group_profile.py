@@ -223,6 +223,8 @@ def _refresh_member_avatars_now(conv):
 
 
 def apply_group_info(conv_id, wxid, info):
+    from backend.sync.contact_remark_sync import upsert_group_remark
+
     conv = db.session.get(Conversation, conv_id)
     if not conv:
         return
@@ -236,6 +238,9 @@ def apply_group_info(conv_id, wxid, info):
     # memberList 顺带落群成员名册（消息展示靠它解析发言人昵称）
     if info.get("members") and group_member.save_members(conv.openid, wxid, info["members"]):
         changed = True
+    # 中间方群备注 → ContactRemarkConfig (scope=group)
+    if upsert_group_remark(wxid, info.get("remark")):
+        changed = True
     if changed:
         db.session.commit()
         _fail_counts.pop((conv.openid, conv.wxid), None)
@@ -243,10 +248,11 @@ def apply_group_info(conv_id, wxid, info):
 
 
 def parse_group_info(record):
-    """任务记录 → {nickname, avatar, members}。
+    """任务记录 → {nickname, avatar, members, remark}。
 
     2026-10-30 实测 processing_result.data：
     nickName=群名, smallHeadImgUrl=群头像,
+    remark=群备注（来自 chatroom_info）,
     memberList=成员（wxid+nickName；头像为空，走 brief_info 补拉）。
     """
     data_raw = unwrap_result(record)
@@ -260,6 +266,7 @@ def parse_group_info(record):
     return {
         "nickname": pick(data, ("nickName", "nickname", "chatroom_name", "name")),
         "avatar": pick(data, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "avatar")),
+        "remark": pick(data, ("remark",)),
         "members": members,
     }
 

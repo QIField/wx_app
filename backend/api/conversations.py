@@ -11,6 +11,11 @@ from sqlalchemy import select
 
 from backend.extensions import db
 from backend.models.contact import Contact
+from backend.models.contact_remark_config import (
+    SCOPE_GROUP,
+    SCOPE_USER,
+    ContactRemarkConfig,
+)
 from backend.models.conversation import Conversation
 from backend.models.group_member import GroupMember
 from backend.models.message import Message
@@ -81,7 +86,9 @@ def list_conversations():
         )
         .all()
     )
-    return jsonify(code=0, msg="success", data=[_conv_json(c) for c in rows])
+    # 批量查 ContactRemarkConfig 覆盖会话名（一次查询 N 个会话，避免 N+1）
+    remarks = _batch_conv_remarks(rows)
+    return jsonify(code=0, msg="success", data=[_conv_json(c, remarks) for c in rows])
 
 
 @bp.post("/api/conversations")
@@ -307,8 +314,12 @@ def list_members(conversation_id):
 
 
 def _member_json(m):
-    """群成员出参：昵称/头像走现有脱敏规则，附全拼与首字母供 @ 搜索。"""
-    name = anonymize.resolved_name(m.nickname, m.wxid)
+    """群成员出参：昵称/头像走现有脱敏规则，附全拼与首字母供 @ 搜索。
+
+    展示优先级：GroupMember.member_remark > GroupMember.nickname > 匿名标识。
+    """
+    display = m.member_remark if (m.member_remark or "").strip() else m.nickname
+    name = anonymize.resolved_name(display, m.wxid)
     return {
         "id": m.id,
         "name": name,
@@ -320,12 +331,36 @@ def _member_json(m):
     }
 
 
-def _conv_json(c):
+def _batch_conv_remarks(convs):
+    """批量查 ContactRemarkConfig → {(scope_type, wxid): remark_name}。"""
+    if not convs:
+        return {}
+    wxids = [c.wxid for c in convs]
+    rows = ContactRemarkConfig.query.filter(
+        ContactRemarkConfig.target_wxid.in_(wxids),
+        ContactRemarkConfig.deleted_at.is_(None),
+    ).all()
+    return {(rc.scope_type, rc.target_wxid): (rc.remark_name or "") for rc in rows}
+
+
+def _scope_of(conv):
+    """会话 → ContactRemarkConfig scope：群聊=group，单聊=user。"""
+    return SCOPE_GROUP if conv.chat_type == Conversation.CHAT_GROUP else SCOPE_USER
+
+
+def _conv_json(c, remarks=None):
     """会话出参（脱敏契约）：不含 wxid；名称未解析 → name=None + alias，头像一并匿名。
 
+    展示优先级：ContactRemarkConfig.remark_name > 中间方昵称 > 匿名标识。
     附 pinyin/initials/pinyin_toks 供会话搜索框拼音匹配（输入 zhang/z 命中 张峰）。
     """
-    name = anonymize.resolved_name(c.name, c.wxid)
+    remarks = remarks or {}
+    scope = _scope_of(c)
+    remark_name = (remarks.get((scope, c.wxid)) or "").strip()
+    if remark_name:
+        name = remark_name
+    else:
+        name = anonymize.resolved_name(c.name, c.wxid)
     return {
         "id": c.id,
         "chat_type": c.chat_type,

@@ -15,6 +15,7 @@ class GroupMember(db.Model, SoftDeleteMixin):
     chatroom_wxid = db.Column(db.String(64), nullable=False, comment="群ID")
     wxid = db.Column(db.String(64), nullable=False, comment="成员微信ID")
     nickname = db.Column(db.String(128), comment="成员昵称（群内显示名）")
+    member_remark = db.Column(db.String(100), comment="群内成员显示名（来自 chatroom_member_detail.remark）")
     avatar = db.Column(db.String(512), comment="成员头像URL（brief_info 补拉）")
     updated_at = db.Column(
         db.DateTime, nullable=False, server_default=db.func.now(), onupdate=db.func.now()

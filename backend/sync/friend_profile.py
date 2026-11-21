@@ -79,13 +79,18 @@ def refresh_singles_now(openid, singles):
 
 
 def apply_friend_info(conv, info):
-    """brief_info → 补齐缺资料的昵称/头像；有变更才提交并广播。"""
+    """brief_info → 补齐缺资料的昵称/头像 + 好友备注；有变更才提交并广播。"""
+    from backend.sync.contact_remark_sync import upsert_user_remark
+
     changed = False
     if info.get("nickname") and conv.name in (None, "", conv.wxid):
         conv.name = info["nickname"]
         changed = True
     if info.get("head_img_url") and not conv.avatar:
         conv.avatar = info["head_img_url"]
+        changed = True
+    # 中间方好友备注 → ContactRemarkConfig (scope=user)
+    if upsert_user_remark(conv.wxid, info.get("remark")):
         changed = True
     if changed:
         db.session.commit()
@@ -127,5 +132,6 @@ def query_brief_infos(wxids, openid=""):
             infos[wxid] = {
                 "nickname": pick(row, ("nickName", "nickname", "nick_name", "name")),
                 "head_img_url": pick(row, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "headImgUrl", "avatar")),
+                "remark": pick(row, ("remark",)),
             }
     return infos

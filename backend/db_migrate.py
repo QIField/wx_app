@@ -40,6 +40,8 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE contact_remark_config ADD COLUMN level VARCHAR(20) NOT NULL DEFAULT 'normal'")
     # 2026-11-19 自动报价增量分析：会话记录已处理到的消息 id
     _try_alter("ALTER TABLE conversation ADD COLUMN last_analyzed_msg_id BIGINT NULL")
+    # 2026-11-21 群成员群内备注：chatroom_member_detail.remark 落库
+    _try_alter("ALTER TABLE group_member ADD COLUMN member_remark VARCHAR(100) NULL")
 
 
 def _backfill_remark_config():

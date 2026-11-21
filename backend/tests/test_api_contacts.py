@@ -62,7 +62,8 @@ def test_keyword_hits_remark(client):
 
     data = client.get("/api/contacts?type=friends&keyword=月结").get_json()["data"]
 
-    assert [c["name"] for c in data["list"]] == ["王老板"]
+    # 备注优先展示（月结大客户），中间方昵称王老板被覆盖
+    assert [c["name"] for c in data["list"]] == ["月结大客户"]
 
 
 def test_roster_other_device_hidden(client):
@@ -129,7 +130,8 @@ def test_keyword_hits_remark_pinyin(client):
 
     data = client.get("/api/contacts?type=friends&keyword=zhang").get_json()["data"]
 
-    assert [c["name"] for c in data["list"]] == ["王老板"]
+    # 备注优先展示（张峰的客户），中间方昵称王老板被覆盖
+    assert [c["name"] for c in data["list"]] == ["张峰的客户"]
 
 
 def test_keyword_pinyin_respects_char_boundary(client):

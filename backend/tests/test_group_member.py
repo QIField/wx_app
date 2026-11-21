@@ -114,7 +114,7 @@ def test_sender_profiles_returns_known_only(app, group_conv):
 
     profiles = group_member.sender_profiles("dev01", group_conv.wxid, ["wxid_a", "wxid_unknown"])
 
-    assert profiles == {"wxid_a": {"nickname": "成员甲", "avatar": "http://a/a.jpg"}}
+    assert profiles == {"wxid_a": {"member_remark": None, "nickname": "成员甲", "avatar": "http://a/a.jpg"}}
 
 
 def test_sender_profiles_empty_inputs(app):

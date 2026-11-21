@@ -39,6 +39,10 @@ def sync_profiles(app):
             refresh_group_member_avatars(app)
         except Exception as exc:  # noqa: BLE001
             app.logger.warning("群成员头像补拉失败: %s", exc)
+        try:
+            sync_group_member_remarks(app)
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("群成员备注同步失败: %s", exc)
 
 
 def refresh_group_member_avatars(app):
@@ -59,6 +63,24 @@ def refresh_group_member_avatars(app):
         except Exception as exc:  # noqa: BLE001 单设备失败不影响其他设备
             db.session.rollback()
             app.logger.warning("群成员头像补拉失败(设备 %s): %s", openid, exc)
+
+
+def sync_group_member_remarks(app):
+    """群成员备注兜底同步：chatroom_member_detail 拉群内成员显示名补 GroupMember.member_remark。
+
+    成本较高（每轮最多 3 群 × 20 成员），只在兜底轮末尾追加，有值才写，无值跳过。
+    """
+    from backend.sync import group_member
+
+    try:
+        if group_member.sync_member_remarks():
+            db.session.commit()
+            from backend.ws import hub
+
+            hub.broadcast("conv_updated", {"reason": "group_member_remarks"})
+    except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
+        app.logger.warning("群成员备注同步失败: %s", exc)
 
 
 def refresh_missing_profiles(openid, conv_ids):

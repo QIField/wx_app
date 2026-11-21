@@ -6,7 +6,11 @@ from flask import Blueprint, g, jsonify, request
 
 from backend.extensions import db
 from backend.models.contact import Contact
-from backend.models.contact_remark_config import ContactRemarkConfig
+from backend.models.contact_remark_config import (
+    SCOPE_GROUP,
+    SCOPE_USER,
+    ContactRemarkConfig,
+)
 from backend.models.conversation import Conversation
 from backend.services import anonymize
 from backend.services.auth import require_role
@@ -59,18 +63,21 @@ def list_contacts():
 
     # 拼音搜索：SQL LIKE 匹配不了拼音，关键词统一回 Python 侧过滤
     # （列表本就全量取回，无额外查询成本）；备注批量取一次避免 N+1。
+    # remarks = {(scope_type, wxid): remark_name}，搜索 + 展示复用同一份
+    all_wxids = [c.wxid for c in contacts]
+    # 通讯录列表要混合查补集会话（没进 contact 表的老会话），先取 contact 行的 wxid
+    remarks = _batch_remarks(all_wxids)
+
     if keyword:
         kw = keyword.lower()
-        wxids = [c.wxid for c in contacts]
-        # 备注搜索走统一配置表（用户级/群级；wxid 与作用域一一对应，无跨域撞键）
-        remarks = {
-            rc.target_wxid: (rc.remark_name or "")
-            for rc in ContactRemarkConfig.query.filter(
-                ContactRemarkConfig.target_wxid.in_(wxids),
-                ContactRemarkConfig.deleted_at.is_(None),
-            ).all()
-        } if wxids else {}
-        contacts = [c for c in contacts if _name_kw_hit(c.name, c.wxid, remarks.get(c.wxid, ""), kw)]
+        # 关键词搜索按 scope 取对应 wxid 的 remark（好友列表只看 user，群列表只看 group）
+        scope = Contact.TYPE_GROUP if contact_type == Contact.TYPE_GROUP else "user"
+        contacts = [
+            c for c in contacts
+            if _name_kw_hit(
+                c.name, c.wxid, _remark_of(remarks, scope, c.wxid), kw
+            )
+        ]
 
     # 本设备该类型的全部会话：按 wxid 挂未读/摘要；找不到会话的联系人补集用
     convs = Conversation.query.filter(
@@ -80,7 +87,7 @@ def list_contacts():
     ).all()
     conv_by_wxid = {c.wxid: c for c in convs}
 
-    items = [_contact_json(c, conv_by_wxid.get(c.wxid)) for c in contacts]
+    items = [_contact_json(c, conv_by_wxid.get(c.wxid), remarks) for c in contacts]
 
     # 补集：会话里有、通讯录还没同步到的老会话（关键词只按昵称过滤）
     known = {c.wxid for c in contacts}
@@ -91,18 +98,40 @@ def list_contacts():
             Contact.deleted_at.isnot(None),
         ).all()
     }
+    # 补集会话的 remark 也要查（没进 contact 表的老会话）
+    extra_wxids = [c.wxid for c in convs if c.wxid not in known and c.wxid not in deleted_wxids]
+    remarks.update(_batch_remarks(extra_wxids))
+    scope = Contact.TYPE_GROUP if contact_type == Contact.TYPE_GROUP else "user"
     kw = keyword.lower()
     extras = [
         c for c in convs
         if c.wxid not in known
         and c.wxid not in deleted_wxids
-        and (not kw or _name_kw_hit(c.name, c.wxid, "", kw))
+        and (not kw or _name_kw_hit(
+            c.name, c.wxid, _remark_of(remarks, scope, c.wxid), kw
+        ))
     ]
-    items.extend(_conv_contact_json(c) for c in extras)
+    items.extend(_conv_contact_json(c, remarks) for c in extras)
 
     # 字母升序、# 排最后；同字母内按名字
     items.sort(key=lambda x: (x["letter"] == "#", x["letter"], (x["name"] or "").lower()))
     return jsonify(code=0, msg="success", data={"list": items, "total": len(items)})
+
+
+def _batch_remarks(wxids):
+    """批量查 ContactRemarkConfig → {(scope_type, wxid): remark_name}。"""
+    if not wxids:
+        return {}
+    rows = ContactRemarkConfig.query.filter(
+        ContactRemarkConfig.target_wxid.in_(wxids),
+        ContactRemarkConfig.deleted_at.is_(None),
+    ).all()
+    return {(rc.scope_type, rc.target_wxid): (rc.remark_name or "") for rc in rows}
+
+
+def _remark_of(remarks, scope, wxid):
+    """从批量查询结果里按 scope 取备注，取不到或为空返回空串。"""
+    return (remarks.get((scope, wxid)) or "").strip()
 
 
 def _kw_in(fields, kw):
@@ -125,27 +154,41 @@ def _name_kw_hit(raw_name, wxid, remark, kw):
     )
 
 
-def _contact_json(c, conv):
-    """contact 行 → 通讯录条目；contact 缺资料时回退用会话里已解析的昵称/头像。"""
-    name = anonymize.resolved_name(c.name, c.wxid) or anonymize.resolved_name(
-        conv.name if conv else None, c.wxid)
+def _contact_json(c, conv, remarks):
+    """contact 行 → 通讯录条目；contact 缺资料时回退用会话里已解析的昵称/头像。
+
+    展示优先级：ContactRemarkConfig.remark_name > 中间方昵称 > 匿名标识。
+    """
     chat_type = conv.chat_type if conv else _roster_chat_type(c)
+    scope = SCOPE_GROUP if chat_type == Conversation.CHAT_GROUP else SCOPE_USER
+    remark_name = _remark_of(remarks, scope, c.wxid)
+    if remark_name:
+        name = remark_name
+    else:
+        name = anonymize.resolved_name(c.name, c.wxid) or anonymize.resolved_name(
+            conv.name if conv else None, c.wxid)
     return _item_json(
         row_id=c.id, wxid=c.wxid, chat_type=chat_type, name=name,
         avatar=c.avatar or (conv.avatar if conv else None), conv=conv,
     )
 
 
-def _conv_contact_json(c):
+def _conv_contact_json(c, remarks):
     """历史会话行 → 通讯录条目（通讯录未同步到时的补集形态）。
 
     row_id 取负值：contact 表与会话表是两套自增 id，直接用正数会与
     contact 行撞号（前端渲染 key 冲突出"幽灵重复行"，档案/发消息也会
     解析到同号的另一个联系人），负号跨表隔离命名空间。
     """
+    scope = SCOPE_GROUP if c.chat_type == Conversation.CHAT_GROUP else SCOPE_USER
+    remark_name = _remark_of(remarks, scope, c.wxid)
+    if remark_name:
+        name = remark_name
+    else:
+        name = anonymize.resolved_name(c.name, c.wxid)
     return _item_json(
         row_id=-c.id, wxid=c.wxid, chat_type=c.chat_type,
-        name=anonymize.resolved_name(c.name, c.wxid), avatar=c.avatar, conv=c,
+        name=name, avatar=c.avatar, conv=c,
     )
 
 

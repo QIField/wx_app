@@ -64,7 +64,7 @@ def sender_map_for(conv, wxids):
 
 
 def sender_profiles(openid, chatroom_wxid, wxids):
-    """批量查群成员资料 → {wxid: {nickname, avatar}}；查不到的成员不在结果里。"""
+    """批量查群成员资料 → {wxid: {member_remark, nickname, avatar}}；查不到的成员不在结果里。"""
     ids = [w for w in set(wxids or []) if w]
     if not ids:
         return {}
@@ -75,7 +75,7 @@ def sender_profiles(openid, chatroom_wxid, wxids):
         .all()
     )
     return {
-        r.wxid: {"nickname": r.nickname, "avatar": r.avatar}
+        r.wxid: {"member_remark": r.member_remark, "nickname": r.nickname, "avatar": r.avatar}
         for r in rows
     }
 
@@ -83,11 +83,16 @@ def sender_profiles(openid, chatroom_wxid, wxids):
 def sender_view(wxid, info=None, snapshot_name=None):
     """发言人展示字段唯一拼装点（HTTP 消息 API 与 WS 广播共用，防两处口径漂移）。
 
+    展示优先级：群内备注(member_remark) > 群内昵称(nickname) > 快照名 > 匿名标识。
     脱敏契约：出参绝不含 wxid 原文；昵称与快照都未解析才算真匿名
     （sender_anon 显式标记），@openim 等"有名字没头像"的成员不算匿名，
     前端走名称首字兜底而不是匿名图标。
     """
-    nickname = anonymize.resolved_name((info or {}).get("nickname"), wxid)
+    member_remark = (info or {}).get("member_remark") if info else None
+    if member_remark and str(member_remark).strip():
+        nickname = str(member_remark).strip()
+    else:
+        nickname = anonymize.resolved_name((info or {}).get("nickname"), wxid)
     snapshot = anonymize.resolved_name(snapshot_name, wxid)
     return {
         "sender_name": nickname or snapshot or anonymize.anon_label(wxid),
@@ -144,3 +149,92 @@ def refresh_avatars_of_device(openid, chatroom_wxid=None, batch=AVATAR_BATCH):
             row.nickname = info["nickname"]
             changed = True
     return changed
+
+
+# ---------- 群成员 remark 兜底同步 ----------
+
+REMARK_GROUP_LIMIT = 3    # 每轮最多同步 3 个群的成员 remark（chatroom_member_detail 成本较高）
+REMARK_BATCH = 20          # chatroom_member_detail 单次最多 20 个 wxid（中间方文档约定）
+
+
+def sync_member_remarks(openid=None):
+    """兜底轮：调 chatroom_member_detail 给 GroupMember.member_remark 补值。
+
+    - openid 传入时只处理该设备的群；缺省处理全部设备
+    - 只处理 member_remark 为空的群（已有值跳过，避免覆盖）
+    - 每轮最多 3 个群 × 每群 20 个成员，后续轮续跑
+    """
+    from backend.sync.task_query import (
+        as_dict,
+        new_task_uuid,
+        pick,
+        query_record,
+        unwrap_result,
+    )
+    from backend.adapter import client
+    from backend.services.devices import pollable_devices
+
+    devices = [openid] if openid else list(pollable_devices())
+    total_changed = False
+    for dev_openid in devices:
+        rows = GroupMember.query.filter(
+            GroupMember.openid == dev_openid,
+            GroupMember.deleted_at.is_(None),
+            GroupMember.member_remark.is_(None),
+        ).all()
+        if not rows:
+            continue
+        # 按群去重取前 N 个群（每群取首批成员）
+        group_batches = {}  # chatroom_wxid -> [wxids...]
+        for r in rows:
+            group_batches.setdefault(r.chatroom_wxid, []).append(r.wxid)
+            if len(group_batches) >= REMARK_GROUP_LIMIT:
+                break
+
+        changed_this = False
+        for chatroom_wxid, wxids in list(group_batches.items())[:REMARK_GROUP_LIMIT]:
+            chunk = wxids[:REMARK_BATCH]
+            if not chunk:
+                continue
+            tu = new_task_uuid()
+            try:
+                client.call(
+                    "group_api", "chatroom_member_detail",
+                    {"chatroom_id": chatroom_wxid, "member_wxids": ",".join(chunk)},
+                    tu, openid=dev_openid or "",
+                )
+                record = query_record("group_api", "get_chatroom_member_detail", tu, dev_openid)
+            except Exception:  # noqa: BLE001 单群失败不影响其他群
+                continue
+            if not record:
+                continue
+            data_raw = unwrap_result(record)
+            if not isinstance(data_raw, list):
+                continue
+            # wxid → remark
+            wxid_remark = {}
+            for item in data_raw:
+                if not isinstance(item, dict):
+                    continue
+                wid = item.get("userName") or item.get("wxid")
+                remark = pick(item, ("remark",))
+                if wid and remark:
+                    wxid_remark[wid] = remark
+            if not wxid_remark:
+                continue
+            for r in rows:
+                if r.chatroom_wxid != chatroom_wxid or not r.member_remark:
+                    continue
+            # 重新查本群需要补 remark 的行（上面 rows 可能已在本轮被其他群变更了）
+            group_rows = GroupMember.query.filter_by(
+                openid=dev_openid, chatroom_wxid=chatroom_wxid, deleted_at=None, member_remark=None,
+            ).filter(GroupMember.wxid.in_(chunk)).all()
+            for row in group_rows:
+                remark = wxid_remark.get(row.wxid)
+                if remark:
+                    row.member_remark = remark
+                    changed_this = True
+        if changed_this:
+            db.session.commit()
+            total_changed = True
+    return total_changed
