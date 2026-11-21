@@ -28,4 +28,6 @@ class GroupMember(db.Model, SoftDeleteMixin):
 
     @property
     def display_name(self):
+        if self.member_remark and str(self.member_remark).strip():
+            return str(self.member_remark).strip()
         return self.nickname or self.wxid

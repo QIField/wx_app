@@ -262,7 +262,11 @@ def parse_group_info(record):
     members = []
     for row in data.get("memberList") or []:
         if isinstance(row, dict) and row.get("wxid"):
-            members.append({"wxid": row["wxid"], "nickname": pick(row, ("nickName", "nickname", "displayName"))})
+            members.append({
+                "wxid": row["wxid"],
+                "nickname": pick(row, ("nickName", "nickname", "displayName")),
+                "member_remark": pick(row, ("remark", "memberRemark", "displayName")),
+            })
     return {
         "nickname": pick(data, ("nickName", "nickname", "chatroom_name", "name")),
         "avatar": pick(data, ("smallHeadImgUrl", "bigHeadImgUrl", "head_img_url", "avatar")),

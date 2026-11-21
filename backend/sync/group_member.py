@@ -43,12 +43,20 @@ def save_members(openid, chatroom_wxid, members):
     for wxid in created:
         db.session.add(GroupMember(
             openid=openid, chatroom_wxid=chatroom_wxid,
-            wxid=wxid, nickname=by_wxid[wxid].get("nickname") or None,
+            wxid=wxid,
+            nickname=by_wxid[wxid].get("nickname") or None,
+            member_remark=by_wxid[wxid].get("member_remark") or None,
         ))
-    for wxid, m in by_wxid.items():  # 只补空昵称，不覆盖已有值
+    for wxid, m in by_wxid.items():
         row = existing.get(wxid)
-        if row is not None and not row.nickname and m.get("nickname"):
+        if row is None:
+            continue
+        # 只补空值，不覆盖已有值（成员改了备注不应该被覆盖回来）
+        if not row.nickname and m.get("nickname"):
             row.nickname = m["nickname"]
+            changed = True
+        if not row.member_remark and m.get("member_remark"):
+            row.member_remark = m["member_remark"]
             changed = True
     return changed or bool(created)
 
@@ -80,6 +88,22 @@ def sender_profiles(openid, chatroom_wxid, wxids):
     }
 
 
+def display_name_of_profile(profile):
+    """群成员资料 → 展示名（不脱敏，只做优先级提取）。
+
+    优先级：member_remark > nickname，两者都空返回 None。
+    脱敏与兜底（匿名标识 / wxid）由调用方负责——不同场景的兜底策略不同：
+    消息气泡要匿名化，sysmsg 灰条直接展示 wxid 也可接受。
+    """
+    if not profile:
+        return None
+    remark = (profile.get("member_remark") or "").strip()
+    if remark:
+        return remark
+    nickname = (profile.get("nickname") or "").strip()
+    return nickname or None
+
+
 def sender_view(wxid, info=None, snapshot_name=None):
     """发言人展示字段唯一拼装点（HTTP 消息 API 与 WS 广播共用，防两处口径漂移）。
 
@@ -88,11 +112,7 @@ def sender_view(wxid, info=None, snapshot_name=None):
     （sender_anon 显式标记），@openim 等"有名字没头像"的成员不算匿名，
     前端走名称首字兜底而不是匿名图标。
     """
-    member_remark = (info or {}).get("member_remark") if info else None
-    if member_remark and str(member_remark).strip():
-        nickname = str(member_remark).strip()
-    else:
-        nickname = anonymize.resolved_name((info or {}).get("nickname"), wxid)
+    nickname = anonymize.resolved_name(display_name_of_profile(info), wxid)
     snapshot = anonymize.resolved_name(snapshot_name, wxid)
     return {
         "sender_name": nickname or snapshot or anonymize.anon_label(wxid),

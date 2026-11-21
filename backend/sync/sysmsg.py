@@ -35,13 +35,18 @@ def resolve(content, raw_type=0, openid=""):
 
 
 def _pat_gray_text(pat, openid):
-    """拍一拍灰条文案：查群成员名册解析昵称，查不到用 wxid 兜底。"""
+    """拍一拍灰条文案：查群成员名册解析展示名，优先群备注→昵称，再兜底 wxid。"""
     from backend.sync import group_member
 
     wxids = [pat["fromusername"], pat["pattedusername"]]
     profiles = group_member.sender_profiles(openid, pat["chatusername"], wxids)
-    who = (profiles.get(wxids[0]) or {}).get("nickname") or wxids[0]
-    whom = (profiles.get(wxids[1]) or {}).get("nickname") or wxids[1]
+
+    def _display(wxid):
+        name = group_member.display_name_of_profile(profiles.get(wxid))
+        return name or wxid
+
+    who = _display(wxids[0])
+    whom = _display(wxids[1])
     suffix = (pat.get("patsuffix") or "").strip()
     return f"「{who}」拍了拍「{whom}」{suffix}".strip()
 
