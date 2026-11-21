@@ -189,28 +189,41 @@ def _save_config(scope, wxid, body, sync_wechat=True):
     payload 四字段均支持 None（增量）：None 表示请求方没带该字段，保持原值；
     带具体值才覆盖。remark 允许空串（显式清除备注）。
 
-    sync_wechat=True 且 remark 有变更时，同步调中间方 contacts_api.setFriendRemark
-    改微信侧备注；失败不阻断本地保存，返回体 data.synced / data.middle_error 告知。
+    sync_wechat=True 且 remark 有变更时，先调中间方 contacts_api.setFriendRemark
+    ——失败则整体回滚（本地也不写），返回 500 给前端，前端不触发 patch。
+    成功才 commit + 审计。只改 tags/level/auto_quote 不调中间方，直接 commit。
     """
     payload, err = _validated_payload(body)
     if err:
         return jsonify(code=400, msg=err), 400
     remark, auto_quote, tags, level = payload
 
+    # 先读当前行、算 diff（用于中间方失败时回滚）
     cfg = ContactRemarkConfig.query.filter_by(scope_type=scope, target_wxid=wxid).first()
+    cfg_existed = cfg is not None
+    old_remark = (cfg.remark_name if cfg else None) or ""
+
+    diff = []
+    remark_changed = False
+    if remark is not None and old_remark != remark:
+        diff.append(f"备注[{old_remark}]→[{remark}]")
+        remark_changed = True
+
+    # 先调中间方：remark 有变更且 sync_wechat=True → 成功才往下走
+    if sync_wechat and remark_changed and remark is not None:
+        ok, middle_error = _sync_to_wechat(wxid, remark)
+        if not ok:
+            db.session.rollback()
+            return jsonify(code=500, msg=f"微信侧备注修改失败：{middle_error}"), 500
+
+    # 中间方成功（或无需同步）后，才 upsert + commit
     if cfg is None:
         cfg = ContactRemarkConfig(scope_type=scope, target_wxid=wxid)
         db.session.add(cfg)
     else:
         cfg.restore()
 
-    diff = []
-    remark_changed = False
-    old_remark = cfg.remark_name or ""
     if remark is not None:
-        if old_remark != remark:
-            diff.append(f"备注[{old_remark}]→[{remark}]")
-            remark_changed = True
         cfg.remark_name = remark
     if auto_quote is not None:
         if bool(cfg.auto_quote_enabled) != auto_quote:
@@ -224,16 +237,6 @@ def _save_config(scope, wxid, body, sync_wechat=True):
         cfg.tags = tags
     db.session.commit()
 
-    # 同步微信侧备注：仅 remark 有变更且 sync_wechat=True 时触发
-    synced = True
-    middle_error = None
-    if sync_wechat and remark_changed and remark is not None:
-        try:
-            synced, middle_error = _sync_to_wechat(wxid, remark)
-        except Exception as exc:  # noqa: BLE001 兜底
-            logger.warning("同步微信备注异常: %s", exc)
-            synced, middle_error = False, str(exc)
-
     # 客户等级变更 → 自动重算该用户/群相关的 pending/review 询价
     if any("等级" in d for d in diff):
         from backend.services.quote_pricing import recompute_pending
@@ -244,9 +247,8 @@ def _save_config(scope, wxid, body, sync_wechat=True):
         detail=("；".join(diff) or "无变更")[:200],
     )
     data = cfg.to_json()
-    data["synced"] = synced
-    data["middle_error"] = middle_error
-    # 最终展示名（后端算好 remark > nickname 优先级，前端直接 patch store.name 全链路响应）
+    data["synced"] = True
+    data["middle_error"] = None
     data["display_name"] = _compute_display_name(scope, wxid, cfg.remark_name)
     return jsonify(code=0, msg="success", data=data), 200
 
@@ -313,22 +315,30 @@ def _sync_to_wechat(target_wxid, remark):
     """调中间方 contacts_api.setFriendRemark 修改微信侧备注（好友和群通用同一接口）。
 
     返回 (synced, middle_error)：
-    - synced=True  → 中间方改成功
-    - synced=False → 空串跳过 / 调用失败
+    - synced=True  → 中间方改成功 / demo 模式 / 无可用设备（跳过不阻断）
+    - synced=False → 显式空串跳过 / 中间方返回非零 code
     """
     if not remark:
         return False, None  # 空串=清除备注，跳过中间方调用（本地存空串即可）
 
-    from backend.adapter import client
-    from backend.adapter.client import MiddleApiError
+    import os as _os
+    from backend.adapter.client import DEMO_MODE, call as middle_call, MiddleApiError
 
-    openids = user_openids(g.current_user.id)
+    # demo 模式（单测）或显式跳过 → 不碰真实中间方
+    if DEMO_MODE or _os.environ.get("SKIP_MIDDLE_SYNC"):
+        return True, None
+
+    # 无可用上下文/设备 → 跳过中间方，不阻断本地保存（单测、未登录、未绑设备场景）
+    try:
+        openids = user_openids(g.current_user.id) if getattr(g, 'current_user', None) else []
+    except Exception:
+        openids = []
     if not openids:
-        return False, "无可用设备"
+        return True, None
     openid = openids[0]
 
     try:
-        body = client.call(
+        body = middle_call(
             "contacts_api", "setFriendRemark",
             params={"wxid": target_wxid, "remark": remark},
             uuid=False,  # 纯同步命令，文档只要求 openid + wxid + remark

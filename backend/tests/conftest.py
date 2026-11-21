@@ -57,6 +57,14 @@ def no_task_query_wait(monkeypatch):
     monkeypatch.setattr(task_query, "QUERY_WAIT_SECONDS", 0)
 
 
+@pytest.fixture(autouse=True)
+def no_middle_remark_sync(monkeypatch):
+    """单测不碰真实中间方 setFriendRemark（设备 wxid 都是测试造的）。"""
+    import backend.api.remark_config as rc
+
+    monkeypatch.setattr(rc, "_sync_to_wechat", lambda *a, **kw: (True, None))
+
+
 @pytest.fixture()
 def client(app):
     """已登录默认客服账号（绑定设备 dev01）的测试客户端。
