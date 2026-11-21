@@ -68,5 +68,16 @@ export const useContactsStore = defineStore('contacts', {
     select(type, id) {
       this.selected = { type, id }
     },
+
+    /** 备注/昵称变更后就地刷新：通讯录搜索结果、联系人详情头部、会话列表名字
+     *  全部走 displayNameOf(item) → 统一改 item.name 即全局响应。
+     *  newName 为空表示"没设置备注"——调用方决定回退策略（通常保持原值不动）。 */
+    patchNameById(id, newName) {
+      if (!newName) return
+      const inFriend = this.friends.find((c) => c.id === id)
+      if (inFriend) { inFriend.name = newName; return }
+      const inGroup = this.groups.find((c) => c.id === id)
+      if (inGroup) inGroup.name = newName
+    },
   },
 })

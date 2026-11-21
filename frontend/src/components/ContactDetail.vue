@@ -18,6 +18,16 @@ const hint = ref('')
 let hintTimer = null
 onUnmounted(() => clearTimeout(hintTimer))
 
+/** 备注保存后：同时 patch contacts + chatStore 里的 name
+ *  —— displayNameOf(item) 统一读 item.name，改这一处全局响应：
+ *  ContactDetail 头部、通讯录搜索结果、ConvList 左栏、当前会话顶部标题。 */
+function onRemarkSaved(cfg) {
+  const newName = cfg?.display_name
+  if (!newName) return
+  contacts.patchNameById(contact.value.id, newName)
+  if (contact.value.conversation_id) chat.patchConvName(contact.value.conversation_id, newName)
+}
+
 /** 发消息：按 contact_id 建/取会话再进（后端校验归属；不传 wxid——脱敏契约）。 */
 const opening = ref(false)
 async function enterChat() {
@@ -68,6 +78,7 @@ async function enterChat() {
         :fetch="fetchRemarkConfig"
         :save="saveRemarkConfig"
         :target-key="contact.id"
+        @saved="onRemarkSaved"
       />
 
       <div class="d-actions">

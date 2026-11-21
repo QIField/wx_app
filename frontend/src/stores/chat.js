@@ -509,5 +509,13 @@ export const useChatStore = defineStore('chat', {
         this.sortConversations()
       }
     },
+
+    /** 备注/昵称变更后就地刷新会话列表里对应的 name：ConvList 左栏、当前会话顶部标题
+     *  都从 conv.name 读（通过 displayNameOf 统一出口），改这里就全响应。 */
+    patchConvName(convId, newName) {
+      if (!newName) return
+      const conv = this.conversations.find((c) => c.id === convId)
+      if (conv) conv.name = newName
+    },
   },
 })

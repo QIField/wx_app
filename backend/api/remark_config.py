@@ -166,6 +166,23 @@ def _validated_payload(body):
     return (remark, auto_quote, tags, level), None
 
 
+def _compute_display_name(scope, wxid, remark_name):
+    """最终展示名（remark > nickname > 匿名标识），与 contacts._contact_json 保持一致。"""
+    if remark_name:
+        return remark_name
+    if scope == SCOPE_USER:
+        from backend.models.contact import Contact
+        c = Contact.query.filter_by(wxid=wxid, deleted_at=None).first()
+        if c:
+            return anonymize.resolved_name(c.name, wxid)
+    else:
+        from backend.models.conversation import Conversation
+        conv = Conversation.query.filter_by(wxid=wxid, deleted_at=None).first()
+        if conv:
+            return anonymize.resolved_name(conv.name, wxid)
+    return anonymize.resolved_name(None, wxid)
+
+
 def _save_config(scope, wxid, body, sync_wechat=True):
     """upsert 配置（含已删除行复活，唯一键不冲突）；写审计，返回 (响应, 状态码)。
 
@@ -229,6 +246,8 @@ def _save_config(scope, wxid, body, sync_wechat=True):
     data = cfg.to_json()
     data["synced"] = synced
     data["middle_error"] = middle_error
+    # 最终展示名（后端算好 remark > nickname 优先级，前端直接 patch store.name 全链路响应）
+    data["display_name"] = _compute_display_name(scope, wxid, cfg.remark_name)
     return jsonify(code=0, msg="success", data=data), 200
 
 

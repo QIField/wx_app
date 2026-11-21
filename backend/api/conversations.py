@@ -361,9 +361,17 @@ def _conv_json(c, remarks=None):
         name = remark_name
     else:
         name = anonymize.resolved_name(c.name, c.wxid)
+    # conv → contact_id 映射：Conversation.wxid + openid 定位 Contact 行
+    contact_id = None
+    contact_type = 1 if c.chat_type == Conversation.CHAT_SINGLE else 2
+    contact = Contact.query.filter_by(
+        wxid=c.wxid, openid=c.openid, type=contact_type, deleted_at=None,
+    ).first()
+    if contact: contact_id = contact.id
     return {
         "id": c.id,
         "chat_type": c.chat_type,
+        "contact_id": contact_id,
         "name": name,
         "avatar": anonymize.avatar_or_none(name, c.avatar),
         "alias": anonymize.alias_of(c.wxid),
