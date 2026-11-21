@@ -23,6 +23,7 @@ from backend.services.quote_context import (
 )
 from backend.services.quote_dispatch import dispatch, parse_scenarios
 from backend.services.rule_extract import rule_extract, should_trigger
+from backend.services.text_utils import normalize_spaced_digits
 
 log = logging.getLogger(__name__)
 
@@ -144,9 +145,13 @@ _BRAND_CAR_WORDS = frozenset({
 })
 
 
+# 剥一行里的 VIN/OE/纯数字/品牌车型，剩下的就是可能的配件名片段。
+# 先做空格归一化（"264 200 3201" → "2642003201"），否则带空格的号码会残留
+# 导致 _has_part_text_in_window 误判（号码数字被当成配件名的一部分）。
 def _strip_noise_line(line: str) -> str:
-    """剥一行里的 VIN/OE/纯数字/品牌车型，剩下的就是可能的配件名片段。"""
-    cur = line
+    # 先归一化空格分隔的数字片段
+    cur = normalize_spaced_digits(line)
+    # 再剥离各类号码模式
     for pat in (_STRIP_VIN_RE, _STRIP_OEM_PREFIX_RE, _STRIP_OEM_DIGITS_RE):
         cur = pat.sub(' ', cur)
     # 剥品牌车型词

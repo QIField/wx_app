@@ -19,6 +19,7 @@ from flask import Blueprint, jsonify, request
 from backend import qq_client
 from backend.services import quote_pricing as pricing  # 复用报价链归一化，r 结构与询价卡一致
 from backend.services.auth import require_role
+from backend.services.text_utils import normalize_spaced_digits
 
 bp = Blueprint("quote_query", __name__)
 
@@ -54,9 +55,16 @@ def _query_endpoint(fn):
 
 
 def _detect_type(q):
-    if _VIN_RE.match(q):
+    """识别查询字符串类型：vin / oe / name。
+
+    对空格做归一化：用户可能输入 "11 53 8 635 689" 这种带空格的 OE 号，
+    先合并为 "11538635689" 再用正则匹配。
+    VIN 本身不会被空格分隔（工业标准 17 位连续字符），但也一并归一化以防万一。
+    """
+    q_norm = normalize_spaced_digits(q or "")
+    if _VIN_RE.match(q_norm):
         return "vin"
-    if _OE_RE.match(q):
+    if _OE_RE.match(q_norm):
         return "oe"
     return "name"
 
