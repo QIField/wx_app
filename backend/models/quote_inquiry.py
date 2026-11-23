@@ -30,7 +30,7 @@ class QuoteInquiry(db.Model, SoftDeleteMixin):
     sender_name = db.Column(db.String(128), comment="询价人（AI 场景提取）")
     vin = db.Column(db.String(64), comment="提取的 VIN，缺字段场景为空")
     part_name = db.Column(db.String(64), comment="配件名称")
-    oem_no = db.Column(db.String(64), comment="AI 提取的 OE（可信度以报价链为准）")
+    oem_no = db.Column(db.Text, comment="AI 提取的 OE（逗号分隔多件，VARCHAR(64) 不够用）")
     quoted = db.Column(
         db.Boolean, nullable=False, default=False,
         comment="AI 判断是否跟进旧报价（true=二次议价，不自动发）",
