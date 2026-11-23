@@ -108,6 +108,7 @@ function copyAllShortcuts() {
           <tr><td>自动报价模式</td><td>切换"仅侧边预览"与"识别成功自动发送"</td></tr>
           <tr><td>配件黑名单</td><td>命中黑名单的配件不报价、不自动发送，最多 20 个</td></tr>
           <tr><td>客户等级价格系数</td><td>VIP-A / VIP-B / 普通客户分别设置报价系数（报价 = 我方价 × 系数）</td></tr>
+          <tr><td>OE 详号开关</td><td>用户/群聊备注中开启后，报价话术里「原厂」「原厂国内4s件」会显示接口返回的原始 OE 号（如 <code>34116890553</code>），关闭时仅显示 <code>替换</code> / <code>对号</code> 文字标记</td></tr>
         </tbody>
       </table>
     </div>

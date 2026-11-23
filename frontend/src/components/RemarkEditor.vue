@@ -126,7 +126,6 @@ async function saveEdit() {
         <div class="rk-row">
           <span class="k">OE详号</span>
           <span class="quote-chip" :class="{ on: cfg.oe_detail_enabled }">{{ cfg.oe_detail_enabled ? '已开启' : '未开启' }}</span>
-          <span class="dim hint">开启后报价话术显示原厂替换/对号的原始OE号</span>
         </div>
         <div class="rk-row">
           <span class="k">客户等级</span>
