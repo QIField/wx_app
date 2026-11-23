@@ -156,7 +156,7 @@ def test_contract_c_truth_table(app, monkeypatch, enabled, ai, mode, expect):
     assert row.price_json["pricing"]["final_price"] == FINAL, f"price_json={row.price_json}"  # 算价两个模式都做
     if expect == "auto":
         assert row.status == QuoteInquiry.ST_SENT and row.sent_at
-        assert [c["img_url"] for c in calls["image"]] == [IMAGE]  # 图前文后
+        assert calls["image"] == []  # 图片不再下发
         assert "¥" in calls["text"][0]["content"]  # V2 模板：品牌比价行含价格
     else:  # preview：只入列，不发送
         assert row.status == QuoteInquiry.ST_PENDING

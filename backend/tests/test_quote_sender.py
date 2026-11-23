@@ -1,4 +1,7 @@
-"""自动报价发送单测（阶段 5）：模式闸门 / 图前文后 / 失败转 review / 广播形态。
+"""自动报价发送单测（阶段 5）：模式闸门 / 只发话术 / 失败转 review / 广播形态。
+
+注：图片仍在报价计算阶段（quote_pricing）下载保存到 price_json.product.image，
+但发送阶段不再下发图片消息——只发话术文本。
 
 中间方发送接口 mock（send_service.middle_sender，参数 kwargs 捕获），
 广播 monkeypatch backend.ws.hub.broadcast 捕获。
@@ -84,28 +87,30 @@ def test_skipped_when_send_disabled(app, monkeypatch):
     assert row.status == QuoteInquiry.ST_PENDING
 
 
-def test_auto_send_image_first_then_text(app, sender_spy):
-    """图前文后：先 post_image(img_url) 再 post_text(话术)，成功置已报价。"""
+def test_auto_send_text_only(app, sender_spy):
+    """有产品图也只发话术文本（图片不再下发，仅保留在 price_json 里供前端展示）。"""
     conv = make_conv()
-    row = make_inquiry(conv)
+    row = make_inquiry(conv, image=IMAGE)  # price_json 里有图片
     set_global_mode("auto")
 
     assert quote_sender.auto_send_pending([row]) == 1
-    assert [c["img_url"] for c in sender_spy["image"]] == [IMAGE]
+    assert sender_spy["image"] == []  # 图片不再下发
     assert [c["content"] for c in sender_spy["text"]] == [TEXT]
     assert row.status == QuoteInquiry.ST_SENT
     assert row.sent_at is not None
 
+    # price_json 里图片仍保留（下载保存流程未动）
+    assert row.price_json["product"]["image"] == IMAGE
+
     events = [d for e, d in sender_spy["broadcast"] if e == "new_message"]
-    assert [m["msg_type"] for m in events] == [2, 1]  # 广播顺序 = 发送顺序
-    assert events[0]["payload"]["img_url"] == IMAGE
-    assert events[1]["content"] == TEXT
+    assert [m["msg_type"] for m in events] == [1]  # 只广播话术一条
+    assert events[0]["content"] == TEXT
     assert all(m["direction"] == 2 for m in events)
     assert events[0]["operator_name"] == "自动报价"
 
 
-def test_text_only_without_image(app, sender_spy):
-    """无产品图：只发话术，照样置已报价。"""
+def test_no_image_does_not_block(app, sender_spy):
+    """无产品图时照样只发话术——行为和有图完全一致。"""
     conv = make_conv()
     row = make_inquiry(conv, image="")
     set_global_mode("auto")
@@ -127,7 +132,7 @@ def test_no_product_or_text_stays_pending(app):
 
 
 def test_dispatch_failure_goes_review(app, sender_spy, monkeypatch):
-    """图片下发失败降级发话术，话术也失败才进 review。"""
+    """话术下发失败 → 进 review，error 记原因。"""
     conv = make_conv()
     row = make_inquiry(conv)
     set_global_mode("auto")
@@ -135,25 +140,12 @@ def test_dispatch_failure_goes_review(app, sender_spy, monkeypatch):
     def boom(**kw):
         raise send_service.SendDispatchError("网络不可达")
 
-    # 图片失败但话术成功 → 仍然已报价（图片是可选项，话术是核心交付）
-    monkeypatch.setattr(send_service.middle_sender, "post_image", boom)
-    assert quote_sender.auto_send_pending([row]) == 1
-    assert row.status == QuoteInquiry.ST_SENT  # 话术发出去了
-    assert len(sender_spy["text"]) == 1  # 话术确实发了
-    assert len(sender_spy["image"]) == 0  # 图片失败没发
-    # 只广播话术一条（图片失败不广播）
-    events = [d for e, d in sender_spy["broadcast"] if e == "new_message"]
-    assert [m["msg_type"] for m in events] == [1]
-
-    # 话术也失败 → 进 review
-    def boom_also_text(**kw):
-        raise send_service.SendDispatchError("网络不可达")
-
-    row2 = make_inquiry(conv)
-    monkeypatch.setattr(send_service.middle_sender, "post_text", boom_also_text)
-    assert quote_sender.auto_send_pending([row2]) == 0
-    assert row2.status == QuoteInquiry.ST_REVIEW
-    assert "自动发送失败" in row2.price_json["error"]
+    monkeypatch.setattr(send_service.middle_sender, "post_text", boom)
+    assert quote_sender.auto_send_pending([row]) == 0
+    assert row.status == QuoteInquiry.ST_REVIEW
+    assert "自动发送失败" in row.price_json["error"]
+    assert "网络不可达" in row.price_json["error"]
+    assert sender_spy["image"] == []  # 图片从未下发过
 
 
 def test_batch_resilient(app, sender_spy, monkeypatch):

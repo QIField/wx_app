@@ -173,14 +173,14 @@ def make_priced(conv, status=QuoteInquiry.ST_PENDING, **over):
     return row
 
 
-def test_send_image_first_then_text(client, send_spy):
-    """人工发送：图前文后下发，置已报价带 sent_at。"""
+def test_send_text_only(client, send_spy):
+    """人工发送：只发话术文本（图片不再下发），置已报价带 sent_at。"""
     conv = make_conv("dev01", "group1")
     row = make_priced(conv)
     resp = client.post(f"/api/quote/inquiries/{row.id}/send")
     body = resp.get_json()
     assert resp.status_code == 200 and body["code"] == 0
-    assert [c["img_url"] for c in send_spy["image"]] == [IMAGE]
+    assert send_spy["image"] == []  # 图片不再下发
     assert len(send_spy["text"]) == 1 and "¥72.16" in send_spy["text"][0]["content"]
     assert body["data"]["status"] == QuoteInquiry.ST_SENT
     assert body["data"]["sent_at"]
