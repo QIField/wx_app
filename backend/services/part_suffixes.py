@@ -84,9 +84,13 @@ def _try_match_block(block: str) -> str | None:
     策略：
       1. 直接匹配原 block → 如果命中的是**多字后缀**（≥2字），
          说明原 block 本身就是干净的配件名或带修饰的完整配件名，直接返回。
-      2. 如果直接命中的是**单字后缀**，说明命中可能太泛，
-         尝试先 strip 干扰词再匹配，看能不能得到更具体的配件名。
-      3. 如果直接没命中，也尝试 strip 干扰词后再匹配。
+      2. 如果直接命中的是**单字后缀**，说明命中可能太泛
+         （后缀表有 40 个单字词条：套、片、管、水...，任何以这些字结尾的
+          2-12 字块都能命中，闲聊"来一套""发个图片"就是这么穿透的），
+         必须经过 strip 干扰词验证：strip 后能命中**任何后缀**才算数。
+      3. 如果直接没命中 → 尝试 strip 干扰词后再匹配任何后缀。
+
+    关键规则：单字后缀命中本身不够，必须 strip 干扰词后仍能命中才算有效。
     """
     # 1. 直接尝试 — 找命中的后缀
     direct_suffix_hit = None
@@ -95,21 +99,19 @@ def _try_match_block(block: str) -> str | None:
             direct_suffix_hit = suffix
             break
 
-    # 如果直接命中多字后缀（≥2字）→ 说明这个块本身就是干净的
+    # 如果直接命中多字后缀（≥2字）→ 说明这个块本身就是干净的，直接返回
     if direct_suffix_hit and len(direct_suffix_hit) >= 2:
         return block
 
-    # 2. 直接命中单字后缀 或 没命中 → 尝试 strip 干扰词
+    # 2. strip 干扰词后再尝试匹配
     stripped = _strip_trailing_noise(block)
     if stripped and stripped != block:
         for suffix in _PART_SUFFIX:
             if stripped.endswith(suffix):
-                return stripped  # strip 后命中的（即使是单字）也更靠谱
+                return stripped
 
-    # 3. strip 后也没命中 → 返回直接匹配的结果（可能是单字后缀命中的）
-    if direct_suffix_hit:
-        return block
-
+    # 3. 单字后缀命中但 strip 后变空或 strip 后不命中 → 返回 None
+    #    （这挡住了 "来一套" → strip 后空 → None；"发个图片" → strip 后"发个图"不命中 → None）
     return None
 
 
