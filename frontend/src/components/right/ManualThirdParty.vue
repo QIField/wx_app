@@ -1,11 +1,10 @@
 <script setup>
 /** 第三方比价子页：兆配云 zpy（城市报价表）+ 机汽人 jqr（供应商竞价表）。
  *
- * 全字段展示：上游返回的每个 key 都进表格，不会漏。
- * - 已知字段 → 友好 label + 固定排序
- * - 未知字段 → 自动追加到表格末尾，保留原始 key 作列名
- * - 嵌套数组/对象 → 智能 stringify（数组提取 name 拼接）
- * - URL 字段 → 截断展示
+ * 每个 tab 独立缓存：切 tab 不清空上次查询结果，输入框自动同步。
+ * - 兆配云 11 字段（4S 价 / 折扣 / 含税售价 / 城市库存）
+ * - 机汽人 10 字段（严格对齐官网列表页，供应商→配件编码→价格）
+ * - 字段严格按 COLS 定义显示，不做动态追加
  *
  * 默认查询示例 OE（1665000075），输入后回车/点击查询。
  */
@@ -56,61 +55,23 @@ const ZPY_COLS = [
   { key: '物料组', label: '物料组' },
 ]
 
-// ---------- 机汽人：英文键名，上游原样透传 ----------
+// ---------- 机汽人：对齐官网列表页的展示顺序 ----------
 const JQR_COLS = [
-  // 配件核心信息
-  { key: 'product_name', label: '配件名称' },
-  { key: 'oe_number', label: 'OE编号' },
-  { key: 'search_oe', label: '搜索OE' },
-  { key: 'oe_epc_name', label: 'EPC配件名' },
-  { key: 'product_name_search', label: '配件搜索名' },
-  { key: 'quality_name', label: '品质' },
-  // 品牌
-  { key: 'brand_name', label: '品牌' },
-  { key: 'custom_brand_name', label: '品牌全称' },
-  { key: 'brand_initial', label: '品牌首字母' },
-  { key: 'producing_area', label: '产地' },
-  // 价格与供应商
-  { key: 'price', label: '价格' },
-  { key: 'price_except_flag', label: '特殊价' },
-  { key: 'quantity', label: '数量' },
+  // === 左侧供应商信息区 ===
   { key: 'seller_name', label: '供应商' },
-  { key: 'seller_id', label: '供应商ID' },
-  { key: 'supplier_code', label: '供应商编码' },
-  { key: 'default_code', label: '产品编码' },
-  { key: 'product_id', label: '产品ID' },
-  { key: 'product_template_id', label: '模板ID' },
-  { key: 'payment_flag', label: '支付方式' },
-  { key: 'plan_id', label: '方案ID' },
-  // 位置与信用
   { key: 'city_name', label: '城市' },
-  { key: 'country_code', label: '国家' },
-  { key: 'credit_score', label: '信用分' },
-  { key: 'level_code', label: '等级编码' },
-  { key: 'level_flag', label: '等级标记' },
-  { key: '_score', label: '匹配分' },
-  // 车型适配
-  { key: 'make', label: '适配品牌' },
-  { key: 'make_name', label: '品牌名' },
-  { key: 'make_id', label: '品牌ID' },
-  { key: 'make_vehicle', label: '车型' },
-  // 时间与统计
+
+  // === 主表格 6 列（对齐机汽人官网） ===
+  { key: 'oe_number', label: '配件编码' },
+  { key: 'product_name', label: '商品' },
+  { key: 'brand_name', label: '品牌' },
+  { key: 'quality_name', label: '品质' },
+  { key: 'quantity', label: '库存' },
+  { key: 'price', label: '价格' },
+
+  // === 右侧状态区 ===
   { key: 'datelastupdate', label: '更新时间' },
   { key: 'enquiry_count', label: '询价次数' },
-  { key: 'part_note', label: '备注' },
-  { key: 'description', label: '描述' },
-  // 渠道/其他
-  { key: 'circle_name', label: '渠道名' },
-  { key: 'circle_prod_id', label: '渠道产品ID' },
-  { key: 'en_brand_name', label: '英文品牌' },
-  { key: 'en_quality_name', label: '英文品质' },
-  { key: 'vn_brand_name', label: '越南品牌' },
-  { key: 'vn_quality_name', label: '越南品质' },
-  { key: 'uom_name', label: '单位' },
-  { key: 'seller_uuid', label: '供应商UUID' },
-  // 图片 URL（保留原始，前端用 truncateUrl 截断）
-  { key: 'brand_images_url', label: '品牌图标' },
-  { key: 'make_images_url', label: '车型图标' },
 ]
 
 // ---------- 工具函数 ----------
@@ -120,7 +81,6 @@ function cellValue(v) {
   if (v === null || v === undefined || v === '') return '-'
   if (Array.isArray(v)) {
     if (v.length === 0) return '-'
-    // 对象数组：尝试提取 name 字段（机汽人 make: [{id, images, name}]）
     const names = v.map((item) => (item && typeof item === 'object' ? item.name : item))
     return names.join(', ')
   }
@@ -128,32 +88,13 @@ function cellValue(v) {
     try { return JSON.stringify(v) } catch { return String(v) }
   }
   const s = String(v)
-  // 超长 URL 截断
   if (s.startsWith('http') && s.length > 60) return s.slice(0, 57) + '...'
   return s
 }
 
-/** 收集所有 row 的 key，去重；用于兜底未知字段自动追加。 */
-function collectKeys(rows) {
-  const set = new Set()
-  for (const r of rows) {
-    if (r && typeof r === 'object') Object.keys(r).forEach((k) => set.add(k))
-  }
-  return [...set]
-}
-
-/** 合并 COLS + 未知 key：未知 key 追加到末尾，label 用原始 key。 */
-function buildCols(cols, rows) {
-  const known = new Set(cols.map((c) => c.key))
-  const extras = collectKeys(rows)
-    .filter((k) => !known.has(k))
-    .map((k) => ({ key: k, label: k }))
-  return [...cols, ...extras]
-}
-
-// ---------- 动态列 ----------
-const zpyCols = computed(() => buildCols(ZPY_COLS, zpyState.rows.value))
-const jqrCols = computed(() => buildCols(JQR_COLS, jqrState.jyRows.value))
+// ---------- 动态列：严格按 COLS 定义显示 ----------
+const zpyCols = computed(() => ZPY_COLS)
+const jqrCols = computed(() => JQR_COLS)
 
 // ---------- 当前 tab 状态（模板里用） ----------
 const curError = computed(() => (source.value === 'zpy' ? zpyState.error : jqrState.error).value)
