@@ -5,8 +5,16 @@
  * 交互：点结果 → locate 事件 → ChatPanel 打开会话 + 滚动定位 + 脉冲高亮
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { searchMessages } from '../api'
+import { useZIndex } from 'element-plus'
+import { searchMessages, fetchMessageDateMeta } from '../api'
 import { msgTextOf } from '../utils/message'
+import CustomDatePicker from './CustomDatePicker.vue'
+
+// Element Plus z-index 体系：defaultInitialZIndex=2000，nextZIndex() 每次 +1
+// HistoryDialog 打开时先占一个 z-index，后续 EP popper（日期选择器）自然比它高
+const { nextZIndex } = useZIndex()
+const maskZ = ref(nextZIndex())
+const dialogZ = computed(() => maskZ.value + 1)
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -18,7 +26,7 @@ const emit = defineEmits(['update:visible', 'locate'])
 
 // ------- 状态 -------
 const keyword = ref('')
-const dateRange = ref(null)       // [YYYY-MM-DD, YYYY-MM-DD] 或 null
+const dateSelected = ref(null)   // 'YYYY-MM-DD' | null
 const msgType = ref('')           // 空=全部  text/image/video/file/voice/emoji/forward
 const direction = ref('')         // 空=全部  customer/staff
 const senderName = ref('')        // 发送人名称模糊匹配
@@ -29,6 +37,11 @@ const page = ref(1)
 const pageSize = 50
 const hasMore = ref(false)
 const selectedId = ref('')        // 当前高亮消息 id
+
+// 日历元数据：供 CustomDatePicker 渲染
+const dateMetaYears = ref([])
+const dateMetaMonths = ref({})
+const dateMetaDateSet = ref(new Set())
 
 // ------- 常量 -------
 const TYPE_OPTIONS = [
@@ -51,7 +64,7 @@ const DIR_OPTIONS = [
 watch(() => props.visible, (v) => {
   if (v) {
     keyword.value = props.initialQuery || ''
-    dateRange.value = null
+    dateSelected.value = null
     msgType.value = ''
     direction.value = ''
     senderName.value = ''
@@ -60,6 +73,7 @@ watch(() => props.visible, (v) => {
     hasMore.value = false
     errorMsg.value = ''
     selectedId.value = ''
+    loadDateMeta()
     doSearch()
   }
 })
@@ -81,13 +95,26 @@ function fallbackHtml(type) {
 function close() { emit('update:visible', false) }
 function resetFilters() {
   keyword.value = props.initialQuery || ''
-  dateRange.value = null
+  dateSelected.value = null
   msgType.value = ''
   direction.value = ''
   senderName.value = ''
   page.value = 1
   items.value = []
   doSearch()
+}
+
+async function loadDateMeta() {
+  try {
+    const data = await fetchMessageDateMeta(props.convId)
+    dateMetaYears.value = data.years || []
+    dateMetaMonths.value = data.monthsByYear || {}
+    dateMetaDateSet.value = new Set(data.dates || [])
+  } catch (e) {
+    dateMetaYears.value = []
+    dateMetaMonths.value = {}
+    dateMetaDateSet.value = new Set()
+  }
 }
 
 // ------- 搜索 -------
@@ -113,9 +140,9 @@ function buildParams() {
   const p = { page: page.value, pageSize }
   if (props.convId) p.convId = props.convId
   if (keyword.value.trim()) p.keyword = keyword.value.trim()
-  if (dateRange.value?.length === 2) {
-    p.date_from = dateRange.value[0]
-    p.date_to = dateRange.value[1]
+  if (dateSelected.value) {
+    p.date_from = dateSelected.value
+    p.date_to = dateSelected.value
   }
   if (msgType.value) p.type = msgType.value
   if (direction.value) p.direction = direction.value
@@ -143,10 +170,10 @@ async function onItemClick(item) {
 <template>
   <Teleport to="body">
     <transition name="hd-fade">
-      <div v-if="visible" class="hd-mask" @click.self="close"></div>
+      <div v-if="visible" class="hd-mask" :style="{ zIndex: maskZ }" @click.self="close"></div>
     </transition>
     <transition name="hd-pop">
-      <div v-if="visible" class="hd-dialog" role="dialog" aria-modal="true">
+      <div v-if="visible" class="hd-dialog" :style="{ zIndex: dialogZ }" role="dialog" aria-modal="true">
         <!-- 标题栏 -->
         <div class="hd-head">
           <div class="hd-title">
@@ -173,13 +200,12 @@ async function onItemClick(item) {
           </div>
           <div class="hd-row">
             <div class="hd-field">
-              <ElDatePicker
-                v-model="dateRange"
-                type="daterange"
-                range-separator="至"
-                start-placeholder="开始日期"
-                end-placeholder="结束日期"
-                value-format="YYYY-MM-DD"
+              <CustomDatePicker
+                v-model="dateSelected"
+                :years="dateMetaYears"
+                :months-by-year="dateMetaMonths"
+                :date-set="dateMetaDateSet"
+                @change="page=1;doSearch()"
               />
             </div>
             <div class="hd-field">
@@ -272,7 +298,6 @@ async function onItemClick(item) {
   position: fixed; inset: 0;
   background: rgba(10, 20, 45, 0.45);
   backdrop-filter: blur(2px);
-  z-index: 9999;
 }
 .hd-dialog {
   position: fixed;
@@ -286,7 +311,6 @@ async function onItemClick(item) {
   border-radius: 12px;
   box-shadow: 0 16px 50px rgba(15, 30, 68, 0.25);
   border: 1px solid #e8edf5;
-  z-index: 10000;
   display: flex;
   flex-direction: column;
   overflow: hidden;

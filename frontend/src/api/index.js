@@ -185,6 +185,10 @@ export const forwardMessages = (payload) => http.post('/messages/forward', paylo
 export const searchMessages = (params) =>
   http.get('/messages/search', { params })
 
+/** 消息日期元数据：返回有消息的年份/月份/日期集合，供日历组件渲染。 */
+export const fetchMessageDateMeta = (convId) =>
+  http.get('/messages/date-meta', { params: convId ? { conv_id: convId } : {} })
+
 /** 合并转发卡片回看：{title, count, items:[{seq, sender_name, content, create_time}]}。 */
 export const fetchForwardSnapshot = (messageId) => http.get(`/messages/${messageId}/forward-snapshot`)
 

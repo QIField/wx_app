@@ -518,3 +518,62 @@ def search_messages():
         "total": total,
         "next_before_id": next_before_id,
     })
+
+
+# ---------- 消息日期元数据（给前端日历用） ----------
+
+@bp.get("/api/messages/date-meta")
+@require_role()
+def messages_date_meta():
+    """返回有消息的日期集合，供日历组件渲染。
+
+    Query params:
+        conv_id  可选，限定某个会话；不传=跨全部会话
+
+    返回 { years, monthsByYear, dates }
+      years:         [2025, 2026]                     升序
+      monthsByYear:  { "2026": [10, 11], "2025": [12] }
+      dates:         ["2026-11-01", "2026-11-15", ...]
+    """
+    from sqlalchemy import distinct, func
+
+    openids = _my_openids()
+    conv_id = request.args.get("conv_id", type=int)
+
+    q = (
+        db.session.query(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(
+            Conversation.deleted_at.is_(None),
+            Conversation.openid.in_(openids),
+        )
+    )
+    if conv_id:
+        q = q.filter(Conversation.id == conv_id)
+
+    # distinct 日期
+    date_rows = (
+        q.with_entities(distinct(func.date(Message.create_time)))
+        .order_by(func.date(Message.create_time).asc())
+        .all()
+    )
+
+    dates = sorted(str(r[0]) for r in date_rows)
+
+    years_set = set()
+    months_map = {}
+    for d in dates:
+        y, m, _ = d.split("-")
+        yi = int(y)
+        mi = int(m)
+        years_set.add(yi)
+        months_map.setdefault(y, set()).add(mi)
+
+    years = sorted(years_set)
+    months_by_year = {y: sorted(ms) for y, ms in months_map.items()}
+
+    return jsonify(code=0, msg="success", data={
+        "years": years,
+        "monthsByYear": months_by_year,
+        "dates": dates,
+    })
