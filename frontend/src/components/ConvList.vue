@@ -1,7 +1,7 @@
 <script setup>
 /** 左栏：会话列表（微信风格搜索框 + 紧凑密度）。置顶优先 + 时间倒序由后端排好，这里直接渲染。
  *  右键菜单：置顶⇄取消置顶 / 标为未读⇄已读 / 消息免打扰；置顶仅背景加深不显示文字。 */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { displayNameOf, fmtTime, highlight, matchName } from '../utils/format'
@@ -9,6 +9,34 @@ import { pickNextUnread } from '../utils/badge'
 import ContextMenu from './ContextMenu.vue'
 import ContactAvatar from './ContactAvatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
+import HistoryDialog from './HistoryDialog.vue'
+
+/* 跨会话历史搜索弹窗 */
+const historyVisible = ref(false)
+const historyQuery = ref('')
+
+/* 从搜索框回车 → 若无会话匹配则打开历史消息搜索 */
+function onSearchEnter() {
+  if (!keyword.value.trim()) return
+  if (filtered.value.length === 0) {
+    openHistorySearch(keyword.value.trim())
+  }
+}
+
+function openHistorySearch(q) {
+  historyQuery.value = q
+  historyVisible.value = true
+}
+
+/** 从历史弹窗点击结果 → 打开对应会话。
+ *  ConvList 只管开窗 + 选中，不做消息定位（消息定位在 ChatPanel）。 */
+async function onHistoryLocate(item) {
+  const targetConvId = item.conversation?.id
+  if (targetConvId) {
+    await chat.ensureOpened(targetConvId)
+    historyVisible.value = false
+  }
+}
 
 const chat = useChatStore()
 
@@ -87,7 +115,23 @@ async function onMenuSelect(key) {
     <div class="head">
       <div class="search">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        <input v-model="keyword" type="text" placeholder="搜索会话">
+        <input
+          v-model="keyword"
+          type="text"
+          placeholder="搜索会话…回车搜历史消息"
+          @keyup.enter="onSearchEnter"
+        >
+        <button
+          v-if="keyword"
+          class="history-shortcut"
+          title="搜索历史消息（回车）"
+          @click.stop="openHistorySearch(keyword.trim())"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+        </button>
         <button v-if="keyword" class="clear" aria-label="清空搜索" @click="keyword = ''">
           <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
@@ -134,6 +178,14 @@ async function onMenuSelect(key) {
 
     <!-- 会话右键菜单：弹层职责在 ContextMenu（定位翻转/收起生命周期） -->
     <ContextMenu :pos="menu" :items="menuItems" @select="onMenuSelect" @close="menu = null" />
+
+    <!-- 跨会话历史消息搜索弹窗 -->
+    <HistoryDialog
+      v-model:visible="historyVisible"
+      :conv-id="null"
+      :initial-query="historyQuery"
+      @locate="onHistoryLocate"
+    />
   </div>
 </template>
 
@@ -171,6 +223,20 @@ async function onMenuSelect(key) {
   cursor: pointer; flex-shrink: 0;
 }
 .clear:hover { background: var(--c-text-sub); }
+
+/* 历史消息快捷入口：搜索框内、清除按钮左侧 */
+.history-shortcut {
+  display: flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0;
+  border: none; border-radius: 4px;
+  background: transparent; color: var(--c-text-sub);
+  cursor: pointer; flex-shrink: 0;
+  transition: all 0.12s;
+}
+.history-shortcut:hover {
+  color: var(--c-primary);
+  background: var(--c-primary-soft);
+}
 .name :deep(mark) { background: none; color: var(--c-primary); font-weight: 600; padding: 0; }
 
 .scroll { flex: 1; }

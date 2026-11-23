@@ -401,3 +401,120 @@ def _msg_json(m, sender_map=None):
         "create_time": m.create_time.strftime("%Y-%m-%d %H:%M:%S"),
         "status": m.status,
     }
+
+
+# ---------- 消息历史搜索 ----------
+
+@bp.get("/api/messages/search")
+@require_role()
+def search_messages():
+    """历史消息搜索：关键词 + 日期范围 + 类型 + 发送人筛选，跨会话返回。
+
+    Query params:
+        q           关键词（模糊匹配 content）
+        conv_id     可选，限定某个会话内搜索
+        msg_type    可选，限定消息类型（1文本 2图片 3文件 4视频 5链接 6语音 7表情 9合并转发）
+        direction   可选，1入方向(客户) 2出方向(客服)
+        sender      可选，发送人名称模糊匹配
+        date_from   可选，起始日期 YYYY-MM-DD
+        date_to     可选，结束日期 YYYY-MM-DD
+        page_size   可选，默认 50，最大 200
+        before_id   可选，翻页游标
+
+    返回 { items: [...], total, next_before_id }
+    """
+    from datetime import datetime as _dt
+
+    openids = _my_openids()
+    if not openids:
+        return jsonify(code=0, msg="success", data={"items": [], "total": 0, "next_before_id": None})
+
+    q = (request.args.get("q") or "").strip()
+    conv_id = request.args.get("conv_id", type=int)
+    msg_type = request.args.get("msg_type", type=int)
+    direction = request.args.get("direction", type=int)
+    sender = (request.args.get("sender") or "").strip()
+    date_from = request.args.get("date_from")
+    date_to = request.args.get("date_to")
+    page_size = request.args.get("page_size", 50, type=int)
+    page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+    before_id = request.args.get("before_id", type=int)
+
+    # 基础查询：归属校验 + 软删除过滤
+    mq = (
+        db.session.query(Message, Conversation)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(
+            Conversation.deleted_at.is_(None),
+            Conversation.openid.in_(openids),
+            Message.deleted_at.is_(None),
+        )
+    )
+
+    # 各维度筛选
+    if conv_id:
+        mq = mq.filter(Conversation.id == conv_id)
+    if q:
+        mq = mq.filter(Message.content.ilike(f"%{q}%"))
+    if msg_type:
+        mq = mq.filter(Message.msg_type == msg_type)
+    if direction:
+        mq = mq.filter(Message.direction == direction)
+    if sender:
+        mq = mq.filter(
+            db.or_(
+                Message.sender_name.ilike(f"%{sender}%"),
+                Message.operator_name.ilike(f"%{sender}%"),
+            )
+        )
+    if date_from:
+        try:
+            dt = _dt.strptime(date_from, "%Y-%m-%d")
+            mq = mq.filter(Message.create_time >= dt)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            dt = _dt.strptime(date_to, "%Y-%m-%d")
+            # 包含当天全天
+            mq = mq.filter(Message.create_time < dt.replace(hour=23, minute=59, second=59))
+        except ValueError:
+            pass
+
+    # 翻页锚点
+    if before_id:
+        anchor = db.session.query(Message.create_time, Message.id).filter(
+            Message.id == before_id, Message.deleted_at.is_(None)
+        ).first()
+        if anchor is not None:
+            anchor_time, anchor_id = anchor
+            mq = mq.filter(
+                (Message.create_time < anchor_time)
+                | ((Message.create_time == anchor_time) & (Message.id < anchor_id))
+            )
+
+    # 先取总数（不带翻页条件）
+    total = mq.count()
+
+    # 排序 + 限制
+    pairs = (
+        mq.order_by(Message.create_time.desc(), Message.id.desc())
+        .limit(page_size)
+        .all()
+    )
+
+    items = []
+    for msg, conv in pairs:
+        sender_map = group_member.sender_map_for(conv, [msg.sender_wxid] if conv.chat_type == Conversation.CHAT_GROUP else [])
+        msg_json = _msg_json(msg, sender_map)
+        msg_json["conversation"] = _conv_json(conv)
+        items.append(msg_json)
+
+    has_more = len(items) == page_size
+    next_before_id = pairs[-1][0].id if has_more and pairs else None
+
+    return jsonify(code=0, msg="success", data={
+        "items": items,
+        "total": total,
+        "next_before_id": next_before_id,
+    })

@@ -27,6 +27,7 @@ const props = defineProps({
   conv: { type: Object, default: null }, // 当前会话（头像/昵称取值用）
   selectable: { type: Boolean, default: false }, // 多选模式：行首出勾选圈，点击行切换
   picked: { type: Boolean, default: false },     // 本行是否已被勾选
+  highlight: { type: Boolean, default: false },  // 历史搜索定位高亮
 })
 const emit = defineEmits(['preview', 'reedit', 'mediaload', 'menu', 'toggle', 'openrecord', 'profile'])
 
@@ -161,7 +162,7 @@ function onTextDbl(e) {
   <div
     v-else
     class="msg"
-    :class="[{ out: msg.direction === 2, in: msg.direction !== 2, selectable }]"
+    :class="[{ out: msg.direction === 2, in: msg.direction !== 2, selectable, highlight: props.highlight }]"
     @click="selectable && emit('toggle', props.msg.id)"
   >
     <span v-if="selectable" class="pick" :class="{ on: picked }">
@@ -261,6 +262,12 @@ function onTextDbl(e) {
 .re-edit:hover { text-decoration: underline; }
 
 .msg { display: flex; gap: 8px; margin-bottom: 12px; animation: pop 0.22s both; }
+/* 历史搜索定位高亮：蓝色脉冲光环，3 秒后自然消失（父组件控时序） */
+.msg.highlight { animation: highlight-pulse 1.2s ease-in-out 2; border-radius: 12px; }
+@keyframes highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(29, 93, 228, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(29, 93, 228, 0.35); }
+}
 @keyframes pop {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }

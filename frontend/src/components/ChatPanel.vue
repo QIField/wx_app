@@ -19,6 +19,7 @@ import ChatComposer from './ChatComposer.vue'
 import ForwardPicker from './ForwardPicker.vue'
 import ForwardRecord from './ForwardRecord.vue'
 import ChatSidePanel from './ChatSidePanel.vue'
+import HistoryDialog from './HistoryDialog.vue'
 
 const chat = useChatStore()
 const scroller = ref(null)
@@ -35,6 +36,79 @@ const {
 
 /* 合并卡片回看中的消息 id（历史卡片，ForwardRecord 拉快照） */
 const recordMsgId = ref(null)
+
+/* 历史消息弹窗 */
+const historyVisible = ref(false)
+const historyQuery = ref('')
+
+/* 打开历史弹窗（当前会话内搜索） */
+function openHistory() {
+  if (!chat.currentId) return
+  historyQuery.value = ''
+  historyVisible.value = true
+}
+
+/* 高亮定位目标消息的 id（CSS 类名匹配） */
+const highlightMsgId = ref(null)
+
+/** 从历史弹窗点击结果 → 打开对应会话 → 滚动定位 → 高亮目标消息。
+ *  目标消息若不在已加载范围内，先 loadOlderMessages 补齐。 */
+async function onHistoryLocate(item) {
+  const targetConvId = item.conversation?.id
+  if (!targetConvId || !item.id) return
+
+  // 打开目标会话（如果还没打开）
+  await chat.ensureOpened(targetConvId)
+  historyVisible.value = false
+
+  // 等待消息渲染
+  await nextTick()
+
+  // 找目标消息在列表中的下标
+  const idx = chat.currentMessages.findIndex((m) => m.id === item.id)
+  if (idx < 0) {
+    // 消息可能在未加载的更早区域，尝试加载
+    if (chat.hasMore) {
+      await chat.loadOlderMessages()
+      await nextTick()
+    }
+  }
+
+  // 再次查找
+  const finalIdx = chat.currentMessages.findIndex((m) => m.id === item.id)
+  if (finalIdx < 0) return
+
+  // 清除之前的高亮
+  highlightMsgId.value = null
+
+  // 滚动到目标消息（消息数少则滚到底兜底，多数则精确锚定）
+  const target = document.querySelector(`[data-mid="${item.id}"]`)
+  if (target) {
+    // 图片消息：data-mid 在 img 上
+    highlightMsgId.value = item.id
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } else {
+    // 文本/卡片消息：找消息气泡容器（MessageRow 没有直接 data 属性，用遍历）
+    const msgs = scroller.value?.$el?.querySelectorAll('.msg, .sysline')
+    if (msgs?.length) {
+      highlightMsgId.value = item.id
+      // 滚动到大致位置：finalIdx * 近似平均高度
+      const wrap = scrollWrap()
+      if (wrap) {
+        // 先滚到底让最近消息全可见
+        wrap.scrollTop = wrap.scrollHeight
+        await nextTick()
+        // 再尝试用 wrapRef 里的原生元素按顺序定位
+        const rows = wrap.querySelectorAll('.msg')
+        const row = rows[finalIdx] || rows[0]
+        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+  }
+
+  // 高亮动画后清除
+  setTimeout(() => { highlightMsgId.value = null }, 3000)
+}
 
 /* ---------- 图片全屏预览：当前会话所有图片可左右切换 ---------- */
 const preview = ref(null) // { urls: string[], index: number }；null 即关闭
@@ -238,6 +312,21 @@ async function onMenuSelect(key) {
         <el-tag v-if="chat.currentConv.chat_type === 2" size="small" type="info" effect="plain">群聊</el-tag>
       </template>
       <span v-else>选择左侧会话</span>
+
+      <!-- 历史消息按钮（与聊天名称同一行的最右侧） -->
+      <button
+        v-if="chat.currentId"
+        class="history-btn"
+        title="搜索历史消息"
+        @click="openHistory"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+          <path d="M12 7v5l4 2"/>
+        </svg>
+        <span>历史消息</span>
+      </button>
     </div>
 
     <el-scrollbar ref="scroller" class="scroll" @scroll="onScroll">
@@ -263,6 +352,7 @@ async function onMenuSelect(key) {
             :conv="chat.currentConv"
             :selectable="multi"
             :picked="pickedIds.has(row.id)"
+            :highlight="highlightMsgId === row.id"
             @preview="openPreview"
             @reedit="onReEdit"
             @mediaload="maybeStickBottom"
@@ -320,6 +410,14 @@ async function onMenuSelect(key) {
       :msg-id="recordMsgId"
       @close="recordMsgId = null"
     />
+
+    <!-- 历史消息搜索弹窗 -->
+    <HistoryDialog
+      v-model:visible="historyVisible"
+      :conv-id="chat.currentId"
+      :initial-query="historyQuery"
+      @locate="onHistoryLocate"
+    />
   </div>
 </template>
 
@@ -337,6 +435,24 @@ async function onMenuSelect(key) {
 /* 顶部备注名可点：展开统一备注侧栏（与点头像同源） */
 .peer-link { cursor: pointer; }
 .peer-link:hover { color: var(--c-primary); }
+
+/* 历史消息按钮：右侧固定位，与标题同行 */
+.history-btn {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: #fff;
+  font-size: 12px; color: var(--c-text-sub); font-family: inherit;
+  cursor: pointer; transition: all 0.15s;
+  flex-shrink: 0;
+}
+.history-btn:hover {
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  background: var(--c-primary-soft);
+}
 .scroll { flex: 1; background: var(--c-bg); }
 /* S1 滚动锚定：上方媒体加载改变高度时，浏览器原生把位移补偿回 scrollTop，
    视野不动（无宽高预占位的历史消息走此兜底；Safari 不支持时退化为现状） */

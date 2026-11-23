@@ -181,6 +181,10 @@ export const revokeMessage = (messageId) => http.post(`/messages/${messageId}/re
  *  merge=合并转发（目标会话各落一张本地卡片 msg_type=9 + 快照回看）。 */
 export const forwardMessages = (payload) => http.post('/messages/forward', payload)
 
+/** 历史消息搜索：跨会话/单会话，支持关键词+日期+类型+方向+发送人筛选。 */
+export const searchMessages = (params) =>
+  http.get('/messages/search', { params })
+
 /** 合并转发卡片回看：{title, count, items:[{seq, sender_name, content, create_time}]}。 */
 export const fetchForwardSnapshot = (messageId) => http.get(`/messages/${messageId}/forward-snapshot`)
 
