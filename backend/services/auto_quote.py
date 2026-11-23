@@ -12,6 +12,7 @@
 import logging
 import re
 import threading
+from datetime import timedelta
 
 from backend import qq_client
 from backend.api.quote_config import merged_config
@@ -28,6 +29,9 @@ from backend.services.text_utils import normalize_spaced_digits
 log = logging.getLogger(__name__)
 
 ANALYZE_DELAY = 3.0  # 静默去抖：客户连发图+文字的间隔内不再触发
+NEW_MSG_FOCUS_WINDOW_MINUTES = 60  # focus 时间窗：距离最新 IN 消息超过 60 分钟的陈旧 IN 消息，
+                                   # 即使没被分析过也不从中提取配件（避免 41 小时前的旧询价
+                                   # 被当成新询价融合进当前回复）
 
 _app = None
 _timers = {}
@@ -206,6 +210,46 @@ def _has_part_text_in_window(messages, focus_ids) -> bool:
     return False
 
 
+def _filter_focus_by_time(new_msgs) -> set:
+    """new_msgs → focus_ids：只保留时间窗口内的 IN 消息。
+
+    问题：窗口拉 10 条时，如果客户停了几天又回来发新询价，那几天前没被分析过的
+    旧 IN 消息也会落在 new_msgs 里（id > last_analyzed_msg_id），被当成新询价融合
+    进当前回复。
+
+    过滤规则：
+      - IN 消息：create_time 距最新 IN 消息 ≤ NEW_MSG_FOCUS_WINDOW_MINUTES 才进 focus
+      - OUT 消息：不进 focus（配件只从客户消息提）
+      - 如果所有 IN 消息都被过滤掉（只剩陈旧 IN 或只有 OUT），focus_ids 为空集
+
+    进度条仍然推进到 new_msgs 最大值——陈旧消息标记"已看过"，不会再被重提。
+    """
+    from backend.models.message import Message
+
+    # 找最新 IN 消息的 create_time 作为锚点
+    in_msgs = [m for m in new_msgs if m.direction == Message.DIR_IN]
+    if not in_msgs:
+        return set()
+
+    anchor_time = max(m.create_time for m in in_msgs)
+    cutoff = anchor_time - timedelta(minutes=NEW_MSG_FOCUS_WINDOW_MINUTES)
+
+    focus = set()
+    skipped = 0
+    for m in in_msgs:
+        if m.create_time >= cutoff:
+            focus.add(m.id)
+        else:
+            skipped += 1
+
+    if skipped:
+        log.info(
+            "focus 时间过滤 conv_msgs=%d anchor=%s cutoff=%s 保留=%d 跳过=%d（陈旧 IN 消息）",
+            len(in_msgs), anchor_time, cutoff, len(focus), skipped,
+        )
+    return focus
+
+
 def analyze_conversation(conversation_id):
     """拉窗口 → 增量切分 → 普通识别 → AI 兜底 → 分流落表。调用方需持有 app_context。
 
@@ -249,7 +293,7 @@ def analyze_conversation(conversation_id):
         db.session.commit()
         return
 
-    focus_ids = {m.id for m in new_msgs}
+    focus_ids = _filter_focus_by_time(new_msgs)
 
     # Step 1：普通识别（传 focus_ids，配件/号码只从新消息提，VIN 全窗口扫）
     scenes = rule_extract(messages, focus_msg_ids=focus_ids)
@@ -285,7 +329,18 @@ def analyze_conversation(conversation_id):
         db.session.commit()
         return
 
-    rows = dispatch(conversation_id, scenes, cfg["parts_blacklist"])
+    rows = []
+    try:
+        rows = dispatch(conversation_id, scenes, cfg["parts_blacklist"])
+    except Exception as e:
+        log.exception("dispatch 异常 conv=%s: %s", conversation_id, e)
+        # 哪怕 dispatch 挂了也要推进进度条，不然下次重跑还是挂（死循环）
+        conv.last_analyzed_msg_id = max(m.id for m in new_msgs)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return
 
     # 更新进度条（dispatch 成功才推进，失败了下次可以重跑）
     conv.last_analyzed_msg_id = max(m.id for m in new_msgs)
