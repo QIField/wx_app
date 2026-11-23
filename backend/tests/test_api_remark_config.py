@@ -40,7 +40,7 @@ def test_get_default_empty(client):
     data = client.get(f"/api/contacts/-{conv.id}/remark-config").get_json()["data"]
     assert data == {
         "scope_type": "user", "remark_name": "", "auto_quote_enabled": False,
-        "level": "normal", "tags": [],
+        "level": "normal", "tags": [], "oe_detail_enabled": False,
     }
 
 

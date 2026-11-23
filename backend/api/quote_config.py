@@ -125,6 +125,10 @@ def _save_global(body, diff):
         if (row.quote_mode or "preview") != mode:
             diff.append(f"报价模式[{row.quote_mode}]→[{mode}]")
         row.quote_mode = mode
+    # 兜底：不管是新建行默认 True、还是用户没传 ai_enabled，
+    # 只要最终状态是 True 且 ai_enabled_at 还空着 → 写 now() 当生效起点。
+    if bool(row.ai_enabled) and not row.ai_enabled_at:
+        row.ai_enabled_at = datetime.now()
     return None
 
 

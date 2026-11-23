@@ -46,6 +46,9 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE quote_config ADD COLUMN ai_enabled_at DATETIME NULL")
     # 2026-11-23 OE 详单开关：报价话术是否展开原始 OE 号码；存量行默认关
     _try_alter("ALTER TABLE contact_remark_config ADD COLUMN oe_detail_enabled TINYINT NOT NULL DEFAULT 0")
+    # 2026-11-23 AI 时间闸存量回填：global 行默认 True 创建时没走过"关→开"，
+    # ai_enabled_at 一直为 NULL，导致闸门形同虚设。回填 updated_at 作为生效起点。
+    _backfill_ai_enabled_at()
 
 
 def _backfill_remark_config():
@@ -63,9 +66,11 @@ def _backfill_remark_config():
         return
     db.session.execute(text(
         "INSERT INTO contact_remark_config "
-        "(scope_type, target_wxid, remark_name, auto_quote_enabled, tags, updated_at) "
+        "(scope_type, target_wxid, remark_name, auto_quote_enabled, "
+        "level, oe_detail_enabled, tags, updated_at) "
         "SELECT CASE WHEN wxid LIKE '%@chatroom' THEN 'group' ELSE 'user' END, "
-        "wxid, COALESCE(remark, ''), 0, COALESCE(tags, '[]'), CURRENT_TIMESTAMP "
+        "wxid, COALESCE(remark, ''), 0, 'normal', 0, "
+        "COALESCE(tags, '[]'), CURRENT_TIMESTAMP "
         "FROM contact_profile "
         "WHERE deleted_at IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM contact_remark_config rc "
@@ -194,5 +199,27 @@ def _backfill_devices():
         "UPDATE user_device SET device_id = "
         "(SELECT d.id FROM device d WHERE d.openid = user_device.openid) "
         "WHERE device_id IS NULL AND openid IS NOT NULL AND openid != ''"
+    ))
+    db.session.commit()
+
+
+def _backfill_ai_enabled_at():
+    """存量 quote_config.global 行 ai_enabled=True 但 ai_enabled_at=NULL → 回填 updated_at。
+
+    场景：global 行默认 ai_enabled=True 创建，从未走过"关→开"动作，
+    _save_global 的时间戳写入分支没被触发，闸门形同虚设。
+
+    幂等：已填时间戳的行跳过。
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(db.engine)
+    if "quote_config" not in insp.get_table_names():
+        return
+    db.session.execute(text(
+        "UPDATE quote_config "
+        "SET ai_enabled_at = COALESCE(updated_at, CURRENT_TIMESTAMP) "
+        "WHERE scope = 'global' AND deleted_at IS NULL "
+        "AND ai_enabled = 1 AND ai_enabled_at IS NULL"
     ))
     db.session.commit()
