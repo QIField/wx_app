@@ -705,12 +705,12 @@ def _quote_text(row, car, items, level=None, rate=None):
                     # OE 一致性标识：|替换 / |对号（oe_match=diff→替换, match→对号）
                     oe_match = c.get("oe_match")  # "diff" / "match" / None
                     if oe_match:
-                        oe_tag = "替换" if oe_match == "diff" else "对号"
-                        # 开关开：追加接口返回的原始 OE 号
-                        if oe_detail_enabled:
-                            oe_raw = (c.get("oe") or "").strip()
-                            if oe_raw:
-                                oe_tag = f"{oe_tag}({oe_raw})"
+                        oe_raw = (c.get("oe") or "").strip()
+                        if oe_detail_enabled and oe_raw:
+                            # 开关开：直接展示接口返回的原始 OE 号，"替换/对号"标记藏掉
+                            oe_tag = oe_raw
+                        else:
+                            oe_tag = "替换" if oe_match == "diff" else "对号"
                     else:
                         oe_tag = ""
                     rows.append((brand_display, sell, oe_tag))
