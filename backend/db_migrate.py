@@ -44,6 +44,8 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE group_member ADD COLUMN member_remark VARCHAR(100) NULL")
     # 2026-11-21 AI 开关时间闸门：关→开记时间戳，闸门前历史消息不触发 AI
     _try_alter("ALTER TABLE quote_config ADD COLUMN ai_enabled_at DATETIME NULL")
+    # 2026-11-23 OE 详单开关：报价话术是否展开原始 OE 号码；存量行默认关
+    _try_alter("ALTER TABLE contact_remark_config ADD COLUMN oe_detail_enabled TINYINT NOT NULL DEFAULT 0")
 
 
 def _backfill_remark_config():

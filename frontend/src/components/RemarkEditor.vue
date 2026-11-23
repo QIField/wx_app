@@ -23,6 +23,7 @@ const saving = ref(false)
 const err = ref('')
 const draftName = ref('')
 const draftQuote = ref(false)
+const draftOeDetail = ref(false)
 const draftLevel = ref('normal')
 const draftTags = ref([])
 const tagInput = ref('')
@@ -61,6 +62,7 @@ watch(() => props.targetKey, () => {
 function startEdit() {
   draftName.value = cfg.value?.remark_name || ''
   draftQuote.value = !!cfg.value?.auto_quote_enabled
+  draftOeDetail.value = !!cfg.value?.oe_detail_enabled
   draftLevel.value = cfg.value?.level || 'normal'
   draftTags.value = [...(cfg.value?.tags || [])]
   tagInput.value = ''
@@ -93,6 +95,7 @@ async function saveEdit() {
     cfg.value = await props.save(props.targetKey, {
       remark_name: draftName.value.trim(),
       auto_quote_enabled: draftQuote.value,
+      oe_detail_enabled: draftOeDetail.value,
       level: draftLevel.value,
       tags: [...draftTags.value],
     })
@@ -121,6 +124,11 @@ async function saveEdit() {
           <span class="quote-chip" :class="{ on: cfg.auto_quote_enabled }">{{ cfg.auto_quote_enabled ? '已开启' : '未开启' }}</span>
         </div>
         <div class="rk-row">
+          <span class="k">OE详号</span>
+          <span class="quote-chip" :class="{ on: cfg.oe_detail_enabled }">{{ cfg.oe_detail_enabled ? '已开启' : '未开启' }}</span>
+          <span class="dim hint">开启后报价话术显示原厂替换/对号的原始OE号</span>
+        </div>
+        <div class="rk-row">
           <span class="k">客户等级</span>
           <span class="level-chip" :class="(cfg.level || 'normal')">{{ levelLabelOf(cfg.level) }}</span>
         </div>
@@ -145,9 +153,15 @@ async function saveEdit() {
             placeholder="备注名称（≤100 字）"
             maxlength="100"
           >
-          <div class="rk-quote">
-            <span class="q-label">自动报价</span>
-            <el-switch v-model="draftQuote" />
+          <div class="rk-quotes">
+            <div class="rk-quote">
+              <span class="q-label">自动报价</span>
+              <el-switch v-model="draftQuote" />
+            </div>
+            <div class="rk-quote">
+              <span class="q-label">OE详号</span>
+              <el-switch v-model="draftOeDetail" />
+            </div>
           </div>
           <div class="rk-edit-row">
             <span class="k">客户等级</span>
@@ -235,8 +249,10 @@ async function saveEdit() {
 .rk-input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(29, 93, 228, 0.12); }
 .cnt { font-size: 11px; color: var(--c-text-sub); flex-shrink: 0; }
 
-.rk-quote { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
-.q-label { font-size: 12.5px; }
+.rk-quote { display: flex; align-items: center; gap: 8px; }
+.rk-quotes { display: flex; align-items: center; gap: 20px; padding: 8px 0; }
+.q-label { font-size: 12.5px; white-space: nowrap; }
+.hint { font-size: 11px; margin-left: auto; }
 
 /* 客户等级查看态标签 */
 .level-chip {

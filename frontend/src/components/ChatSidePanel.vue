@@ -2,12 +2,12 @@
 /** 聊天右侧「客户资料」侧栏：头部信息 + 统一备注编辑器。
  *  由 ChatPanel 触发展开（点头像 / 顶部备注名），收起走头部按钮或 Esc；
  *  群成员目标时展示所属群来源，配置仍为该用户的用户级（全局生效）。 */
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ContactAvatar from './ContactAvatar.vue'
 import RemarkEditor from './RemarkEditor.vue'
 
 const props = defineProps({
-  /** { key, apiId, title, subtitle, alias, avatar, chatType, fetch, save, fromGroup } */
+  /** { key, apiId, title, subtitle, alias, avatar, chatType, fetch, save, fromGroup, _convId } */
   target: { type: Object, required: true },
 })
 const emit = defineEmits(['close', 'saved'])
@@ -17,6 +17,7 @@ function onKey(e) {
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
+
 </script>
 
 <template>

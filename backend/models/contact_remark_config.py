@@ -44,6 +44,10 @@ class ContactRemarkConfig(db.Model, SoftDeleteMixin):
         comment="客户等级：vip_a/vip_b/normal（报价系数）",
     )
     tags = db.Column(db.JSON, nullable=False, default=list)
+    oe_detail_enabled = db.Column(
+        db.Boolean, nullable=False, default=False,
+        comment="是否在报价话术里显示原厂替换/对号的原始 OE 号码",
+    )
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
     __table_args__ = (
@@ -56,6 +60,7 @@ class ContactRemarkConfig(db.Model, SoftDeleteMixin):
             "scope_type": self.scope_type,
             "remark_name": self.remark_name or "",
             "auto_quote_enabled": bool(self.auto_quote_enabled),
+            "oe_detail_enabled": bool(self.oe_detail_enabled),
             "level": self.level or self.LEVEL_NORMAL,
             "tags": list(self.tags or []),
         }

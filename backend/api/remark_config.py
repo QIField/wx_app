@@ -124,6 +124,7 @@ def _config_data(scope, wxid):
         return cfg.to_json()
     return {
         "scope_type": scope, "remark_name": "", "auto_quote_enabled": False,
+        "oe_detail_enabled": False,
         "level": ContactRemarkConfig.LEVEL_NORMAL, "tags": [],
     }
 
@@ -163,7 +164,12 @@ def _validated_payload(body):
         level = str(body["level"]).strip()
         if level not in ContactRemarkConfig.ALLOWED_LEVELS:
             return None, "客户等级不合法（vip_a/vip_b/normal）"
-    return (remark, auto_quote, tags, level), None
+
+    oe_detail = None
+    if "oe_detail_enabled" in body and body.get("oe_detail_enabled") is not None:
+        oe_detail = bool(body.get("oe_detail_enabled"))
+
+    return (remark, auto_quote, tags, level, oe_detail), None
 
 
 def _compute_display_name(scope, wxid, remark_name):
@@ -196,7 +202,7 @@ def _save_config(scope, wxid, body, sync_wechat=True):
     payload, err = _validated_payload(body)
     if err:
         return jsonify(code=400, msg=err), 400
-    remark, auto_quote, tags, level = payload
+    remark, auto_quote, tags, level, oe_detail = payload
 
     # 先读当前行、算 diff（用于中间方失败时回滚）
     cfg = ContactRemarkConfig.query.filter_by(scope_type=scope, target_wxid=wxid).first()
@@ -235,6 +241,10 @@ def _save_config(scope, wxid, body, sync_wechat=True):
     if tags is not None and list(cfg.tags or []) != tags:
         diff.append(f"标签{list(cfg.tags or [])}→{tags}")
         cfg.tags = tags
+    if oe_detail is not None:
+        if bool(cfg.oe_detail_enabled) != oe_detail:
+            diff.append("OE详号关→开" if oe_detail else "OE详号开→关")
+        cfg.oe_detail_enabled = oe_detail
     db.session.commit()
 
     # 客户等级变更 → 自动重算该用户/群相关的 pending/review 询价

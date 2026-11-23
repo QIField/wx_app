@@ -317,6 +317,8 @@ def _price_item(item, rate):
             c["sell_price"] = f"{sell_f:.2f}" if sell_f is not None else ""
             c["sell_price_fmt"] = f"¥{sell_f:.0f}" if sell_f and sell_f > 0 else ""
             c["retail_price_fmt"] = f"¥{kaisi:.0f}" if kaisi else ""
+        # OE 一致性校验：「原厂」「原厂国内4S件」各自独立对比接口返回 oe vs 询价原始 oe
+        _mark_oe_consistency(product, item.get("oe") or "")
 
     # 顶层 final_price + save_percent（取首个有有效开思价的 child）
     final = store = None
@@ -347,6 +349,38 @@ def _price_item(item, rate):
         "final_price": final,
         "save_percent": save,
     }
+
+
+# ---------- OE 一致性校验（原厂系品牌独立对比） ----------
+
+
+# 需要做独立 OE 一致性校验的「原厂系」品牌名（小写形式，接口返回统一 lower() 后匹配）
+# 接口返回实测："原厂国内4s件"（小写 s）；可能也有用户写的 "原厂国内4S件"（大写 S）
+_OEM_BRAND_NAMES = {"原厂", "原厂国内4s件"}
+
+
+def _mark_oe_consistency(product, input_oe):
+    """对 product.child 中的每个「原厂系」品牌行，独立对比其接口返回的 oe 与询价输入的原始 oe。
+
+    每个品牌各自判定，互不影响：
+      - brand_name.lower() ∈ _OEM_BRAND_NAMES 且 oe 非空 → 标记 oe_match = "match" / "diff"
+      - 其他品牌或 oe 缺失 → 不标记
+
+    标记写入 child 字典本身（dict 引用修改，调用方持有的 product 自动生效）。
+    """
+    if not product or not input_oe:
+        return
+    input_norm = input_oe.replace(" ", "").strip()
+    if not input_norm:
+        return
+    for c in product.get("child") or []:
+        bn = (c.get("brand_name") or "").lower().replace(" ", "")
+        if bn not in _OEM_BRAND_NAMES:
+            continue
+        child_oe = (c.get("oe") or "").replace(" ", "").strip()
+        if not child_oe:
+            continue
+        c["oe_match"] = "match" if child_oe == input_norm else "diff"
 
 
 def _product_rows(data):
@@ -580,6 +614,20 @@ def _quote_text(row, car, items, level=None, rate=None):
     conv = db.session.get(Conversation, row.conversation_id)
     who = _resolve_real_name(row.sender_name, conv)
     blocks.append(f"@{who}")
+
+    # 读当前会话/用户的「原厂OE详号」开关（决定标识后是否追加括号里的原始 OE 号）
+    # 口径和 _customer_rate 一致：单聊 scope=user + target_wxid=conv.wxid；群聊 scope=group + target_wxid=conv.wxid
+    oe_detail_enabled = False
+    try:
+        from backend.models.contact_remark_config import ContactRemarkConfig, SCOPE_GROUP, SCOPE_USER
+        if conv and conv.wxid:
+            scope = SCOPE_GROUP if conv.chat_type == Conversation.CHAT_GROUP else SCOPE_USER
+            cfg = ContactRemarkConfig.query.filter_by(
+                scope_type=scope, target_wxid=conv.wxid, deleted_at=None,
+            ).first()
+            oe_detail_enabled = bool(cfg.oe_detail_enabled) if cfg else False
+    except Exception:
+        oe_detail_enabled = False
     if row.vin:
         blocks.append(row.vin)
     if has_car:
@@ -639,7 +687,7 @@ def _quote_text(row, car, items, level=None, rate=None):
                 child_sorted = sorted(child, key=_sort_key)
 
                 # 先算所有品牌行，拿到最大 brand_display 宽度用于对齐
-                rows = []  # [(brand_display, sell), ...]
+                rows = []  # [(brand_display, sell, oe_match_tag), ...]
                 for c in child_sorted:
                     brand = (c.get("brand_name") or "").strip()
                     if not brand:
@@ -654,13 +702,25 @@ def _quote_text(row, car, items, level=None, rate=None):
                         brand_display = f"{brand}｜{remark}｜"
                     else:
                         brand_display = f"{brand}｜"
-                    rows.append((brand_display, sell))
+                    # OE 一致性标识：|替换 / |对号（oe_match=diff→替换, match→对号）
+                    oe_match = c.get("oe_match")  # "diff" / "match" / None
+                    if oe_match:
+                        oe_tag = "替换" if oe_match == "diff" else "对号"
+                        # 开关开：追加接口返回的原始 OE 号
+                        if oe_detail_enabled:
+                            oe_raw = (c.get("oe") or "").strip()
+                            if oe_raw:
+                                oe_tag = f"{oe_tag}({oe_raw})"
+                    else:
+                        oe_tag = ""
+                    rows.append((brand_display, sell, oe_tag))
                     if len(rows) >= 10:
                         break
 
-                # 输出：品牌｜产品名｜¥价格（直接贴，不对齐）
+                # 输出：品牌｜产品名｜¥价格[|替换/|对号]
                 shown = 0
-                for bd, sell in rows:
-                    blocks.append(f"{circles[shown]} {bd}{sell}")
+                for bd, sell, oe_tag in rows:
+                    suffix = f"｜{oe_tag}" if oe_tag else ""
+                    blocks.append(f"{circles[shown]} {bd}{sell}{suffix}")
                     shown += 1
     return "\n".join(blocks)
