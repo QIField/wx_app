@@ -10,7 +10,7 @@ import { msgTextOf } from '../utils/message'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  convId: { type: String, default: '' },        // 限定某会话；空=跨会话
+  convId: { type: [String, Number], default: '' },  // 限定某会话；空=跨会话
   initialQuery: { type: String, default: '' },  // 外部搜索框传入的初始关键词
 })
 
@@ -180,8 +180,6 @@ async function onItemClick(item) {
                 start-placeholder="开始日期"
                 end-placeholder="结束日期"
                 value-format="YYYY-MM-DD"
-                class="hd-daterange"
-                popper-class="hd-daterange-popper"
               />
             </div>
             <div class="hd-field">
@@ -413,9 +411,6 @@ async function onItemClick(item) {
   color: #17233a;
 }
 .hd-btn-ghost:hover:not(:disabled) { border-color: #1d5de4; color: #1d5de4; }
-
-/* daterange 宽度 */
-.hd-daterange { width: 260px; }
 
 /* ====== 4. 结果区 ====== */
 .hd-results {
