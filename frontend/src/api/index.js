@@ -224,6 +224,12 @@ export const saveMemberRemarkConfig = (contactId, memberAlias, payload) =>
 /** 询价列表：{status: 0-4, conversation_id, page, limit} 可选，id 倒序。 */
 export const fetchQuoteInquiries = (params) => http.get('/quote/inquiries', { params })
 
+/** 单条询价详情（详情页用）。 */
+export const fetchQuoteInquiry = (id) => http.get(`/quote/inquiries/${id}`)
+
+/** 保存行内改价覆盖（详情页表格改价 debounce 调用）。body.items = [{oe, final_price}] */
+export const saveQuoteOverride = (id, items) => http.post(`/quote/inquiries/${id}/override`, { items })
+
 /** 人工发送报价（预览流动作）：price 可选改价（后端话术联动重建），图前文后发出。
  *  已报价 409 / 发送未启用 403 / 下发失败 502（询价转人工 review）。 */
 export const sendQuoteInquiry = (id, price) =>

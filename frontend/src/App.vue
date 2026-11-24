@@ -1,6 +1,7 @@
 <script setup>
-/** 应用入口：恢复会话 → 按角色分流（developer/admin → 管理后台，agent → 工作台）。 */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+/** 应用入口：恢复会话 → 按角色分流（developer/admin → 管理后台，agent → 工作台）。
+ *  额外：hash 路由 /#/quote-detail/:id 新开详情页标签时，直接渲染 <router-view> 全屏详情页。 */
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { fetchMe, getToken, setToken } from './api'
 import LoginPage from './pages/LoginPage.vue'
 import WorkbenchPage from './pages/WorkbenchPage.vue'
@@ -11,6 +12,7 @@ import DevicesPage from './pages/admin/DevicesPage.vue'
 import OrgsPage from './pages/admin/OrgsPage.vue'
 import LogsPage from './pages/admin/LogsPage.vue'
 import ForceChangePassword from './components/ForceChangePassword.vue'
+import { isDetailRoute } from './router'
 
 const booted = ref(false)
 const me = ref(null)          // 当前登录人（/api/auth/me）
@@ -72,19 +74,24 @@ function onLoggedOut() {
 </script>
 
 <template>
-  <LoginPage v-if="booted && view === 'login'" @logged-in="onLoggedIn" />
+  <!-- 详情页路由（新开标签）：独立全屏渲染，不走工作台分流 -->
+  <router-view v-if="booted && isDetailRoute()" />
 
-  <WorkbenchPage v-else-if="booted && view === 'workbench'" :me="me" @logout="onLoggedOut" @back="view = 'admin'" />
+  <template v-else>
+    <LoginPage v-if="booted && view === 'login'" @logged-in="onLoggedIn" />
 
-  <AdminLayout v-else-if="booted && view === 'admin'" v-model:page="page" :me="me" @logout="onLoggedOut" @open-workbench="view = 'workbench'">
-    <DashboardPage v-if="page === 'dashboard'" :me="me" />
-    <AccountsPage v-else-if="page === 'accounts'" :me="me" @toast="toast" />
-    <DevicesPage v-else-if="page === 'devices'" :me="me" @toast="toast" />
-    <OrgsPage v-else-if="page === 'orgs'" @toast="toast" />
-    <LogsPage v-else-if="page === 'logs'" @toast="toast" />
-  </AdminLayout>
+    <WorkbenchPage v-else-if="booted && view === 'workbench'" :me="me" @logout="onLoggedOut" @back="view = 'admin'" />
 
-  <div v-else class="boot-loading">加载中…</div>
+    <AdminLayout v-else-if="booted && view === 'admin'" v-model:page="page" :me="me" @logout="onLoggedOut" @open-workbench="view = 'workbench'">
+      <DashboardPage v-if="page === 'dashboard'" :me="me" />
+      <AccountsPage v-else-if="page === 'accounts'" :me="me" @toast="toast" />
+      <DevicesPage v-else-if="page === 'devices'" :me="me" @toast="toast" />
+      <OrgsPage v-else-if="page === 'orgs'" @toast="toast" />
+      <LogsPage v-else-if="page === 'logs'" @toast="toast" />
+    </AdminLayout>
+
+    <div v-else class="boot-loading">加载中…</div>
+  </template>
 
   <!-- 初始密码强制改密：覆盖一切页面，不可关闭 -->
   <ForceChangePassword v-if="changingPwd" @done="onPwdChanged" />

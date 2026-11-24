@@ -6,9 +6,11 @@ import 'element-plus/dist/index.css'
 import './style.css'
 import './admin.css'
 import App from './App.vue'
+import { router } from './router'
 
 // Element Plus 全局中文 locale：周标题 / 月份 / 按钮 / placeholder 统一中文
 createApp(App)
   .use(createPinia())
   .use(ElementPlus, { locale: zhCn })
+  .use(router)
   .mount('#app')

@@ -1,6 +1,6 @@
 <script setup>
 /** 三栏工作台：深色顶栏 + 微信式图标侧栏（会话/通讯录）+ 列表 / 聊天窗 / 报价处理台。 */
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useContactsStore } from '../stores/contacts'
 import { useBoundaryResize } from '../composables/useBoundaryResize'
@@ -28,6 +28,8 @@ const ROLE_TEXT = { developer: '开发者', admin: '管理员', agent: '客服' 
 const activeView = ref('chat') // chat | contacts | help
 const convListRef = ref(null) // ConvList 实例：用于触发未读定位
 const ringSettingsRef = ref(null) // 设置弹窗实例：左栏底部齿轮打开提示音选择
+const chatPanelRef = ref(null) // ChatPanel 实例：暴露 locateMessage 方法给拓展栏的 QuoteCard
+provide('chatPanelRef', chatPanelRef)
 
 /* 左栏列表宽度：右缘 ±5px 悬停出拖拽光标，按住拖动实时调宽（220~420），松开持久化 */
 const { width: listWidth, bind: bindListWidth } = useBoundaryResize({
@@ -123,7 +125,7 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
         </aside>
       </div>
       <main class="col-main">
-        <ChatPanel v-if="activeView === 'chat'" />
+        <ChatPanel v-if="activeView === 'chat'" ref="chatPanelRef" />
         <ContactDetail v-else-if="activeView === 'contacts'" @enter-chat="activeView = 'chat'" />
         <HelpCenter v-else />
       </main>

@@ -301,6 +301,9 @@ async function onMenuSelect(key) {
     ElMessage.error('复制失败，可放大图片右键复制')
   }
 }
+
+/** 暴露给父层调用的定位接口：{ convId, id } → 切会话 + 滚消息 + 高亮 */
+defineExpose({ locateMessage: onHistoryLocate })
 </script>
 
 <template>
