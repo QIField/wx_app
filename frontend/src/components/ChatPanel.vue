@@ -326,7 +326,6 @@ async function onMenuSelect(key) {
           <path d="M3 3v5h5"/>
           <path d="M12 7v5l4 2"/>
         </svg>
-        <span>历史消息</span>
       </button>
     </div>
 
@@ -440,12 +439,12 @@ async function onMenuSelect(key) {
 /* 历史消息按钮：右侧固定位，与标题同行 */
 .history-btn {
   margin-left: auto;
-  display: flex; align-items: center; gap: 5px;
-  padding: 5px 12px;
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
   border: 1px solid var(--c-border-strong);
   border-radius: var(--r-md);
   background: #fff;
-  font-size: 12px; color: var(--c-text-sub); font-family: inherit;
+  color: var(--c-text-sub);
   cursor: pointer; transition: all 0.15s;
   flex-shrink: 0;
 }
