@@ -6,7 +6,7 @@
  *   类型识别与原型 detectType 同款；示例 chips 一键查询。
  * 其余三子页为独立组件（ManualAiChat / ManualThirdParty / ManualHistory）。
  */
-import { ref } from 'vue'
+import { computed, onMounted, onActivated, onDeactivated, onBeforeUnmount, ref, watch, defineComponent } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qqManualSearch } from '../../api'
 import { TYPE_LABELS, detectType } from '../../utils/quoteQuery'
@@ -14,6 +14,10 @@ import QuoteResultCard from './QuoteResultCard.vue'
 import ManualAiChat from './ManualAiChat.vue'
 import ManualThirdParty from './ManualThirdParty.vue'
 import ManualHistory from './ManualHistory.vue'
+
+/* ---------- 🔍 生命周期监控 ---------- */
+const L = (msg, c = '#888') =>
+  console.log(`%c[3.ManualView] ${msg}`, `color:${c};font-weight:bold`)
 
 const SUBS = [
   { key: 'query', label: '查询报价' },
@@ -56,19 +60,22 @@ async function doQuery(text) {
     loading.value = false
   }
 }
-</script>
 
-<template>
-  <div class="manual">
-    <div class="sub-tabs">
-      <span
-        v-for="s in SUBS" :key="s.key"
-        class="st" :class="{ on: subTab === s.key }"
-        @click="subTab = s.key"
-      >{{ s.label }}</span>
-    </div>
+/* ---------- 🔍 生命周期监控 ---------- */
+onMounted(() => L('onMounted ✅', '#27ae60'))
+onActivated(() => L('onActivated 🟢', '#2ecc71'))
+onDeactivated(() => L('onDeactivated 🔴', '#e74c3c'))
+onBeforeUnmount(() => L('onBeforeUnmount 💀', '#c0392b'))
+watch(subTab, (k) => L(`subTab → ${k}`, '#3498db'))
 
-    <template v-if="subTab === 'query'">
+/* ---------- 4 个子页全部用 component :is → keep-alive 统一缓存 ---------- */
+const ManualQueryInline = defineComponent({
+  name: 'ManualQueryInline',
+  setup() {
+    return { q, partName, loading, error, result, CHIPS, typeLabel, doQuery, QuoteResultCard }
+  },
+  template: `
+    <div>
       <div class="qq-box">
         <div class="qq-row">
           <input v-model="q" class="qq-input num" placeholder="输入 OE / VIN / 配件名称（如：节温器）" @keyup.enter="doQuery()">
@@ -82,7 +89,6 @@ async function doQuery(text) {
           <span v-for="c in CHIPS" :key="c.q" class="chip num" @click="doQuery(c.q)">{{ c.label }}</span>
         </div>
       </div>
-
       <div class="res">
         <div v-if="loading" class="qq-skel"><span class="ring"></span>解析中（识别 → 译码 → CRM → 爆炸图）…</div>
         <div v-else-if="error" class="qq-empty err">
@@ -92,16 +98,33 @@ async function doQuery(text) {
         <QuoteResultCard v-else-if="result" :r="result" />
         <div v-else class="qq-empty">查询结果将在此输出（识别 → 译码 → CRM → 爆炸图）</div>
       </div>
-    </template>
+    </div>
+  `,
+})
 
-    <!-- query 子页是内联内容，另外三子页用 keep-alive 常驻内存 -->
-    <template v-else>
-      <keep-alive>
-        <component
-          :is="subTab === 'ai' ? ManualAiChat : subTab === 'third' ? ManualThirdParty : ManualHistory"
-        />
-      </keep-alive>
-    </template>
+const currentSub = computed(() => {
+  L(`currentSub → ${subTab.value}`, '#9b59b6')
+  if (subTab.value === 'query') return ManualQueryInline
+  if (subTab.value === 'ai') return ManualAiChat
+  if (subTab.value === 'third') return ManualThirdParty
+  return ManualHistory
+})
+</script>
+
+<template>
+  <div class="manual">
+    <div class="sub-tabs">
+      <span
+        v-for="s in SUBS" :key="s.key"
+        class="st" :class="{ on: subTab === s.key }"
+        @click="subTab = s.key"
+      >{{ s.label }}</span>
+    </div>
+
+    <!-- 4 个子页全部在 keep-alive 里，切 tab 不销毁任何一个 -->
+    <keep-alive>
+      <component :is="currentSub" />
+    </keep-alive>
   </div>
 </template>
 
