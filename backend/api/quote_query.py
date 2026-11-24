@@ -184,6 +184,18 @@ def extract_parts():
                    data=qq_client.extract_parts([{"type": "input_text", "text": text}]))
 
 
+@bp.post("/api/quote/query/ocr-vin")
+@require_role()
+@_query_endpoint
+def ocr_vin():
+    """图片 → VIN 识别：上传后拿到的绝对 url 传给腾讯云 OCR，返回识别到的 VIN 字符串。"""
+    image_url = _require(_json_body(), "image_url")
+    vin = qq_client.ocr_vin(image_url)
+    if not vin:
+        raise _QueryError("图片识别未返回 VIN")
+    return jsonify(code=0, msg="success", data={"vin": vin})
+
+
 @bp.post("/api/quote/query/zpy")
 @require_role()
 @_query_endpoint

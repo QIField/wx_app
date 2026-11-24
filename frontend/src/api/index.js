@@ -248,6 +248,10 @@ export const qqManualSearch = (q, partName) =>
 export const qqExtractParts = (text) =>
   http.post('/quote/query/extract-parts', { text }, { timeout: 60000 })
 
+/** 图片 VIN 识别：{image_url} → {vin}。先 uploadFile 拿到 url，再调这个。 */
+export const qqOcrVin = (imageUrl) =>
+  http.post('/quote/query/ocr-vin', { image_url: imageUrl }, { timeout: 60000 })
+
 /** 兆配云全网比价（中文键名列表原样透传）。 */
 export const qqZpy = (number) => http.post('/quote/query/zpy', { number }, { timeout: 60000 })
 
