@@ -19,7 +19,9 @@ const current = computed(() => (PANEL_VIEWS.find((v) => v.key === active.value) 
   <div class="qq">
     <PanelHead v-model="active" :views="PANEL_VIEWS" />
     <div class="body">
-      <component :is="current" />
+      <keep-alive>
+        <component :is="current" />
+      </keep-alive>
     </div>
   </div>
 </template>

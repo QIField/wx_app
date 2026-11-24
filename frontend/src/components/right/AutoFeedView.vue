@@ -6,7 +6,7 @@
  * 新鲜度：15s 轮询 + WS quote_inquiry_changed 静默刷新；暂停按钮停轮询。
  * 开关/模式：GET /quote/config 回填；PUT 保存失败回滚原值 + toast（客服 403 文案后端给）。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onBeforeUnmount, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { connectWs, fetchQuoteInquiries, saveQuoteConfig } from '../../api'
 import { useQuoteConfig } from '../../composables/useQuoteConfig'
@@ -69,18 +69,29 @@ function onWsEvent(event) {
   if (event === 'quote_inquiry_changed') refresh() // 落库/动作广播 → 静默刷新
 }
 
-onMounted(() => {
-  fetchRows()
-  loadConfig()
+function startPolling() {
+  if (timer) return
   timer = setInterval(() => {
     if (!paused.value) refresh()
   }, POLL_MS)
   sub = connectWs(onWsEvent)
-})
-onUnmounted(() => {
+}
+function stopPolling() {
   clearInterval(timer)
-  if (sub) sub.stop()
+  timer = null
+  if (sub) { sub.stop(); sub = null }
+}
+
+// keep-alive 场景：首次激活 / 每次重新激活都要启动
+onActivated(() => {
+  if (!loaded.value) {
+    fetchRows()
+    loadConfig()
+  }
+  startPolling()
 })
+onDeactivated(stopPolling)
+onBeforeUnmount(stopPolling)
 </script>
 
 <template>

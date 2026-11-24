@@ -94,9 +94,13 @@ async function doQuery(text) {
       </div>
     </template>
 
-    <ManualAiChat v-else-if="subTab === 'ai'" />
-    <ManualThirdParty v-else-if="subTab === 'third'" />
-    <ManualHistory v-else />
+    <!-- 三子页用 keep-alive 常驻内存，切 tab 不销毁 -->
+    <keep-alive>
+      <component
+        v-else
+        :is="subTab === 'ai' ? ManualAiChat : subTab === 'third' ? ManualThirdParty : ManualHistory"
+      />
+    </keep-alive>
   </div>
 </template>
 
