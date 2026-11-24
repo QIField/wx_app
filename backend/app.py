@@ -105,6 +105,57 @@ def register_risk_hooks(app: Flask) -> None:
         )
 
 
+def _init_mutex_protocol(app: Flask) -> None:
+    """互斥控制插件初始化：自动探测可用后端（Redis 优先 → DB 锁兜底）。
+
+    配置：
+        MUTEX_PROTOCOL_ENABLED=true  启用
+        MUTEX_PROTOCOL_BACKEND=auto  | redis | db  —— 默认 auto
+        REDIS_URL=redis://...
+
+    任一步失败都静默降级为"全放行" —— 不阻断启动、不影响现有业务。
+    """
+    from backend.config import (
+        MUTEX_PROTOCOL_ENABLED, MUTEX_PROTOCOL_BACKEND, REDIS_URL,
+    )
+    from backend.extensions import db
+
+    _log = lambda m: (app.logger.warning(m), print(m))  # 同时打 Flask logger + stdout
+
+    if not MUTEX_PROTOCOL_ENABLED:
+        print("🔐 MutexProtocol 未启用 (MUTEX_PROTOCOL_ENABLED=false)")
+        return
+
+    backend = MUTEX_PROTOCOL_BACKEND
+    redis_client = None
+
+    if backend in ("auto", "redis"):
+        try:
+            import redis  # noqa: F401  可选依赖
+        except ImportError:
+            if backend == "redis":
+                _log(
+                    "🔐 MutexProtocol backend=redis 但 redis 包未安装 → 降级全放行。"
+                    "pip install redis 后重启生效。"
+                )
+                return
+        else:
+            try:
+                client = redis.Redis.from_url(REDIS_URL)
+                client.ping()
+                redis_client = client
+                print("🔐 Redis 可用 (backend=auto, 准备作为首选)")
+            except Exception as exc:
+                print(f"🔐 Redis 不可用 ({exc}) → auto 模式下将使用 DB 锁")
+
+    print(f"🔐 MutexProtocol 启用 (backend={backend})")
+    from backend.plugins.mutex_protocol import init_app as plugin_init
+    with app.app_context():
+        plugin_init(app, backend=backend, redis_client=redis_client, db=db)
+    from backend.plugins.mutex_protocol import get_backend
+    print(f"🔐 MutexProtocol 初始化完成 —— 实际后端: {get_backend()}")
+
+
 def register_routes(app: Flask) -> None:
     from backend.api.accounts import bp as accounts_bp
     from backend.api.admin_devices import bp as admin_devices_bp
@@ -142,6 +193,7 @@ def register_routes(app: Flask) -> None:
     from backend.services.auto_quote import init_app as init_auto_quote
 
     init_auto_quote(app)
+    _init_mutex_protocol(app)  # 互斥控制插件（群聊多设备自动报价防重）
     app.register_blueprint(remark_config_bp)
     app.register_blueprint(quote_config_bp)
     app.register_blueprint(quote_inquiry_bp)

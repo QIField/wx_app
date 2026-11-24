@@ -86,3 +86,13 @@ RINGTONE_ALLOWED_EXTS = ("mp3", "m4a", "wav", "ogg")
 RINGTONE_MAX_BYTES = int(os.getenv("RINGTONE_MAX_BYTES", str(5 * 1024 * 1024)))
 RINGTONE_MAX_COUNT = int(os.getenv("RINGTONE_MAX_COUNT", "10"))
 RINGTONE_MIN_FREE_BYTES = int(os.getenv("RINGTONE_MIN_FREE_BYTES", str(100 * 1024 * 1024)))
+
+# 互斥控制插件（群聊多设备自动报价防重）：
+# - 默认关闭（false），打开后会在 Redis 和 DB 锁之间自动选可用的后端
+# - MUTEX_PROTOCOL_BACKEND: auto | redis | db  —— 默认 auto（Redis 可用→Redis，否则 DB 锁）
+# - REDIS_URL 不配默认 redis://localhost:6379/0
+MUTEX_PROTOCOL_ENABLED = os.getenv("MUTEX_PROTOCOL_ENABLED", "false").lower() in (
+    "1", "true", "yes",
+)
+MUTEX_PROTOCOL_BACKEND = os.getenv("MUTEX_PROTOCOL_BACKEND", "auto").lower()
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

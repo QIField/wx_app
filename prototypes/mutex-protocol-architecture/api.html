@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>接口定义 · Mutex Protocol</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="api">
+  <div class="app-wrapper">
+    <nav class="app-nav">
+      <div class="nav-brand">
+        <div class="nav-brand-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          <span>MUTEX<br/>PROTOCOL</span>
+        </div>
+        <div class="nav-brand-sub">互斥控制插件 · v1.0</div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">架构文档</div>
+        <ul class="nav-list">
+          <li>
+            <a href="index.html" class="nav-link" data-nav="overview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+              <span>架构总览</span>
+            </a>
+          </li>
+          <li>
+            <a href="sequence.html" class="nav-link" data-nav="sequence">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span>核心流程</span>
+            </a>
+          </li>
+          <li>
+            <a href="api.html" class="nav-link active" data-nav="api">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/></svg>
+              <span>接口定义</span>
+            </a>
+          </li>
+          <li>
+            <a href="error.html" class="nav-link" data-nav="error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+              <span>异常处理</span>
+            </a>
+          </li>
+          <li>
+            <a href="testing.html" class="nav-link" data-nav="testing">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>测试方案</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="nav-footer">
+        BACKEND · PYTHON · FLASK<br/>
+        低侵入 · 零 downtime
+      </div>
+    </nav>
+
+    <main class="app-content">
+      <header>
+        <h1>关键接口与数据结构</h1>
+        <div class="subtitle">Redis Key 设计 · 插件 Python API · 数据模型</div>
+      </header>
+
+      <!-- Redis 数据结构 -->
+      <section class="card">
+        <h2>Redis Key 设计</h2>
+        <p>所有 Key 都带前缀 <code>mutex:</code>，锁按群聊 <strong>wxid 哈希值</strong>隔离，互不干扰。</p>
+
+        <h3 style="margin-top: var(--s-6);">互斥锁 Key</h3>
+        <table class="data-table">
+          <thead>
+            <tr><th>Key</th><th>类型</th><th>TTL</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>mutex:lock:{group_wxid}</code></td><td>STRING (JSON)</td><td>30s</td><td>分布式互斥锁</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top: var(--s-3); font-size: 12px; color: var(--text-muted);">
+          Value 结构: <code>{"owner": "openid_xxx", "term": 5, "lease": 1700000000, "ts": 1700000000}</code>
+        </p>
+
+        <h3 style="margin-top: var(--s-6);">心跳与候选集</h3>
+        <table class="data-table">
+          <thead>
+            <tr><th>Key</th><th>类型</th><th>TTL</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>mutex:hb:{group_wxid}:{openid}</code></td><td>STRING</td><td>15s</td><td>Leader 心跳续租标记</td></tr>
+            <tr><td><code>mutex:candidates:{group_wxid}</code></td><td>SET</td><td>—</td><td>该群有哪些在线设备（定期重写）</td></tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top: var(--s-6);">Lua 脚本</h3>
+        <p>为保证原子性，<code>try_acquire</code> 和 <code>release</code> 使用 Lua 脚本实现，避免竞态条件。</p>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">lua · try_acquire.lua</span>
+          </div>
+<pre><code><span class="tok-comment">-- 只有当 key 不存在或已有 key 的 owner == device_id 时才写入
+<span class="tok-comment">-- 避免 A 还拿着过期锁时 B 抢锁成功</span>
+<span class="tok-keyword">local</span> key      = KEYS[<span class="tok-num">1</span>]
+<span class="tok-keyword">local</span> owner    = ARGV[<span class="tok-num">1</span>]
+<span class="tok-keyword">local</span> term     = tonumber(ARGV[<span class="tok-num">2</span>])
+<span class="tok-keyword">local</span> value    = ARGV[<span class="tok-num">3</span>]
+<span class="tok-keyword">local</span> ttl      = tonumber(ARGV[<span class="tok-num">4</span>])
+
+<span class="tok-keyword">local</span> existing = redis.call(<span class="tok-str">"GET"</span>, key)
+<span class="tok-keyword">if</span> existing <span class="tok-keyword">then</span>
+    <span class="tok-keyword">local</span> prev = cjson.decode(existing)
+    <span class="tok-comment">-- 同一个 device 续约？允许；否则拒绝</span>
+    <span class="tok-keyword">if</span> prev[<span class="tok-str">"owner"</span>] == owner <span class="tok-keyword">then</span>
+        redis.call(<span class="tok-str">"SETEX"</span>, key, ttl, value)
+        <span class="tok-keyword">return</span> <span class="tok-num">1</span>
+    <span class="tok-keyword">else</span>
+        <span class="tok-keyword">return</span> <span class="tok-num">0</span>
+    <span class="tok-keyword">end</span>
+<span class="tok-keyword">else</span>
+    redis.call(<span class="tok-str">"SETEX"</span>, key, ttl, value)
+    <span class="tok-keyword">return</span> <span class="tok-num">1</span>
+<span class="tok-keyword">end</span></code></pre>
+        </div>
+      </section>
+
+      <!-- Python API -->
+      <section class="card">
+        <h2>插件 Python 模块 API</h2>
+
+        <h3>模块入口</h3>
+        <table class="data-table">
+          <thead>
+            <tr><th>函数</th><th>参数</th><th>返回</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>should_process(conversation_id)</code></td>
+              <td>conversation_id: int</td>
+              <td><code>bool</code></td>
+              <td><span class="tag tag-accent">主入口</span> 判断当前设备是否该处理这条会话的消息</td>
+            </tr>
+            <tr>
+              <td><code>leader_of(group_wxid)</code></td>
+              <td>group_wxid: str</td>
+              <td><code>dict | None</code></td>
+              <td>查询某群当前的 Leader 信息</td>
+            </tr>
+            <tr>
+              <td><code>force_election(group_wxid)</code></td>
+              <td>group_wxid: str</td>
+              <td><code>None</code></td>
+              <td>手动触发选举（运维用）</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top: var(--s-6);">LockManager 类</h3>
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">python · backend/plugins/mutex_protocol/lock.py</span>
+          </div>
+<pre><code><span class="tok-keyword">import</span> json
+<span class="tok-keyword">import</span> logging
+<span class="tok-keyword">import</span> time
+<span class="tok-keyword">from</span> typing <span class="tok-keyword">import</span> Optional, Dict
+
+log = logging.getLogger(__name__)
+
+LOCK_PREFIX = <span class="tok-str">"mutex:lock:"</span>
+LOCK_TTL_SEC = <span class="tok-num">30</span>
+
+
+<span class="tok-keyword">class</span> <span class="tok-class">LockManager</span>:
+    <span class="tok-str">"""基于 Redis SET NX 的分布式互斥锁。"""</span>
+
+    <span class="tok-keyword">def</span> <span class="tok-func">__init__</span>(self, redis_client):
+        self._redis = redis_client
+
+    <span class="tok-keyword">def</span> <span class="tok-func">_key</span>(self, group_wxid: <span class="tok-class">str</span>) -> <span class="tok-class">str</span>:
+        <span class="tok-keyword">return</span> <span class="tok-str">f"{LOCK_PREFIX}{group_wxid}"</span>
+
+    <span class="tok-keyword">def</span> <span class="tok-func">try_acquire</span>(
+        self, group_wxid: <span class="tok-class">str</span>, device_id: <span class="tok-class">str</span>, term: <span class="tok-class">int</span>
+    ) -> <span class="tok-class">bool</span>:
+        <span class="tok-str">"""尝试获取锁（SET NX + EX 30）。
+
+        term: 任期号，用于 fencing token —— 只有新任期能覆盖旧任期。
+        """</span>
+        key = self._key(group_wxid)
+        value = json.dumps({
+            <span class="tok-str">"owner"</span>: device_id,
+            <span class="tok-str">"term"</span>: term,
+            <span class="tok-str">"lease"</span>: int(time.time()) + LOCK_TTL_SEC,
+            <span class="tok-str">"ts"</span>: int(time.time()),
+        })
+        <span class="tok-comment"># SET NX EX 原子操作</span>
+        ok = self._redis.set(key, value, nx=<span class="tok-keyword">True</span>, ex=LOCK_TTL_SEC)
+        <span class="tok-keyword">if</span> ok:
+            log.info(<span class="tok-str">"🔒 抢锁成功 group=%s owner=%s term=%d"</span>, group_wxid[:<span class="tok-num">20</span>], device_id, term)
+        <span class="tok-keyword">else</span>:
+            log.debug(<span class="tok-str">"🔓 抢锁失败 group=%s owner=%s term=%d"</span>, group_wxid[:<span class="tok-num">20</span>], device_id, term)
+        <span class="tok-keyword">return</span> bool(ok)
+
+    <span class="tok-keyword">def</span> <span class="tok-func">renew</span>(self, group_wxid: <span class="tok-class">str</span>, device_id: <span class="tok-class">str</span>, term: <span class="tok-class">int</span>) -> <span class="tok-class">bool</span>:
+        <span class="tok-str">"""Leader 续租：只有 owner 和 term 都匹配才允许延长 TTL。"""</span>
+        key = self._key(group_wxid)
+        raw = self._redis.get(key)
+        <span class="tok-keyword">if not</span> raw:
+            <span class="tok-keyword">return False</span>
+        <span class="tok-keyword">try</span>:
+            data = json.loads(raw)
+        <span class="tok-keyword">except</span> json.JSONDecodeError:
+            <span class="tok-keyword">return False</span>
+
+        <span class="tok-keyword">if</span> data[<span class="tok-str">"owner"</span>] != device_id <span class="tok-keyword">or</span> data[<span class="tok-str">"term"</span>] != term:
+            <span class="tok-keyword">return False</span>  <span class="tok-comment"># 锁已易主</span>
+
+        <span class="tok-comment"># 续租：重写 value + 延长 TTL</span>
+        data[<span class="tok-str">"lease"</span>] = int(time.time()) + LOCK_TTL_SEC
+        data[<span class="tok-str">"ts"</span>] = int(time.time())
+        self._redis.setex(key, LOCK_TTL_SEC, json.dumps(data))
+        <span class="tok-keyword">return True</span>
+
+    <span class="tok-keyword">def</span> <span class="tok-func">release</span>(self, group_wxid: <span class="tok-class">str</span>, device_id: <span class="tok-class">str</span>, term: <span class="tok-class">int</span>) -> <span class="tok-class">bool</span>:
+        <span class="tok-str">"""主动释放锁（Lua 脚本校验 owner，避免删了别人的锁）。"""</span>
+        key = self._key(group_wxid)
+        raw = self._redis.get(key)
+        <span class="tok-keyword">if not</span> raw:
+            <span class="tok-keyword">return True</span>
+        <span class="tok-keyword">try</span>:
+            data = json.loads(raw)
+        <span class="tok-keyword">except</span> json.JSONDecodeError:
+            <span class="tok-keyword">return True</span>
+
+        <span class="tok-keyword">if</span> data[<span class="tok-str">"owner"</span>] != device_id <span class="tok-keyword">or</span> data[<span class="tok-str">"term"</span>] != term:
+            log.warning(<span class="tok-str">"⚠️ 拒绝释放：lock 已易主 group=%s local=%d remote=%d"</span>,
+                        group_wxid, term, data.get(<span class="tok-str">"term"</span>))
+            <span class="tok-keyword">return False</span>
+
+        self._redis.delete(key)
+        <span class="tok-keyword">return True</span>
+
+    <span class="tok-keyword">def</span> <span class="tok-func">peek</span>(self, group_wxid: <span class="tok-class">str</span>) -> Optional[<span class="tok-class">Dict</span>]:
+        <span class="tok-str">"""读锁内容（不修改）。"""</span>
+        key = self._key(group_wxid)
+        raw = self._redis.get(key)
+        <span class="tok-keyword">if not</span> raw:
+            <span class="tok-keyword">return None</span>
+        <span class="tok-keyword">try</span>:
+            <span class="tok-keyword">return</span> json.loads(raw)
+        <span class="tok-keyword">except</span> json.JSONDecodeError:
+            <span class="tok-keyword">return None</span></code></pre>
+        </div>
+      </section>
+
+      <!-- 心跳模块 -->
+      <section class="card">
+        <h2>心跳续租与本地状态</h2>
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">python · backend/plugins/mutex_protocol/monitor.py</span>
+          </div>
+<pre><code><span class="tok-str">"""DeviceMonitor: Leader 心跳续租 + 本地状态管理。
+
+设计要点：
+1. 每 10 秒尝试续租一次 → 3 个周期内都失败就降级
+2. 线程安全：本地 dict 用 threading.Lock 保护
+3. 所有异常只记日志，绝不影响消息处理主链路
+"""</span>
+
+<span class="tok-keyword">import</span> logging
+<span class="tok-keyword">import</span> threading
+<span class="tok-keyword">import</span> time
+
+log = logging.getLogger(__name__)
+
+<span class="tok-keyword">class</span> <span class="tok-class">DeviceMonitor</span>:
+    HEARTBEAT_INTERVAL = <span class="tok-num">10</span>   <span class="tok-comment"># 心跳周期（秒）</span>
+    MAX_FAILURES = <span class="tok-num">3</span>           <span class="tok-comment"># 连续失败上限 → 降级</span>
+
+    <span class="tok-keyword">def</span> <span class="tok-func">__init__</span>(self, lock_manager, device_id: <span class="tok-class">str</span>):
+        self._lock_mgr = lock_manager
+        self._device_id = device_id
+        self._state_lock = threading.Lock()
+
+        <span class="tok-comment"># 本地状态：{group_wxid: {leader, term, failures, timer, running}}</span>
+        self._groups: <span class="tok-class">dict</span> = {}
+
+    <span class="tok-keyword">def</span> <span class="tok-func">promote</span>(self, group_wxid: <span class="tok-class">str</span>, term: <span class="tok-class">int</span>):
+        <span class="tok-str">"""当选 Leader 后调用：启动心跳续租线程。"""</span>
+        <span class="tok-keyword">with</span> self._state_lock:
+            state = self._groups.setdefault(group_wxid, {
+                <span class="tok-str">"leader"</span>: <span class="tok-keyword">None</span>,
+                <span class="tok-str">"term"</span>: <span class="tok-num">0</span>,
+                <span class="tok-str">"failures"</span>: <span class="tok-num">0</span>,
+                <span class="tok-str">"timer"</span>: <span class="tok-keyword">None</span>,
+            })
+            state[<span class="tok-str">"leader"</span>] = self._device_id
+            state[<span class="tok-str">"term"</span>] = term
+            state[<span class="tok-str">"failures"</span>] = <span class="tok-num">0</span>
+            <span class="tok-keyword">if</span> <span class="tok-keyword">not</span> state[<span class="tok-str">"timer"</span>]:
+                state[<span class="tok-str">"timer"</span>] = threading.Thread(
+                    target=self._heartbeat_loop, args=(group_wxid,), daemon=<span class="tok-keyword">True</span>,
+                )
+                state[<span class="tok-str">"timer"</span>].start()
+
+    <span class="tok-keyword">def</span> <span class="tok-func">demote</span>(self, group_wxid: <span class="tok-class">str</span>, reason: <span class="tok-class">str</span> = <span class="tok-str">""</span>):
+        <span class="tok-str">"""降级为 Follower：停止心跳、清空 leader 标记。"""</span>
+        <span class="tok-keyword">with</span> self._state_lock:
+            state = self._groups.get(group_wxid)
+            <span class="tok-keyword">if</span> state:
+                state[<span class="tok-str">"leader"</span>] = <span class="tok-keyword">None</span>
+                state[<span class="tok-str">"failures"</span>] = <span class="tok-num">0</span>
+        log.info(<span class="tok-str">"""⚙️  降级 Follower group=%s reason=%s"""</span>, group_wxid[:<span class="tok-num">20</span>], reason)
+
+    <span class="tok-keyword">def</span> <span class="tok-func">is_leader</span>(self, group_wxid: <span class="tok-class">str</span>) -> <span class="tok-class">bool</span>:
+        <span class="tok-keyword">with</span> self._state_lock:
+            state = self._groups.get(group_wxid)
+            <span class="tok-keyword">return</span> bool(state <span class="tok-keyword">and</span> state[<span class="tok-str">"leader"</span>] == self._device_id)
+
+    <span class="tok-keyword">def</span> <span class="tok-func">heartbeat_ok</span>(self, group_wxid: <span class="tok-class">str</span>) -> <span class="tok-class">bool</span>:
+        <span class="tok-keyword">with</span> self._state_lock:
+            state = self._groups.get(group_wxid)
+            <span class="tok-keyword">return</span> bool(state <span class="tok-keyword">and</span> state[<span class="tok-str">"failures"</span>] < self.MAX_FAILURES)
+
+    <span class="tok-keyword">def</span> <span class="tok-func">_heartbeat_loop</span>(self, group_wxid):
+        <span class="tok-keyword">while True</span>:
+            time.sleep(self.HEARTBEAT_INTERVAL)
+            <span class="tok-keyword">with</span> self._state_lock:
+                state = self._groups.get(group_wxid)
+                <span class="tok-keyword">if not</span> state <span class="tok-keyword">or</span> state[<span class="tok-str">"leader"</span>] != self._device_id:
+                    <span class="tok-keyword">break</span>  <span class="tok-comment"># 已降级，退出心跳线程</span>
+                term = state[<span class="tok-str">"term"</span>]
+
+            <span class="tok-keyword">try</span>:
+                ok = self._lock_mgr.renew(group_wxid, self._device_id, term)
+            <span class="tok-keyword">except</span> Exception <span class="tok-keyword">as</span> exc:
+                log.error(<span class="tok-str">"心跳异常 group=%s: %s"</span>, group_wxid[:<span class="tok-num">20</span>], exc)
+                ok = <span class="tok-keyword">False</span>
+
+            <span class="tok-keyword">with</span> self._state_lock:
+                state = self._groups.get(group_wxid)
+                <span class="tok-keyword">if not</span> state:
+                    <span class="tok-keyword">break</span>
+                <span class="tok-keyword">if</span> ok:
+                    state[<span class="tok-str">"failures"</span>] = <span class="tok-num">0</span>
+                <span class="tok-keyword">else</span>:
+                    state[<span class="tok-str">"failures"</span>] += <span class="tok-num">1</span>
+                    log.warning(<span class="tok-str">"心跳失败 %d/%d group=%s"</span>,
+                                state[<span class="tok-str">"failures"</span>], self.MAX_FAILURES, group_wxid[:<span class="tok-num">20</span>])
+                    <span class="tok-keyword">if</span> state[<span class="tok-str">"failures"</span>] >= self.MAX_FAILURES:
+                        log.error(<span class="tok-str">"""🚨 心跳超时，主动降级 group=%s"""</span>, group_wxid[:<span class="tok-num">20</span>])
+                        state[<span class="tok-str">"leader"</span>] = <span class="tok-keyword">None</span>
+                        <span class="tok-keyword">break</span></code></pre>
+        </div>
+      </section>
+
+      <!-- 完整 __init__.py 入口 -->
+      <section class="card">
+        <h2>插件入口模块</h2>
+        <p>插件对外暴露的唯一公共 API，供 <code>message_sync.py</code> 调用。</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">python · backend/plugins/mutex_protocol/__init__.py</span>
+          </div>
+<pre><code><span class="tok-str">"""互斥控制插件 · 公共 API 入口。
+
+用法（在 message_sync.py 的 broadcast_messages 中）：
+    from backend.plugins.mutex_protocol import should_process
+    if not should_process(conversation_id):
+        continue
+    on_new_message(conversation_id, ...)
+"""</span>
+
+<span class="tok-keyword">import</span> logging
+<span class="tok-keyword">from</span> typing <span class="tok-keyword">import</span> Optional, Dict
+
+log = logging.getLogger(__name__)
+
+<span class="tok-comment"># 单例实例（由 init_app 初始化）</span>
+_lock_manager  = <span class="tok-keyword">None</span>
+_device_monitor = <span class="tok-keyword">None</span>
+_local_terms: <span class="tok-class">dict</span> = {}  <span class="tok-comment"># {group_wxid: int}</span>
+_local_lock: <span class="tok-class">threading.Lock</span> = threading.Lock()
+
+
+<span class="tok-keyword">def</span> <span class="tok-func">init_app</span>(app, redis_client, device_id: <span class="tok-class">str</span>):
+    <span class="tok-str">"""应用启动时调用：初始化锁管理器和心跳监控。"""</span>
+    <span class="tok-keyword">from</span> .lock <span class="tok-keyword">import</span> LockManager
+    <span class="tok-keyword">from</span> .monitor <span class="tok-keyword">import</span> DeviceMonitor
+    <span class="tok-keyword">import</span> threading  <span class="tok-comment"># noqa</span>
+
+    <span class="tok-keyword">global</span> _lock_manager, _device_monitor
+    _lock_manager = LockManager(redis_client)
+    _device_monitor = DeviceMonitor(_lock_manager, device_id)
+    log.info(<span class="tok-str">"🔐 MutexProtocol 已初始化 device_id=%s"</span>, device_id)
+
+
+<span class="tok-keyword">def</span> <span class="tok-func">should_process</span>(conversation_id: <span class="tok-class">int</span>) -> <span class="tok-class">bool</span>:
+    <span class="tok-str">"""插件主入口：判定当前设备是否该处理该会话的消息。
+
+    返回 True  → 放行到业务逻辑（自动报价执行）
+    返回 False → 静默丢弃（Follower 设备）
+    """</span>
+    <span class="tok-keyword">if not</span> _lock_manager <span class="tok-keyword">or not</span> _device_monitor:
+        log.warning(<span class="tok-str">"MutexProtocol 未初始化，默认放行"</span>)
+        <span class="tok-keyword">return True</span>
+
+    <span class="tok-keyword">with</span> _local_lock:
+        <span class="tok-keyword">try</span>:
+            <span class="tok-keyword">from</span> backend.models.conversation <span class="tok-keyword">import</span> Conversation
+            <span class="tok-keyword">from</span> backend.extensions <span class="tok-keyword">import</span> db
+
+            conv = db.session.get(Conversation, conversation_id)
+            <span class="tok-keyword">if not</span> conv <span class="tok-keyword">or</span> conv.chat_type != Conversation.CHAT_GROUP:
+                <span class="tok-keyword">return True</span>  <span class="tok-comment"># 非群聊，无需互斥</span>
+
+            group_wxid = conv.wxid
+
+            <span class="tok-comment"># 快速路径：本地已知自己是 Leader 且心跳正常</span>
+            <span class="tok-keyword">if</span> _device_monitor.is_leader(group_wxid) <span class="tok-keyword">and</span> _device_monitor.heartbeat_ok(group_wxid):
+                <span class="tok-keyword">return True</span>
+
+            <span class="tok-comment"># 查 Redis 锁</span>
+            lock = _lock_manager.peek(group_wxid)
+
+            <span class="tok-keyword">if</span> lock <span class="tok-keyword">is not None</span>:
+                <span class="tok-keyword">if</span> lock[<span class="tok-str">"owner"</span>] == _device_monitor._device_id:
+                    <span class="tok-keyword">return True</span>  <span class="tok-comment"># 兜底：锁还是自己的</span>
+
+                <span class="tok-comment"># 别人有锁，看任期号</span>
+                local_term = _local_terms.get(group_wxid, <span class="tok-num">0</span>)
+                <span class="tok-keyword">if</span> lock[<span class="tok-str">"term"</span>] > local_term:
+                    _local_terms[group_wxid] = lock[<span class="tok-str">"term"</span>]
+                <span class="tok-keyword">return False</span>  <span class="tok-comment"># ❌ 静默</span>
+
+            <span class="tok-comment"># 锁空 → 选举：抢锁</span>
+            local_term = _local_terms.get(group_wxid, <span class="tok-num">0</span>)
+            new_term = local_term + <span class="tok-num">1</span>
+
+            <span class="tok-keyword">if</span> _lock_manager.try_acquire(group_wxid, _device_monitor._device_id, new_term):
+                _local_terms[group_wxid] = new_term
+                _device_monitor.promote(group_wxid, new_term)
+                <span class="tok-keyword">return True</span>  <span class="tok-comment"># 🎉 当选</span>
+
+            <span class="tok-comment"># 抢锁失败 → 读 winner 同步状态</span>
+            winner = _lock_manager.peek(group_wxid)
+            <span class="tok-keyword">if</span> winner:
+                _local_terms[group_wxid] = winner[<span class="tok-str">"term"</span>]
+            <span class="tok-keyword">return False</span>
+
+        <span class="tok-keyword">except</span> Exception <span class="tok-keyword">as</span> exc:
+            <span class="tok-comment"># 任何异常都兜底放行 —— 插件不能阻断业务</span>
+            log.exception(<span class="tok-str">"MutexProtocol should_process 异常: %s"</span>, exc)
+            <span class="tok-keyword">return True</span></code></pre>
+        </div>
+      </section>
+
+      <!-- 数据模型（插件自己的可选 DB 表） -->
+      <section class="card">
+        <h2>可选：本地审计表（非必需）</h2>
+        <p>插件可以完全不写数据库，只靠 Redis 运行。但如果需要审计日志，可选建一张本地表记录选举事件。</p>
+        <table class="data-table">
+          <thead>
+            <tr><th>表名</th><th>字段</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td rowspan="4"><code>mutex_election_log</code></td>
+                <td>id (PK)</td><td>自增</td></tr>
+            <tr><td>group_wxid, device_id, term</td><td>哪个群、哪个设备、任期号</td></tr>
+            <tr><td>action</td><td>ACQUIRE / RENEW / RELEASE / DEMOTE / ELECT</td></tr>
+            <tr><td>created_at</td><td>时间戳</td></tr>
+          </tbody>
+        </table>
+        <p style="font-size: 12px; color: var(--text-muted); margin-top: var(--s-3);">
+          <span class="tag tag-warning">可选</span> 不写这张表也能完整运行 —— 插件核心逻辑只依赖 Redis。建表主要用于运维排查。
+        </p>
+      </section>
+
+    </main>
+  </div>
+  <script src="components.js"></script>
+</body>
+</html>

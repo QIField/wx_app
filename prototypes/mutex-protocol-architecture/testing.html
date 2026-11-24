@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>测试方案 · Mutex Protocol</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="testing">
+  <div class="app-wrapper">
+    <nav class="app-nav">
+      <div class="nav-brand">
+        <div class="nav-brand-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          <span>MUTEX<br/>PROTOCOL</span>
+        </div>
+        <div class="nav-brand-sub">互斥控制插件 · v1.0</div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">架构文档</div>
+        <ul class="nav-list">
+          <li>
+            <a href="index.html" class="nav-link" data-nav="overview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+              <span>架构总览</span>
+            </a>
+          </li>
+          <li>
+            <a href="sequence.html" class="nav-link" data-nav="sequence">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span>核心流程</span>
+            </a>
+          </li>
+          <li>
+            <a href="api.html" class="nav-link" data-nav="api">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/></svg>
+              <span>接口定义</span>
+            </a>
+          </li>
+          <li>
+            <a href="error.html" class="nav-link" data-nav="error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+              <span>异常处理</span>
+            </a>
+          </li>
+          <li>
+            <a href="testing.html" class="nav-link active" data-nav="testing">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>测试方案</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="nav-footer">
+        BACKEND · PYTHON · FLASK<br/>
+        低侵入 · 零 downtime
+      </div>
+    </nav>
+
+    <main class="app-content">
+      <header>
+        <h1>测试验证方案</h1>
+        <div class="subtitle">单元测试 · 集成测试 · 故障注入 · 灰度验证</div>
+      </header>
+
+      <!-- 测试分层 -->
+      <section class="card">
+        <h2>测试分层策略</h2>
+        <div class="card-grid" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="stat-block">
+            <div class="stat-label">L1 · 单元测试</div>
+            <div class="stat-value" style="font-size: 18px;">LockManager</div>
+            <div class="stat-desc">Mock Redis，覆盖 try_acquire / renew / release / peek</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-label">L2 · 组件测试</div>
+            <div class="stat-value" style="font-size: 18px;">DeviceMonitor</div>
+            <div class="stat-desc">真实 Redis，模拟心跳续租和降级</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-label">L3 · 集成测试</div>
+            <div class="stat-value" style="font-size: 18px;">多进程协作</div>
+            <div class="stat-desc">多进程同时 should_process → 只有一个返回 True</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-label">L4 · 故障注入</div>
+            <div class="stat-value" style="font-size: 18px;">Electra 验证</div>
+            <div class="stat-desc">Kill Leader / 分区 / Redis 不可用等极端场景</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 单元测试 -->
+      <h2>L1 · LockManager 单元测试</h2>
+
+      <div class="test-case">
+        <div class="test-case-title">UT-LOCK-001：SET NX 成功获取锁</div>
+        <div class="test-case-meta">
+          <span>Given: 锁不存在</span>
+          <span>When: try_acquire("grpA", "dev_01", 1)</span>
+          <span>Then: return True + Redis key 存在 + value.owner="dev_01"</span>
+        </div>
+        <div class="test-case-body">
+          <ul>
+            <li>断言返回 True</li>
+            <li>断言 Redis key 存在</li>
+            <li>断言 value.owner == "dev_01", term == 1</li>
+            <li>断言 TTL ≈ 30s</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">UT-LOCK-002：SET NX 失败 — 锁已被别人持有</div>
+        <div class="test-case-meta">
+          <span>Given: 锁已存在 owner="dev_01"</span>
+          <span>When: try_acquire("grpA", "dev_02", 2)</span>
+          <span>Then: return False + 原锁内容不变</span>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">UT-LOCK-003：自己可以续租自己的锁</div>
+        <div class="test-case-meta">
+          <span>Given: 锁存在 owner="dev_01", term=1</span>
+          <span>When: renew("grpA", "dev_01", 1)</span>
+          <span>Then: return True + TTL 被续到 30s</span>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">UT-LOCK-004：别人的锁不能续租</div>
+        <div class="test-case-meta">
+          <span>Given: 锁存在 owner="dev_01", term=1</span>
+          <span>When: renew("grpA", "dev_02", 1)</span>
+          <span>Then: return False + 锁不变</span>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">UT-LOCK-005：term 不匹配不能续租（fencing token）</div>
+        <div class="test-case-meta">
+          <span>Given: 锁存在 owner="dev_01", term=5</span>
+          <span>When: renew("grpA", "dev_01", 4)  ← term 落后</span>
+          <span>Then: return False + 锁不变</span>
+        </div>
+      </div>
+
+      <!-- DeviceMonitor 测试 -->
+      <h2>L2 · DeviceMonitor 组件测试</h2>
+
+      <div class="test-case">
+        <div class="test-case-title">UT-MONITOR-001：心跳续租 3 次失败 → 自动降级</div>
+        <div class="test-case-meta">
+          <span>Given: DeviceMonitor("dev_01") promote("grpA", term=1)</span>
+          <span>When: lock_manager.renew() 连续 3 次返回 False</span>
+          <span>Then: 60s 内（3 × 20s 测试加速）is_leader("grpA") 返回 False</span>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">UT-MONITOR-002：心跳恢复 → failures 计数归零</div>
+        <div class="test-case-meta">
+          <span>Given: 已连续失败 2 次</span>
+          <span>When: 第 3 次心跳成功</span>
+          <span>Then: state.failures == 0</span>
+        </div>
+      </div>
+
+      <!-- 集成测试 -->
+      <h2>L3 · 多进程集成测试（双 Leader 绝对不允许）</h2>
+
+      <div class="test-case" style="border-left-color: var(--accent-danger);">
+        <div class="test-case-title">IT-MUTEX-001：多进程同时 should_process → 最多一个 True</div>
+        <div class="test-case-meta" style="color: var(--text-danger);">
+          <span>核心红线测试</span>
+          <span>4 个进程并发启动</span>
+          <span>重复 100 次</span>
+        </div>
+        <div class="test-case-body">
+          <p><strong>场景：</strong>启动 4 个子进程，每个进程序 <code>should_process("grpA")</code> 10 次，每次间隔 50ms。</p>
+          <p><strong>断言：</strong>每一轮中，返回 True 的进程数 <strong>≤ 1</strong>。如果任何一轮出现 2 个以上 True → 测试失败 = 插件存在致命 bug。</p>
+          <p><strong>覆盖率：</strong>必须运行 100 次以上，每次用不同的 Redis key 隔离。</p>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">IT-MUTEX-002：Leader 离线 → 选举 → 新 Leader 接管</div>
+        <div class="test-case-meta">
+          <span>进程 A 当选 → Kill A</span>
+          <span>等 35s（TTL 到期）</span>
+          <span>进程 B 下一条消息到来</span>
+        </div>
+        <div class="test-case-body">
+          <ul>
+            <li>断言 35s 后 Redis lock key 消失</li>
+            <li>断言 B 的 should_process 返回 True</li>
+            <li>断言 term 被提升</li>
+            <li>断言后续其他进程的 should_process 返回 False</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">IT-MUTEX-003：脑裂恢复测试 — 低任期 Leader 必须降级</div>
+        <div class="test-case-meta">
+          <span>Leader A (term=5) + 分区</span>
+          <span>Leader B (term=6) 当选</span>
+          <span>分区恢复</span>
+        </div>
+        <div class="test-case-body">
+          <p>A 恢复连接后，should_process 必须立即返回 False —— 即使 A 本地还以为自己是 Leader。</p>
+        </div>
+      </div>
+
+      <!-- 故障注入 -->
+      <h2>L4 · 故障注入测试（Chaos Engineering）</h2>
+
+      <div class="test-case">
+        <div class="test-case-title">CHAOS-001：Redis 不可用 30s → 恢复</div>
+        <div class="test-case-meta">
+          <span>Leader A 正常工作</span>
+          <span>Kill Redis 30s</span>
+          <span>恢复 Redis</span>
+        </div>
+        <div class="test-case-body">
+          <p>验证 Redis 恢复后状态自洽：锁没有丢失、term 没有混乱、Follower 不会趁机夺权。</p>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">CHAOS-002：选举风暴 — 8 台设备同时启动</div>
+        <div class="test-case-meta">
+          <span>清理所有锁</span>
+          <span>同时启动 8 个进程</span>
+          <span>全部 should_process</span>
+        </div>
+        <div class="test-case-body">
+          <p>重复 50 次。每次必须恰好有一个 Leader 当选，且后续 7 个稳定静默。</p>
+        </div>
+      </div>
+
+      <div class="test-case">
+        <div class="test-case-title">CHAOS-003：Leader 在选举中途崩溃</div>
+        <div class="test-case-meta">
+          <span>A 抢锁成功</span>
+          <span>Promote 刚返回 True</span>
+          <span>A 立即崩溃</span>
+        </div>
+        <div class="test-case-body">
+          <p>验证 30s 后其他进程能正确接管，且不会出现 A 的残留状态影响新选举。</p>
+        </div>
+      </div>
+
+      <!-- 灰度验证 -->
+      <section class="card">
+        <h2>灰度上线计划</h2>
+        <table class="data-table">
+          <thead>
+            <tr><th>阶段</th><th>持续</th><th>覆盖范围</th><th>关键指标</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag tag-warning">Phase 1</span> Shadow 模式</td>
+              <td>3 天</td>
+              <td>1 台测试设备</td>
+              <td>should_process 只打日志不拦截 —— 验证选举逻辑正确</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-accent">Phase 2</span> 试点</td>
+              <td>5 天</td>
+              <td>2~3 台生产设备（非关键群）</td>
+              <td>对比启用前后的报价条数 —— 确认重复从 N 降到 1</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-success">Phase 3</span> 全量</td>
+              <td>持续</td>
+              <td>全部设备</td>
+              <td>监控 Redis 锁健康度 · 心跳超时率 · 选举频率</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 验收清单 -->
+      <section class="card">
+        <h2>验收 Checklist</h2>
+        <div style="columns: 2; column-gap: var(--s-8);">
+          <div style="break-inside: avoid; margin-bottom: var(--s-3);">
+            <div style="font-family: var(--font-display); font-size: 12px; color: var(--text-accent); margin-bottom: 8px;">🔒 互斥正确性</div>
+            <div style="font-size: 13px; color: var(--text-secondary); line-height: 2;">
+              ☐ 同一条消息只触发一次报价<br/>
+              ☐ IT-MUTEX-001 跑通 100 次无异常<br/>
+              ☐ 极端并发下 term 不混乱
+            </div>
+          </div>
+          <div style="break-inside: avoid; margin-bottom: var(--s-3);">
+            <div style="font-family: var(--font-display); font-size: 12px; color: var(--text-accent); margin-bottom: 8px;">🔄 自动恢复</div>
+            <div style="font-size: 13px; color: var(--text-secondary); line-height: 2;">
+              ☐ Leader 离线 ≤60s 内新 Leader 接管<br/>
+              ☐ 心跳失败自动降级<br/>
+              ☐ Redis 恢复后状态自洽
+            </div>
+          </div>
+          <div style="break-inside: avoid; margin-bottom: var(--s-3);">
+            <div style="font-family: var(--font-display); font-size: 12px; color: var(--text-accent); margin-bottom: 8px;">🛡️ 故障安全</div>
+            <div style="font-size: 13px; color: var(--text-secondary); line-height: 2;">
+              ☐ 插件异常不阻断业务<br/>
+              ☐ Redis 不可用时插件降级不崩<br/>
+              ☐ 插件卸载后系统照常运行
+            </div>
+          </div>
+          <div style="break-inside: avoid; margin-bottom: var(--s-3);">
+            <div style="font-family: var(--font-display); font-size: 12px; color: var(--text-accent); margin-bottom: 8px;">📊 性能</div>
+            <div style="font-size: 13px; color: var(--text-secondary); line-height: 2;">
+              ☐ 单群 1000msg/s 压测下插件开销 < 1ms/msg<br/>
+              ☐ 心跳 CPU / 内存影响可忽略<br/>
+              ☐ Redis QPS 增量 ≤ 原系统的 20%
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+  <script src="components.js"></script>
+</body>
+</html>

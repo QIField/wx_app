@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>异常处理 · Mutex Protocol</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="error">
+  <div class="app-wrapper">
+    <nav class="app-nav">
+      <div class="nav-brand">
+        <div class="nav-brand-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          <span>MUTEX<br/>PROTOCOL</span>
+        </div>
+        <div class="nav-brand-sub">互斥控制插件 · v1.0</div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">架构文档</div>
+        <ul class="nav-list">
+          <li>
+            <a href="index.html" class="nav-link" data-nav="overview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+              <span>架构总览</span>
+            </a>
+          </li>
+          <li>
+            <a href="sequence.html" class="nav-link" data-nav="sequence">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span>核心流程</span>
+            </a>
+          </li>
+          <li>
+            <a href="api.html" class="nav-link" data-nav="api">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/></svg>
+              <span>接口定义</span>
+            </a>
+          </li>
+          <li>
+            <a href="error.html" class="nav-link active" data-nav="error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+              <span>异常处理</span>
+            </a>
+          </li>
+          <li>
+            <a href="testing.html" class="nav-link" data-nav="testing">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>测试方案</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="nav-footer">
+        BACKEND · PYTHON · FLASK<br/>
+        低侵入 · 零 downtime
+      </div>
+    </nav>
+
+    <main class="app-content">
+      <header>
+        <h1>异常处理与故障兜底</h1>
+        <div class="subtitle">8 种典型故障场景 · 插件如何自恢复</div>
+      </header>
+
+      <!-- 异常设计原则 -->
+      <section class="card">
+        <h2>设计原则</h2>
+        <div class="card-grid" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="stat-block">
+            <div class="stat-label">核心原则</div>
+            <div class="stat-value" style="font-size: 16px; line-height: 1.4;">永不阻断业务</div>
+            <div class="stat-desc">插件任何异常 → 兜底放行 → 原始业务照常执行</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-label">防双 Leader</div>
+            <div class="stat-value" style="font-size: 16px; line-height: 1.4;">任期 fencing</div>
+            <div class="stat-desc">所有 Redis 写入带 term 校验，过期锁无法重新生效</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-label">防全失效</div>
+            <div class="stat-value" style="font-size: 16px; line-height: 1.4;">TTL 兜底</div>
+            <div class="stat-desc">极端情况也不会出现所有设备都不报价（插件宕机 → 放行）</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 故障场景矩阵 -->
+      <h2>故障场景矩阵</h2>
+
+      <section class="module-block">
+        <h3><span class="module-num">E01</span> Leader 设备离线（正常）</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag tag-warning">可恢复</span> 进程消失 / 网络断开</td></tr>
+            <tr><th>检测手段</th><td>Redis 锁 TTL 到期（30s）+ 心跳连续失败</td></tr>
+            <tr><th>自动恢复</th><td>✅ 锁过期 → 下一条消息触发选举 → Follower 自动接管</td></tr>
+            <tr><th>业务影响</th><td>最长 30s ~ 60s 的报价延迟（取决于消息到达时机）</td></tr>
+            <tr><th>极端恶化</th><td>🔴 不会发生 — 锁到期后必有一台设备抢锁成功</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">E02</span> Redis 短暂不可用（网络抖动）</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag tag-warning">可恢复</span> Redis 连接超时 / 短暂断连</td></tr>
+            <tr><th>检测手段</th><td>try_acquire / peek / renew 抛异常</td></tr>
+            <tr><th>自动恢复</th><td>✅ 异常兜底：should_process() 返回 <code>True</code>（放行） → 每台设备都执行报价？</td></tr>
+            <tr><th>业务影响</th><td><span class="tag tag-danger">⚠️ 短时 Redis 不可用 = 所有设备都放行 = 可能重复报价</span></td></tr>
+            <tr><th>缓解措施</th><td>本地缓存最后一次 Leader 状态，Redis 挂了时先查本地 → 只有心跳超时才放行</td></tr>
+          </tbody>
+        </table>
+        <div class="code-block" style="margin-top: var(--s-4);">
+          <div class="code-block-header">
+            <span class="code-block-lang">python · 本地缓存兜底逻辑</span>
+          </div>
+<pre><code><span class="tok-comment"># should_process 中，Redis 异常时的处理</span>
+<span class="tok-keyword">try</span>:
+    lock = _lock_manager.peek(group_wxid)
+<span class="tok-keyword">except</span> RedisConnectionError:
+    log.error(<span class="tok-str">"Redis 不可用，查本地缓存兜底"</span>)
+    <span class="tok-comment"># 不是立即放行 —— 先看本地是否记录过自己是 Leader</span>
+    <span class="tok-keyword">if</span> _device_monitor.is_leader(group_wxid):
+        <span class="tok-keyword">return</span> <span class="tok-keyword">True</span>   <span class="tok-comment"># 本地记得自己是 Leader，放行</span>
+    <span class="tok-keyword">else</span>:
+        <span class="tok-keyword">return</span> <span class="tok-keyword">False</span>  <span class="tok-comment"># 本地记得自己是 Follower，静默（防重复）</span>
+<span class="tok-keyword">except</span> Exception <span class="tok-keyword">as</span> exc:
+    log.exception(<span class="tok-str">"未知异常，兜底放行"</span>)
+    <span class="tok-keyword">return</span> <span class="tok-keyword">True</span>  <span class="tok-comment"># 最后的安全网</span></code></pre>
+        </div>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">E03</span> 网络分区（脑裂）</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag tag-danger">严重</span> 设备分区成两组，各自有 Redis</td></tr>
+            <tr><th>检测手段</th><td>续租连续失败 + 恢复后 term 比对</td></tr>
+            <tr><th>自动恢复</th><td>✅ fencing token：分区恢复后，低任期号的 Leader 立即降级</td></tr>
+            <tr><th>业务影响</th><td>分区期间两边各自报价 → 重复（但边界很窄：必须两边都有 Leader + 都有客户询价）</td></tr>
+            <tr><th>缓解措施</th><td>单 Redis 实例 + Leader 连续 3 次心跳失败主动降级（宁可漏处理，不发重复）</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">E04</span> 选举风暴（同时有大量设备上线）</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag">性能</span> 多台设备同时 SET NX</td></tr>
+            <tr><th>检测手段</th><td>Redis 命令执行频率突增</td></tr>
+            <tr><th>自动恢复</th><td>✅ Redis SET NX 原子性保证：N 台设备同时抢，只有 1 台成功 → 其余 N-1 台失败后读 winner</td></tr>
+            <tr><th>业务影响</th><td>几乎无影响 —— 选举就是为这种场景设计的</td></tr>
+            <tr><th>优化</th><td>失败后可以加 50ms ~ 200ms 随机抖动再重试（避免热循环）</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">E05</span> Redis 锁被误删（运维 / 过期）</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag tag-warning">可恢复</span> 锁意外消失</td></tr>
+            <tr><th>检测手段</th><td>Leader 续租失败 + peek 返回 None</td></tr>
+            <tr><th>自动恢复</th><td>✅ Leader 发现锁没了 → 重新 SET NX → 大概率抢回自己的锁</td></tr>
+            <tr><th>业务影响</th><td>可能产生一次额外选举，但不会重复（选举期间只有一台能抢到）</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">E06</span> 插件自身 Bug 导致异常</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag tag-danger">代码</span> 新引入的 bug 导致崩溃</td></tr>
+            <tr><th>检测手段</th><td>异常日志 + should_process 兜底逻辑</td></tr>
+            <tr><th>自动恢复</th><td>✅ should_process 所有异常兜底返回 <code>True</code> —— 插件 crash = 无互斥 = 回到插件安装前的状态</td></tr>
+            <tr><th>业务影响</th><td>降级为多设备独立报价（可能重复），但 <strong>核心业务不会中断</strong></td></tr>
+            <tr><th>缓解措施</th><td>灰度发布：先在 1 台设备启用 → 观察 1 天 → 逐步扩量</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">E07</span> 所有设备全部离线</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag tag-danger">极端</span> 全部设备都断了</td></tr>
+            <tr><th>检测手段</th><td><code>pollable_devices()</code> 返回空</td></tr>
+            <tr><th>自动恢复</th><td>❌ 无法自动恢复，需人工</td></tr>
+            <tr><th>业务影响</th><td>整条链路挂了 —— 这不是插件问题，是上游中间方/网络挂了</td></tr>
+            <tr><th>缓解措施</th><td>插件的故障处理到此为止，应该由中间方/网络层处理</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">E08</span> 时钟漂移（设备间时间不一致）</h3>
+        <table class="data-table">
+          <tbody>
+            <tr><th style="width:140px;">故障类型</th><td><span class="tag">边缘</span> 设备本地时间不准</td></tr>
+            <tr><th>检测手段</th><td>Redis server time 对比</td></tr>
+            <tr><th>自动恢复</th><td>✅ 插件所有时间基准用 <code>Redis 服务器时间</code>，不用设备本地时间</td></tr>
+            <tr><th>业务影响</th><td>无影响 —— SET NX + EX 的原子性完全在 Redis 侧保证</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 防御深度一览 -->
+      <section class="card">
+        <h2>防御深度：多层兜底机制</h2>
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr><th>层级</th><th>机制</th><th>防什么</th><th>失败后的退化</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>L1 原子锁</td>
+                <td>Redis SET NX EX</td>
+                <td>并发抢锁 → 双 Leader</td>
+                <td>↓ 退到 L2</td>
+              </tr>
+              <tr>
+                <td>L2 任期 fencing</td>
+                <td>term 号只升不降</td>
+                <td>脑裂恢复后旧 Leader 复活</td>
+                <td>↓ 退到 L3</td>
+              </tr>
+              <tr>
+                <td>L3 心跳续租</td>
+                <td>10s 续租 · 3 次失败降级</td>
+                <td>假 Leader（网络分区内）</td>
+                <td>↓ 退到 L4</td>
+              </tr>
+              <tr>
+                <td>L4 TTL 兜底</td>
+                <td>30s 自动过期</td>
+                <td>Leader 消失后锁永远不释放</td>
+                <td>↓ 退到 L5</td>
+              </tr>
+              <tr>
+                <td>L5 本地缓存</td>
+                <td>Redis 挂了看本地状态</td>
+                <td>Redis 短暂不可用时重复报价</td>
+                <td>↓ 退到 L6</td>
+              </tr>
+              <tr>
+                <td>L6 异常放行</td>
+                <td>should_process 兜底 True</td>
+                <td>插件自身 Bug 阻断业务</td>
+                <td>退化为"无插件"状态</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+  <script src="components.js"></script>
+</body>
+</html>

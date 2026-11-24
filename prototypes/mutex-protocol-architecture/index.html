@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>架构总览 · Mutex Protocol</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="overview">
+  <div class="app-wrapper">
+    <nav class="app-nav">
+      <div class="nav-brand">
+        <div class="nav-brand-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          <span>MUTEX<br/>PROTOCOL</span>
+        </div>
+        <div class="nav-brand-sub">互斥控制插件 · v1.0</div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">架构文档</div>
+        <ul class="nav-list">
+          <li>
+            <a href="index.html" class="nav-link active" data-nav="overview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+              <span>架构总览</span>
+            </a>
+          </li>
+          <li>
+            <a href="sequence.html" class="nav-link" data-nav="sequence">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span>核心流程</span>
+            </a>
+          </li>
+          <li>
+            <a href="api.html" class="nav-link" data-nav="api">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/></svg>
+              <span>接口定义</span>
+            </a>
+          </li>
+          <li>
+            <a href="error.html" class="nav-link" data-nav="error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+              <span>异常处理</span>
+            </a>
+          </li>
+          <li>
+            <a href="testing.html" class="nav-link" data-nav="testing">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>测试方案</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="nav-footer">
+        BACKEND · PYTHON · FLASK<br/>
+        低侵入 · 零 downtime
+      </div>
+    </nav>
+
+    <main class="app-content">
+      <header>
+        <h1>插件架构总览</h1>
+        <div class="subtitle">Mutex Protocol · 群聊维度互斥控制 · 多设备自动报价防重</div>
+      </header>
+
+      <!-- 问题背景 -->
+      <section class="card">
+        <h2>问题背景</h2>
+        <p>现有快捷报价系统的消息同步按 <strong class="text-accent">设备维度独立运行</strong>：每台绑定的设备各自拉取消息、各自触发自动报价。当多台设备账号同时加入同一个企业微信群时，同一条客户询价会被 <span class="tag tag-danger">N 次重复处理</span> → 向群里发出 N 条重复报价。</p>
+        <p style="margin-bottom:0">本插件的目标：<strong>同一时间、同一群，只有一台设备能执行自动报价</strong>；其余设备静默丢弃，彻底杜绝重复。</p>
+      </section>
+
+      <!-- 架构总览图 -->
+      <section class="arch-container">
+        <h2 style="margin-bottom: var(--s-6);">插件嵌入架构</h2>
+
+        <!-- 上层：多设备消息源 -->
+        <div class="arch-connector-label">↑ 消息同步层（已有，不改）</div>
+        <div class="arch-row">
+          <div class="arch-block">
+            <div class="arch-block-title">消息同步轮询</div>
+            <div class="arch-block-label">backend.sync.message_sync</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">每 5s 遍历 pollable_devices()</div>
+          </div>
+        </div>
+
+        <!-- 钩子 -->
+        <div class="arch-connector">│  on_new_message(conversation_id) 钩子</div>
+
+        <!-- 拦截点 -->
+        <div class="arch-connector-label">↓ 插件拦截点（注入在这里）</div>
+        <div class="arch-row">
+          <div class="arch-block plugin">
+            <div class="arch-block-badge">Plugin Hook</div>
+            <div class="arch-block-title">Intercept Layer</div>
+            <div class="arch-block-label">判断当前设备是否该处理</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">if not should_process(): return  # 静默丢弃</div>
+          </div>
+        </div>
+
+        <!-- 四大核心模块 -->
+        <div class="arch-connector-label">↓ 插件内部四大模块</div>
+        <div class="arch-row">
+          <div class="arch-block plugin">
+            <div class="arch-block-badge">Module 1</div>
+            <div class="arch-block-title">LockManager</div>
+            <div class="arch-block-label">互斥锁管理</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">Redis SET NX + TTL</div>
+          </div>
+          <div class="arch-block plugin">
+            <div class="arch-block-badge">Module 2</div>
+            <div class="arch-block-title">DeviceMonitor</div>
+            <div class="arch-block-label">状态检测</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">心跳 + lease 续期</div>
+          </div>
+          <div class="arch-block plugin">
+            <div class="arch-block-badge">Module 3</div>
+            <div class="arch-block-title">ElectionEngine</div>
+            <div class="arch-block-label">选举算法</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">Raft-like term 提升</div>
+          </div>
+          <div class="arch-block plugin">
+            <div class="arch-block-badge">Module 4</div>
+            <div class="arch-block-title">ConflictResolver</div>
+            <div class="arch-block-label">冲突规避</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">脑裂检测 + epoch  fencing</div>
+          </div>
+        </div>
+
+        <!-- 下层：原有核心业务 -->
+        <div class="arch-connector-label">↓ 放行后：核心报价引擎（原有，完全不改）</div>
+        <div class="arch-row">
+          <div class="arch-block core">
+            <div class="arch-block-badge">Untouched</div>
+            <div class="arch-block-title">auto_quote.on_new_message()</div>
+            <div class="arch-block-label">资格判定 + 3s 去抖 + AI 分析</div>
+          </div>
+          <div class="arch-block core">
+            <div class="arch-block-badge">Untouched</div>
+            <div class="arch-block-title">quote_dispatch.dispatch()</div>
+            <div class="arch-block-label">场景落表 + 状态机</div>
+          </div>
+          <div class="arch-block core">
+            <div class="arch-block-badge">Untouched</div>
+            <div class="arch-block-title">quote_sender.auto_send()</div>
+            <div class="arch-block-label">算价 + 自动发送</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 低侵入性说明 -->
+      <section class="card">
+        <h2>零侵入接入方式</h2>
+        <p><strong>只改一行：</strong>在 <code>message_sync.py → broadcast_messages()</code> 的 <code>on_new_message()</code> 调用前，插入插件拦截判断。原有 <code>auto_quote.py</code>、<code>quote_dispatch.py</code>、<code>quote_sender.py</code> <span class="tag tag-success">一行不改</span>。</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">python · broadcast_messages() 中新增 3 行</span>
+          </div>
+          <pre><code><span class="tok-comment"># 原有代码（不变）</span>
+<span class="tok-keyword">from</span> backend.services.auto_quote <span class="tok-keyword">import</span> on_new_message
+
+<span class="tok-keyword">for</span> saved <span class="tok-keyword">in</span> pushed:
+    <span class="tok-keyword">if</span> saved[<span class="tok-str">"direction"</span>] == Message.DIR_IN:
+
+        <span class="tok-comment"># ===== 新增：互斥锁拦截（3 行）=====</span>
+        <span class="tok-keyword">from</span> backend.plugins.mutex_protocol <span class="tok-keyword">import</span> should_process
+        <span class="tok-keyword">if not</span> should_process(saved[<span class="tok-str">"conversation_id"</span>]):
+            <span class="tok-keyword">continue</span>  <span class="tok-comment"># 非 Leader 设备 → 静默丢弃</span>
+        <span class="tok-comment"># ===== 拦截结束 =====</span>
+
+        <span class="tok-comment"># 原有业务逻辑（完全不动）</span>
+        on_new_message(saved[<span class="tok-str">"conversation_id"</span>], message_time=saved[<span class="tok-str">"create_time"</span>])</code></pre>
+        </div>
+      </section>
+
+      <!-- 四大模块详细说明 -->
+      <h2>核心模块详解</h2>
+
+      <section class="module-block">
+        <h3><span class="module-num">01</span> LockManager — 互斥锁管理</h3>
+        <p>基于 Redis <code>SET key value NX EX 30</code> 实现的分布式互斥锁。锁按 <strong>群聊 wxid</strong> 隔离（粒度：每群一把锁），锁 value 包含 <code>{device_id, term, timestamp}</code>。TTL 默认 30 秒，Leader 每 10 秒续租一次。</p>
+        <table class="data-table">
+          <thead>
+            <tr><th>方法</th><th>说明</th><th>返回值</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>try_acquire(group_wxid, device_id, term)</code></td><td>尝试抢锁（SET NX）</td><td><code>bool</code></td></tr>
+            <tr><td><code>renew(group_wxid, device_id, term)</code></td><td>Leader 续租（GET+SET 原子校验 owner）</td><td><code>bool</code></td></tr>
+            <tr><td><code>release(group_wxid, device_id, term)</code></td><td>主动释放（Lua 脚本校验 owner）</td><td><code>bool</code></td></tr>
+            <tr><td><code>peek(group_wxid)</code></td><td>读锁内容（不修改）</td><td><code>dict | None</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">02</span> DeviceMonitor — 账号状态检测</h3>
+        <p>双重健康检测：<strong>Redis 心跳（每 10s）</strong> + <strong>设备在线状态（复用已有 check_device_online）</strong>。连续 3 次续租失败 → 本地降级为被动模式；离线设备自动被排除出选举候选池。</p>
+        <div class="card-grid" style="margin-top: var(--s-4);">
+          <div class="stat-block">
+            <div class="stat-label">心跳间隔</div>
+            <div class="stat-value">10s</div>
+            <div class="stat-desc">Leader 每 10 秒写一次 Redis key</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-label">锁 TTL</div>
+            <div class="stat-value">30s</div>
+            <div class="stat-desc">3 个心跳周期的容错窗口</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-label">失效判定</div>
+            <div class="stat-value">3×</div>
+            <div class="stat-desc">连续 3 次续租失败 → 降级</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">03</span> ElectionEngine — 群聊维度选举</h3>
+        <p>Leader 失效时，下一条消息触发选举：所有候选设备同时 <code>SET NX</code> 抢锁，Redis 原子性保证只有一个成功。选举胜出者获得新任期号 <code>term + 1</code>，自动接管自动报价职责。败者读取锁的新 owner → 静默降级。</p>
+        <p><strong>选举触发条件（OR）：</strong></p>
+        <ul style="padding-left: var(--s-6); color: var(--text-secondary); font-size: 13px;">
+          <li>Redis 锁已过期（TTL 到了）</li>
+          <li>本地心跳连续 3 次失败（自己可能脑裂了）</li>
+          <li>锁存在但 owner 的 <code>lease</code> 已过期 60s+（极端情况）</li>
+        </ul>
+      </section>
+
+      <section class="module-block">
+        <h3><span class="module-num">04</span> ConflictResolver — 冲突规避策略</h3>
+        <p>核心机制：<strong>任期号 fencing token</strong>。每个 Leader 任期递增，所有操作携带当前 term。当网络分区恢复后，旧 Leader 即使仍认为自己持有锁，一旦发现 Redis 中的 term 大于自己的，立即降级。</p>
+        <table class="data-table">
+          <thead>
+            <tr><th>策略</th><th>解决问题</th><th>实现</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>任期号 fencing</td><td>脑裂后双 Leader</td><td>所有 Redis 写入带 term 校验</td></tr>
+            <tr><td>lease + 主动降级</td><td>网络分区时假 Leader</td><td>3 次续租失败立即停止报价</td></tr>
+            <tr><td>设备在线筛选</td><td>离线设备误参与选举</td><td>复用 <code>pollable_devices()</code> 排除离线</td></tr>
+            <tr><td>单机锁 + 分布式锁</td><td>进程重启后瞬时竞争</td><td>本地 threading.Lock 保护抢锁临界区</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 状态流转图 -->
+      <section class="card">
+        <h2>设备角色状态流转</h2>
+        <div style="display:flex; align-items:center; justify-content:center; padding: var(--s-6); flex-wrap:wrap; gap: var(--s-4);">
+          <div class="arch-block">
+            <div class="arch-block-badge">初始</div>
+            <div class="arch-block-title">CANDIDATE</div>
+            <div class="arch-block-label">候选者</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">首次上线 / 锁过期</div>
+          </div>
+          <div style="text-align:center; font-family: var(--font-display); color: var(--text-accent); font-size: 14px;">
+            ── SET NX 成功 ──►
+          </div>
+          <div class="arch-block plugin">
+            <div class="arch-block-badge">活跃</div>
+            <div class="arch-block-title">LEADER</div>
+            <div class="arch-block-label">执行自动报价</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">每 10s 续租</div>
+          </div>
+          <div style="text-align:center; font-family: var(--font-display); color: var(--text-warning); font-size: 14px;">
+            ── 续租失败 3× ──►
+          </div>
+          <div class="arch-block" style="border-color: var(--status-waiting);">
+            <div class="arch-block-badge" style="background:rgba(245,158,11,0.15);color:var(--text-warning);">降级</div>
+            <div class="arch-block-title">FOLLOWER</div>
+            <div class="arch-block-label">静默丢弃</div>
+            <div class="arch-block-label" style="margin-top:6px;font-size:10px;color:var(--text-muted);">等下次选举</div>
+          </div>
+        </div>
+        <p style="text-align:center; font-size:12px; color:var(--text-muted); margin-top: var(--s-4);">
+          CANDIDATE ──SET NX 失败──► FOLLOWER（读到新 Leader 的 term 后静默）
+        </p>
+      </section>
+
+    </main>
+  </div>
+  <script src="components.js"></script>
+</body>
+</html>

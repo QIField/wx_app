@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>核心流程 · Mutex Protocol</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="sequence">
+  <div class="app-wrapper">
+    <nav class="app-nav">
+      <div class="nav-brand">
+        <div class="nav-brand-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          <span>MUTEX<br/>PROTOCOL</span>
+        </div>
+        <div class="nav-brand-sub">互斥控制插件 · v1.0</div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">架构文档</div>
+        <ul class="nav-list">
+          <li>
+            <a href="index.html" class="nav-link" data-nav="overview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+              <span>架构总览</span>
+            </a>
+          </li>
+          <li>
+            <a href="sequence.html" class="nav-link active" data-nav="sequence">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+              <span>核心流程</span>
+            </a>
+          </li>
+          <li>
+            <a href="api.html" class="nav-link" data-nav="api">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/></svg>
+              <span>接口定义</span>
+            </a>
+          </li>
+          <li>
+            <a href="error.html" class="nav-link" data-nav="error">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+              <span>异常处理</span>
+            </a>
+          </li>
+          <li>
+            <a href="testing.html" class="nav-link" data-nav="testing">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>测试方案</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="nav-footer">
+        BACKEND · PYTHON · FLASK<br/>
+        低侵入 · 零 downtime
+      </div>
+    </nav>
+
+    <main class="app-content">
+      <header>
+        <h1>核心流程与时序图</h1>
+        <div class="subtitle">三种典型场景 · 正常报价 / Leader 选举 / 脑裂恢复</div>
+      </header>
+
+      <!-- 场景 Tabs -->
+      <section class="sequence-container">
+        <div class="sequence-tabs">
+          <button class="seq-tab active" data-scene="normal">场景一：正常报价</button>
+          <button class="seq-tab" data-scene="election">场景二：Leader 选举</button>
+          <button class="seq-tab" data-scene="splitbrain">场景三：脑裂恢复</button>
+        </div>
+
+        <!-- 场景说明 -->
+        <div id="sceneTitle" style="font-family: var(--font-display); font-size: 16px; color: var(--text-accent); margin-bottom: var(--s-6);">
+          场景一：正常报价流程
+        </div>
+
+        <!-- 时序图步骤 -->
+        <div class="seq-step-list" id="seqStepList">
+          <!-- JS 动态填充 -->
+        </div>
+      </section>
+
+      <!-- 交互式 Demo -->
+      <section class="demo-panel">
+        <h2 style="margin-bottom: var(--s-4); font-size: 18px;">
+          <span style="color: var(--text-accent);">●</span> 实时模拟 Demo：4 台设备 + 1 个群
+        </h2>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom: var(--s-6);">
+          模拟真实运行时的互斥协议行为：<strong>所有设备</strong>同时收到群消息 → 只有 <strong>一个 Leader</strong> 执行报价 → 其余静默。点击按钮触发各种事件，观察协议如何动态响应。
+        </p>
+
+        <div class="demo-controls">
+          <button class="demo-btn primary" onclick="demo.receiveGroupMsg()">① 群发询价消息</button>
+          <button class="demo-btn" onclick="demo.killLeader()">② Leader 突然离线</button>
+          <button class="demo-btn" onclick="demo.recoverNetwork()">③ 网络恢复（模拟脑裂）</button>
+          <button class="demo-btn" onclick="demo.reset()">↻ 重置模拟</button>
+        </div>
+
+        <div class="demo-device-grid" id="demoDeviceGrid">
+          <!-- JS 动态填充设备卡片 -->
+        </div>
+
+        <div class="demo-log" id="demoLog">
+          <div class="demo-log-entry"><span class="timestamp">[系统]</span> <span class="DEMO-log-info">互斥协议模拟器已就绪，点击上方按钮开始演示</span></div>
+        </div>
+      </section>
+
+      <!-- 核心流程伪代码 -->
+      <section class="card">
+        <h2>核心流程伪代码</h2>
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">python · should_process() — 拦截层核心判断</span>
+          </div>
+<pre><code><span class="tok-keyword">def</span> <span class="tok-func">should_process</span>(conversation_id: <span class="tok-class">int</span>) -> <span class="tok-class">bool</span>:
+    <span class="tok-str">"""插件拦截入口：返回 True = 放行到业务逻辑；False = 静默丢弃。"""</span>
+
+    conv = Conversation.query.get(conversation_id)
+    <span class="tok-keyword">if not</span> conv:
+        <span class="tok-keyword">return True</span>  <span class="tok-comment"># 会话不存在，让下游自己处理</span>
+
+    <span class="tok-comment"># 只在群聊场景生效（单聊天然只有一个设备，不需要互斥）</span>
+    <span class="tok-keyword">if</span> conv.chat_type != Conversation.CHAT_GROUP:
+        <span class="tok-keyword">return True</span>
+
+    group_wxid = conv.wxid
+    device_id  = current_device.openid
+    term       = local_term.get(group_wxid, 0)
+
+    <span class="tok-comment"># --- 快速路径：本地已知自己是 Leader，且心跳正常 ---</span>
+    <span class="tok-keyword">if</span> local_leader.get(group_wxid) == device_id:
+        <span class="tok-keyword">if</span> heartbeat_ok(group_wxid):
+            <span class="tok-keyword">return True</span>     <span class="tok-comment"># ✅ 放行，继续报价</span>
+        <span class="tok-keyword">else</span>:
+            <span class="tok-comment"># 心跳异常 → 可能脑裂 → 降级为被动，等选举</span>
+            local_leader[group_wxid] = <span class="tok-keyword">None</span>
+
+    <span class="tok-comment"># --- 查 Redis 锁 ---</span>
+    lock = lock_manager.peek(group_wxid)
+
+    <span class="tok-keyword">if</span> lock <span class="tok-keyword">is not None</span>:
+        <span class="tok-keyword">if</span> lock[<span class="tok-str">"owner"</span>] == device_id:
+            <span class="tok-comment"># 锁还是自己的（快速路径已覆盖，这里兜底）</span>
+            <span class="tok-keyword">return True</span>
+        <span class="tok-keyword">if</span> lock[<span class="tok-str">"term"</span>] > term:
+            <span class="tok-comment"># ✅ 别人任期更高 → 静默</span>
+            local_term[group_wxid] = lock[<span class="tok-str">"term"</span>]
+            <span class="tok-keyword">return False</span>
+        <span class="tok-comment"># term 相等或更低但 owner 不是自己 → 锁异常，尝试抢</span>
+
+    <span class="tok-comment"># --- 选举：尝试抢锁 ---</span>
+    new_term = max(term, (lock <span class="tok-keyword">and</span> lock[<span class="tok-str">"term"</span>])) + <span class="tok-num">1</span>
+    <span class="tok-keyword">if</span> lock_manager.try_acquire(group_wxid, device_id, new_term):
+        local_leader[group_wxid] = device_id
+        local_term[group_wxid]   = new_term
+        start_heartbeat(group_wxid)        <span class="tok-comment"># 启动心跳续租</span>
+        <span class="tok-keyword">return True</span>     <span class="tok-comment"># 🎉 当选 Leader，放行</span>
+    <span class="tok-keyword">else</span>:
+        <span class="tok-comment"># 抢锁失败 → 别人当选了，读它的 term 同步本地状态</span>
+        winner = lock_manager.peek(group_wxid)
+        <span class="tok-keyword">if</span> winner:
+            local_term[group_wxid] = winner[<span class="tok-str">"term"</span>]
+        <span class="tok-keyword">return False</span>  <span class="tok-comment"># ❌ 静默丢弃</span></code></pre>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="components.js"></script>
+  <script>
+    /* ---------- 场景切换逻辑 ---------- */
+    const SEQUENCES = {
+      normal: {
+        title: "场景一：正常报价流程",
+        steps: [
+          { num: 1, bold: "设备A 收到群消息 → 触发 on_new_message", detail: "消息同步链路照常触发，插件拦截入口被调用" },
+          { num: 2, bold: "插件调用 should_process(group_wxid)", detail: "查本地缓存 → A 是 Leader → 快速路径命中 ✅" },
+          { num: 3, bold: "A 放行到 auto_quote.on_new_message()", detail: "原有业务逻辑：资格判定 + 3s 去抖 + AI 分析（核心引擎完全不改）" },
+          { num: 4, bold: "A 执行规则提取 + dispatch 落表 + auto_send", detail: "完整走完报价链路，向群里发送一条报价" },
+          { num: 5, bold: "设备B 也收到同一条群消息", detail: "因为每个设备独立拉消息 → 同一条消息被 N 台设备重复处理" },
+          { num: 6, bold: "B 的插件查 Redis 锁 → owner=A", detail: "读取锁内容 → owner=A, term=5 → B 不是 Leader ❌" },
+          { num: 7, bold: "B 静默丢弃，不触发任何报价逻辑", detail: "return False → 消息不会进入 auto_quote → 零重复" },
+        ],
+      },
+      election: {
+        title: "场景二：Leader 离线 → 自动选举",
+        steps: [
+          { num: 1, bold: "正常运行中：A 是 Leader，锁 TTL=30s", detail: "每 10s 续租一次 → Redis key 永远不会过期" },
+          { num: 2, bold: "设备A 突然离线（网络故障/设备断电）", detail: "续租心跳停止，Redis key 无法续期" },
+          { num: 3, bold: "30s 后锁 TTL 到期 → Redis 自动删除", detail: "TTL 兜底：即便 A 完全消失，锁也会被释放" },
+          { num: 4, bold: "下一条群消息到达 → B 和 C 同时触发 should_process()", detail: "B 和 C 都是 Follower → 查 Redis 发现锁已空" },
+          { num: 5, bold: "B 和 C 同时 SET NX group_lock:grpA owner=?", detail: "Redis 原子性保证：只有一个客户端能成功" },
+          { num: 6, bold: "B 抢到锁 ✓ → term 从 5 升到 6", detail: "B 成为新 Leader → 启动心跳续租 → 放行" },
+          { num: 7, bold: "C 抢锁失败 ✗ → 读锁 owner=B", detail: "C 同步 term=6 → 识别出 B 已当选 → 静默降级" },
+          { num: 8, bold: "新 Leader B 无缝接管自动报价", detail: "功能连续性 100% → 切换过程对客户完全无感" },
+        ],
+      },
+      splitbrain: {
+        title: "场景三：脑裂检测与恢复",
+        steps: [
+          { num: 1, bold: "A 持有锁，正常工作（term=5）", detail: "Redis 锁内容: {owner: A, term: 5, lease: T+30s}" },
+          { num: 2, bold: "网络分区 → A 连不上 Redis", detail: "A 的续租心跳连续 3 次超时失败" },
+          { num: 3, bold: "A 本地主动降级为被动模式", detail: "防假 Leader：宁可漏处理，也不发重复 → A 不再报价" },
+          { num: 4, bold: "分区恢复后的新 Leader 是 B（term=6）", detail: "锁过期后 B 抢到 → term 升到 6" },
+          { num: 5, bold: "网络恢复 → A 重新连上 Redis", detail: "A 读锁 → 发现 owner=B, term=6" },
+          { num: 6, bold: "A 发现 term=6 > 自己记忆的 5 → 确认脑裂", detail: "任期号 fencing token 是判定一切的准绳" },
+          { num: 7, bold: "A 立即放弃，静默降级为 Follower", detail: "即便 A 还以为自己是 Leader → 也必须服从更高任期号" },
+        ],
+      },
+    };
+
+    function renderScene(key) {
+      const scene = SEQUENCES[key];
+      document.getElementById("sceneTitle").textContent = scene.title;
+      const stepsEl = document.getElementById("seqStepList");
+      stepsEl.innerHTML = scene.steps.map(s => `
+        <div class="seq-step">
+          <div class="seq-step-num">${s.num}</div>
+          <div class="seq-step-content">
+            <strong>${s.bold}</strong><br/>
+            ${s.detail}
+          </div>
+        </div>
+      `).join("");
+    }
+
+    document.querySelectorAll(".seq-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".seq-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        renderScene(tab.dataset.scene);
+      });
+    });
+
+    renderScene("normal");
+
+    /* ---------- 交互式 Demo ---------- */
+    const demo = (() => {
+      const devices = [
+        { id: "A", name: "销售-张伟",   openid: "dev_zhang_01", online: true,  role: "leader",   term: 5, heartbeat: "ok" },
+        { id: "B", name: "销售-李娜",   openid: "dev_li_02",    online: true,  role: "follower", term: 5, heartbeat: "ok" },
+        { id: "C", name: "销售-王强",   openid: "dev_wang_03",  online: false, role: "offline",  term: 5, heartbeat: "fail" },
+        { id: "D", name: "销售-陈芳",   openid: "dev_chen_04", online: true,  role: "follower", term: 5, heartbeat: "ok" },
+      ];
+      let redisLock = { owner: "A", term: 5, ttl_ms: 30000 };
+      let logCounter = 0;
+
+      function log(level, msg) {
+        const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+        const cls = level === "info" ? "DEMO-log-info" : level === "success" ? "DEMO-log-success" : level === "warn" ? "DEMO-log-warn" : "DEMO-log-error";
+        const entry = document.createElement("div");
+        entry.className = "demo-log-entry";
+        entry.innerHTML = `<span class="timestamp">[${now}]</span> <span class="${cls}">${msg}</span>`;
+        const logEl = document.getElementById("demoLog");
+        logEl.appendChild(entry);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function render() {
+        const grid = document.getElementById("demoDeviceGrid");
+        grid.innerHTML = devices.map(d => {
+          let cls = "demo-device";
+          let statusHtml = "";
+          if (!d.online) {
+            cls += " offline";
+            statusHtml = `<span class="status-dot status-failed"></span><span>离线</span>`;
+          } else if (d.role === "leader") {
+            cls += " active-leader";
+            statusHtml = `<span class="status-dot status-active animate-pulse"></span><span>LEADER · 执行报价</span>`;
+          } else if (d.role === "candidate") {
+            cls += " waiting";
+            statusHtml = `<span class="status-dot status-waiting animate-pulse"></span><span>CANDIDATE · 参选中</span>`;
+          } else {
+            statusHtml += `<span class="status-dot status-inactive"></span><span>FOLLOWER · 静默丢弃</span>`;
+          }
+          return `
+            <div class="${cls}">
+              <div class="demo-device-name">${d.name}</div>
+              <div class="demo-device-openid">${d.openid}</div>
+              <div class="demo-device-status">${statusHtml}</div>
+              <div style="margin-top:8px; font-family: var(--font-display); font-size: 10px; color: var(--text-muted);">
+                term=${d.term} · hb=${d.heartbeat}
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function getLeader() { return devices.find(d => d.online && d.role === "leader"); }
+      function getOnlineFollower() { return devices.find(d => d.online && d.role === "follower"); }
+      function getOnlineCandidate() { return devices.find(d => d.online && (d.role === "follower" || d.role === "candidate")); }
+
+      function receiveGroupMsg() {
+        log("info", "📨 收到群询价消息：'请问 2023 款宝马 530Li 前保险杠多少钱？'");
+        render();
+
+        // 模拟每个设备并行处理
+        devices.forEach((d, idx) => {
+          setTimeout(() => {
+            if (!d.online) {
+              log("warn", `  [${d.name}] 离线，忽略消息`);
+              return;
+            }
+            if (d.role === "leader") {
+              log("success", `  [${d.name}] ✅ should_process() → True → 执行自动报价 → 发出报价消息`);
+            } else {
+              log("info", `  [${d.name}] ❌ should_process() → False → 静默丢弃（已识别 owner=${redisLock.owner}, term=${redisLock.term}）`);
+            }
+            render();
+          }, idx * 300);
+        });
+      }
+
+      function killLeader() {
+        const leader = getLeader();
+        if (!leader) { log("warn", "当前没有 Leader"); return; }
+
+        log("error", `💥 模拟 Leader [${leader.name}] 突然离线！`);
+        leader.online = false;
+        leader.role = "offline";
+        leader.heartbeat = "fail";
+        render();
+
+        log("warn", "⏱️  Redis 锁 TTL 到期（30s 后）…");
+        redisLock.owner = null;
+        redisLock.term += 1;
+        log("warn", `🔓  Redis 锁过期，任期提升至 term=${redisLock.term}`);
+
+        // 触发选举
+        log("info", "🗳️  下一条群消息触发选举：所有在线 Follower 同时 SET NX");
+        render();
+
+        setTimeout(() => {
+          const candidates = devices.filter(d => d.online);
+          if (candidates.length === 0) {
+            log("error", "❌ 无在线设备，自动报价功能暂时不可用");
+            return;
+          }
+          const winner = candidates[Math.floor(Math.random() * candidates.length)];
+          winner.role = "leader";
+          winner.term = redisLock.term;
+          redisLock.owner = winner.id;
+
+          log("success", `🎉  选举完成！[${winner.name}] 当选新 Leader（term=${redisLock.term}）`);
+          log("success", `   启动心跳续租 → 自动报价功能无缝恢复`);
+
+          candidates.filter(c => c.id !== winner.id).forEach(c => {
+            c.role = "follower";
+            c.term = redisLock.term;
+          });
+          render();
+        }, 1200);
+      }
+
+      function recoverNetwork() {
+        const anyOnline = devices.some(d => d.online && d.role === "leader");
+        if (!anyOnline) { log("warn", "先触发选举让系统恢复正常"); return; }
+
+        log("info", "🌐  模拟网络分区恢复场景…");
+        log("warn", "分区前：旧 Leader term=4, 分区内新 Leader term=6");
+
+        // 让旧 Leader 重新上线但记忆落后 term
+        const oldLeader = devices.find(d => d.id === "A");
+        const currentLeader = getLeader();
+        if (oldLeader && currentLeader && oldLeader.id !== currentLeader.id) {
+          oldLeader.online = true;
+          oldLeader.role = "follower";
+          oldLeader.term = currentLeader.term - 2; // 落后两期
+          oldLeader.heartbeat = "fail";
+
+          log("warn", `⚠️  [${oldLeader.name}] 恢复上线但记忆 term=${oldLeader.term}`);
+          log("warn", `   如果没有 fencing token → 双 Leader 同时报价 = 灾难！`);
+
+          setTimeout(() => {
+            log("success", `🔍 [${oldLeader.name}] 重新连上 Redis → 读到 owner=${currentLeader.name}, term=${currentLeader.term}`);
+            if (currentLeader.term > oldLeader.term) {
+              log("success", `   ✅ 任期号 fencing: term=${currentLeader.term} > 自己记忆的 ${oldLeader.term}`);
+              log("success", `   🛡️  [${oldLeader.name}] 主动降级为 Follower，绝不重复报价`);
+              oldLeader.role = "follower";
+              oldLeader.term = currentLeader.term;
+              render();
+            }
+          }, 800);
+        } else {
+          log("info", "需要先让 Leader 离线触发选举，然后才能模拟脑裂恢复");
+        }
+      }
+
+      function reset() {
+        devices[0] = { id: "A", name: "销售-张伟", openid: "dev_zhang_01", online: true,  role: "leader",   term: 5, heartbeat: "ok" };
+        devices[1] = { id: "B", name: "销售-李娜", openid: "dev_li_02",    online: true,  role: "follower", term: 5, heartbeat: "ok" };
+        devices[2] = { id: "C", name: "销售-王强", openid: "dev_wang_03",  online: false, role: "offline",  term: 5, heartbeat: "fail" };
+        devices[3] = { id: "D", name: "销售-陈芳", openid: "dev_chen_04", online: true,  role: "follower", term: 5, heartbeat: "ok" };
+        redisLock = { owner: "A", term: 5, ttl_ms: 30000 };
+        document.getElementById("demoLog").innerHTML = '<div class="demo-log-entry"><span class="timestamp">[系统]</span> <span class="DEMO-log-info">模拟器已重置</span></div>';
+        render();
+      }
+
+      render();
+
+      return { receiveGroupMsg, killLeader, recoverNetwork, reset };
+    })();
+  </script>
+</body>
+</html>

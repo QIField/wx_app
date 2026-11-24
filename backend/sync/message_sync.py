@@ -132,11 +132,16 @@ def broadcast_messages(pushed, openid=""):
 
     for saved in pushed:
         if saved["direction"] == Message.DIR_IN:
-            # 自动报价触发器（阶段 2）：内部自带资格判定与异常兜底，不影响收信
-            # 传消息原始 create_time，用于 AI 开关时间闸门过滤历史消息
-            from backend.services.auto_quote import on_new_message
+            # ----- 互斥协议拦截（插件） -----
+            # 同一群多设备同时在线时，只有 Leader 执行自动报价，其余静默丢弃
+            # 插件内部异常会兜底放行，绝不阻断收信链路
+            from backend.plugins.mutex_protocol import should_process as _mutex_should
+            if _mutex_should(saved["conversation_id"], openid=openid):
+                # 自动报价触发器（阶段 2）：内部自带资格判定与异常兜底，不影响收信
+                # 传消息原始 create_time，用于 AI 开关时间闸门过滤历史消息
+                from backend.services.auto_quote import on_new_message
 
-            on_new_message(saved["conversation_id"], message_time=saved["create_time"])
+                on_new_message(saved["conversation_id"], message_time=saved["create_time"])
         info = sender_maps.get(saved["conversation_id"], {}).get(saved["sender_wxid"] or "")
         hub.broadcast("new_message", {
             "message_id": saved["message_id"],
