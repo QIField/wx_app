@@ -52,9 +52,10 @@ function openHistory() {
 const highlightMsgId = ref(null)
 
 /** 从历史弹窗点击结果 → 打开对应会话 → 滚动定位 → 高亮目标消息。
- *  目标消息若不在已加载范围内，先 loadOlderMessages 补齐。 */
+ *  目标消息若不在已加载范围内，先 loadOlderMessages 补齐。
+ *  入参 item 已由 HistoryDialog.mapItem 做过后端→前端字段映射。 */
 async function onHistoryLocate(item) {
-  const targetConvId = item.conversation?.id
+  const targetConvId = item.convId
   if (!targetConvId || !item.id) return
 
   // 打开目标会话（如果还没打开）
