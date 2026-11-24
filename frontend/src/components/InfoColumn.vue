@@ -8,7 +8,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useBoundaryResize } from '../composables/useBoundaryResize.js'
 import InfoPanel from './InfoPanel.vue'
 
-/* 宽度动态约束（视口比例） */
+/* ---------- 宽度动态约束（视口比例） ---------- */
 const getMinW = () => Math.floor(window.innerWidth / 3)
 const getMaxW = () => Math.floor(window.innerWidth * 0.5)
 
@@ -23,20 +23,21 @@ const { width, isDragging, bindEdge } = useBoundaryResize({
 /* ---------- 收起/展开 ---------- */
 const open = ref(true)
 const lastWidth = ref(width.value)
-const contentMounted = ref(true) // 收起动画播完才卸载内容，动画期间内容冻结不动
-const COLLAPSED_WIDTH = 0 // 收起后面板宽度归零，只留骑缝按钮充当展开入口
+// v-show 而非 v-if：收起/展开只是 CSS 隐藏，InfoPanel 常驻内存，
+// 里面 keep-alive 的子组件（ManualView / ThirdParty 等）缓存不丢
+const contentMounted = ref(true)
+const COLLAPSED_WIDTH = 0
 let unmountTimer = null
 
 function toggle() {
   if (open.value) {
     lastWidth.value = width.value
     open.value = false
-    /* 宽度动画播完再卸载内容：动画期间内容冻结在原宽、仅被逐帧裁剪 */
     clearTimeout(unmountTimer)
     unmountTimer = setTimeout(() => { if (!open.value) contentMounted.value = false }, 320)
   } else {
     clearTimeout(unmountTimer)
-    contentMounted.value = true // 先按目标宽度挂载内容，再让面板宽度展开逐帧揭示
+    contentMounted.value = true
     width.value = lastWidth.value
     open.value = true
   }
@@ -56,9 +57,6 @@ function onWinResize() {
   }
 }
 
-onMounted(() => window.addEventListener('resize', onWinResize))
-
-/* 给模板用的 style：展开=动态宽度 过渡，收起=宽度归零 */
 const colInfoStyle = computed(() => ({
   width: (open.value ? width.value : COLLAPSED_WIDTH) + 'px',
 }))
@@ -69,6 +67,7 @@ const colInfoStyle = computed(() => ({
 const edgeEl = ref(null)
 let cleanupEdge = null
 onMounted(() => {
+  window.addEventListener('resize', onWinResize)
   if (edgeEl.value) cleanupEdge = bindEdge(edgeEl.value)
 })
 onBeforeUnmount(() => {

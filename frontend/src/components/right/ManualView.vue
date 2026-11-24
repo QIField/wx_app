@@ -6,7 +6,7 @@
  *   类型识别与原型 detectType 同款；示例 chips 一键查询。
  * 其余三子页为独立组件（ManualAiChat / ManualThirdParty / ManualHistory）。
  */
-import { computed, onMounted, onActivated, onDeactivated, onBeforeUnmount, ref, watch, defineComponent } from 'vue'
+import { computed, ref, defineComponent } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qqManualSearch } from '../../api'
 import { TYPE_LABELS, detectType } from '../../utils/quoteQuery'
@@ -14,10 +14,6 @@ import QuoteResultCard from './QuoteResultCard.vue'
 import ManualAiChat from './ManualAiChat.vue'
 import ManualThirdParty from './ManualThirdParty.vue'
 import ManualHistory from './ManualHistory.vue'
-
-/* ---------- 🔍 生命周期监控 ---------- */
-const L = (msg, c = '#888') =>
-  console.log(`%c[3.ManualView] ${msg}`, `color:${c};font-weight:bold`)
 
 const SUBS = [
   { key: 'query', label: '查询报价' },
@@ -61,13 +57,6 @@ async function doQuery(text) {
   }
 }
 
-/* ---------- 🔍 生命周期监控 ---------- */
-onMounted(() => L('onMounted ✅', '#27ae60'))
-onActivated(() => L('onActivated 🟢', '#2ecc71'))
-onDeactivated(() => L('onDeactivated 🔴', '#e74c3c'))
-onBeforeUnmount(() => L('onBeforeUnmount 💀', '#c0392b'))
-watch(subTab, (k) => L(`subTab → ${k}`, '#3498db'))
-
 /* ---------- 4 个子页全部用 component :is → keep-alive 统一缓存 ---------- */
 const ManualQueryInline = defineComponent({
   name: 'ManualQueryInline',
@@ -103,7 +92,6 @@ const ManualQueryInline = defineComponent({
 })
 
 const currentSub = computed(() => {
-  L(`currentSub → ${subTab.value}`, '#9b59b6')
   if (subTab.value === 'query') return ManualQueryInline
   if (subTab.value === 'ai') return ManualAiChat
   if (subTab.value === 'third') return ManualThirdParty

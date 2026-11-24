@@ -156,7 +156,7 @@ function switchSource(key) {
 }
 
 // 首次激活不自动查询，等用户输入 OE 点查询；缓存命中时也不重查
-// （InfoColumn 已用 v-show 保住 InfoPanel，keep-alive 让 onMounted 只触发一次）
+// （InfoColumn 已用 v-show 保住 InfoPanel，ManualView 用 keep-alive 包住 4 个子页）
 </script>
 
 <template>
