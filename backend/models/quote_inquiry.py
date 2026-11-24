@@ -27,6 +27,7 @@ class QuoteInquiry(db.Model, SoftDeleteMixin):
 
     id = db.Column(BigIntPK, primary_key=True, autoincrement=True)
     conversation_id = db.Column(db.BigInteger, nullable=False, comment="触发分析的会话")
+    message_id = db.Column(db.BigInteger, comment="触发该询价的原始消息 ID（用于前端定位聊天气泡）")
     sender_name = db.Column(db.String(128), comment="询价人（AI 场景提取）")
     vin = db.Column(db.String(64), comment="提取的 VIN，缺字段场景为空")
     part_name = db.Column(db.String(64), comment="配件名称")
@@ -42,9 +43,13 @@ class QuoteInquiry(db.Model, SoftDeleteMixin):
         comment="0待报价 1待人工 2拦截 3已报价 4忽略",
     )
     price_json = db.Column(db.JSON, comment="报价结果（阶段 4 写；含改价后价格）")
+    override_pricing = db.Column(
+        db.JSON, comment="人工改价覆盖（detail 页行内改价保存；结构 {items:[{oe,final_price}]}）",
+    )
     sent_at = db.Column(db.DateTime, comment="自动发送时间（阶段 5 回写）")
     created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.now())
 
     __table_args__ = (
         db.Index("idx_inquiry_conv", "conversation_id", "status"),
+        db.Index("idx_inquiry_msg", "message_id"),
     )

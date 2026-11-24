@@ -3,7 +3,11 @@
 只在直接运行 app.py 的启动引导里调用；所有操作幂等，重复执行无副作用。
 新加列：在 upgrade_existing_schema 里追加一条 _try_alter 即可。
 """
+import logging
+
 from backend.extensions import db
+
+log = logging.getLogger(__name__)
 
 
 def upgrade_existing_schema():
@@ -49,6 +53,13 @@ def upgrade_existing_schema():
     # 2026-11-23 AI 时间闸存量回填：global 行默认 True 创建时没走过"关→开"，
     # ai_enabled_at 一直为 NULL，导致闸门形同虚设。回填 updated_at 作为生效起点。
     _backfill_ai_enabled_at()
+    # 2026-11-24 询价气泡定位：QuoteInquiry 记录触发该询价的原始 message_id，
+    # 前端"定位聊天气泡"按此 ID 精确命中 DOM（比时间匹配靠谱得多）
+    _try_alter("ALTER TABLE quote_inquiry ADD COLUMN message_id BIGINT NULL")
+    _try_alter("ALTER TABLE quote_inquiry ADD INDEX idx_inquiry_msg (message_id)")
+    _backfill_inquiry_message_id()
+    # 2026-11-24 行内改价持久化：详情页表格改价 → 保存 override_pricing 覆盖
+    _try_alter("ALTER TABLE quote_inquiry ADD COLUMN override_pricing JSON NULL")
 
 
 def _backfill_remark_config():
@@ -223,3 +234,68 @@ def _backfill_ai_enabled_at():
         "AND ai_enabled = 1 AND ai_enabled_at IS NULL"
     ))
     db.session.commit()
+
+
+def _backfill_inquiry_message_id():
+    """存量询价行 message_id 空 → 用 inquiry_time + inquiry_content 在同会话 message 表里定位来源消息。
+
+    匹配策略（幂等：已填 message_id 的跳过）：
+      1. 同会话 + inquiry_time ±5 分钟窗口内的用户消息（dir=1）
+      2. inquiry_content 关键词在 message.content 里命中（LIKE）
+      3. 两者交集取 create_time 最接近的那条
+
+    匹配不上的保持 NULL，前端兜底走时间匹配。
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(db.engine)
+    if "quote_inquiry" not in insp.get_table_names() or "message" not in insp.get_table_names():
+        return
+    # message_id 列刚加可能还没数据，需要先确认列存在
+    if "message_id" not in [c["name"] for c in insp.get_columns("quote_inquiry")]:
+        return
+
+    rows = db.session.execute(text(
+        "SELECT id, conversation_id, inquiry_time, inquiry_content "
+        "FROM quote_inquiry WHERE deleted_at IS NULL AND message_id IS NULL "
+        "LIMIT 500"
+    )).fetchall()
+    if not rows:
+        return
+
+    filled = 0
+    for row in rows:
+        iid, conv_id, itime, icontent = row
+        # 构造时间窗口（±5 分钟）
+        time_cond = ""
+        params = {"cid": conv_id}
+        if itime:
+            time_cond = "AND create_time BETWEEN :tstart AND :tend"
+            params["tstart"] = itime  # 由 SQL DATE_SUB 处理
+            params["tend"] = itime
+
+        kw_cond = ""
+        if icontent and len(icontent.strip()) >= 2:
+            kw_cond = "AND content LIKE :kw"
+            # 取前 30 字符做关键词，AI 提取的 inquiry_content 常带"请问"等
+            kw = icontent.strip()[:30]
+            params["kw"] = f"%{kw}%"
+
+        sql = text(
+            f"SELECT id FROM message "
+            f"WHERE deleted_at IS NULL AND conversation_id = :cid "
+            f"AND direction = 1 "
+            f"{time_cond} {kw_cond} "
+            f"ORDER BY LENGTH(content) DESC LIMIT 1"
+        )
+        hit = db.session.execute(sql, params).fetchone()
+        if hit:
+            db.session.execute(
+                text("UPDATE quote_inquiry SET message_id = :mid WHERE id = :iid"),
+                {"mid": hit[0], "iid": iid},
+            )
+            filled += 1
+
+    if filled:
+        db.session.commit()
+        log.info("backfill_inquiry_msg: filled %d rows", filled)

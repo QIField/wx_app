@@ -151,6 +151,50 @@ def rebuild_quote_text(row, price=None):
     return pricing["text"]
 
 
+def rebuild_quote_text_with_override(row, price=None):
+    """重建话术（支持行内改价覆盖）。优先级：
+      1. override_pricing（人工详情页行内改价 → 所有配件价都变了）
+      2. body.price（QuoteCard 顶栏单卡改价 → 只改首件）
+      3. 原始话术（都没改就原样返回）
+    """
+    ov = row.override_pricing or {}
+    ov_items = list(ov.get("items") or [])
+    r = row.price_json or {}
+    pricing = dict(r.get("pricing") or {})
+    stored = (pricing.get("text") or "").strip()
+
+    # 优先级 1：override_pricing 整包覆盖
+    if ov_items:
+        pitems = list(pricing.get("items") or [])
+        if pitems:
+            by_oe = {str(x.get("oe") or ""): x for x in ov_items}
+            merged_total = 0.0
+            new_items = []
+            for it in pitems:
+                oe = str(it.get("oe") or "")
+                if oe in by_oe:
+                    new_items.append({**it, "final_price": by_oe[oe]["final_price"]})
+                else:
+                    new_items.append(dict(it))
+                try:
+                    merged_total += float(new_items[-1].get("final_price") or 0)
+                except (TypeError, ValueError):
+                    pass
+            pricing["items"] = new_items
+            if merged_total > 0:
+                pricing["final_price"] = f"{round(merged_total, 2):.2f}"
+            pricing["text"] = _quote_text(row, r.get("car"), pricing["items"], pricing.get("level"), pricing.get("rate"))
+            row.price_json = {**r, "pricing": pricing}
+            return pricing["text"]
+
+    # 优先级 2：body.price（单卡顶栏改价）
+    if price is not None:
+        return rebuild_quote_text(row, price)
+
+    # 都没改 → 原样返回
+    return stored
+
+
 # ---------- 链路各段 ----------
 
 
@@ -172,14 +216,26 @@ def _customer_rate(conv):
 
 
 def _car_block(vin):
-    """VIN → 契约 A car 子集（vininfo 真实字段映射）。查无此车 / 无 VIN 返回 None。"""
-    vin = (vin or "").strip()
+    """VIN → 契约 A car 子集（vininfo 真实字段映射）。查无此车 / 无 VIN / 脏值 'None' 返回 None。"""
+    vin = _clean_str(vin)
     if not vin:
         return None
     data = qq_client.vininfo(vin)
     rows = data if isinstance(data, list) else []
     info = rows[0] if rows and isinstance(rows[0], dict) else {}
     return _car_from_info(info, vin)
+
+
+def _clean_str(val):
+    """和 quote_dispatch._clean 同逻辑：把字符串 'None'/'null'/'undefined' 清洗成空串。"""
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        v = val.strip()
+        if v.lower() in ("none", "null", "undefined", "nan"):
+            return ""
+        return v
+    return str(val).strip()
 
 
 def _car_from_info(info, vin=""):

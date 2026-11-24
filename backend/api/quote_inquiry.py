@@ -75,6 +75,79 @@ def list_inquiries():
     })
 
 
+@bp.get("/api/quote/inquiries/<int:inquiry_id>")
+@require_role()
+def get_inquiry(inquiry_id):
+    """单条询价详情（报价处理台详情页数据源）。
+    出参与 list 的行结构完全一致（复用 _inquiry_json）。"""
+    row = _visible_inquiry(inquiry_id)
+    if row is None:
+        return jsonify(code=404, msg="询价不存在或无权限"), 404
+    conv = db.session.get(Conversation, row.conversation_id)
+    return jsonify(code=0, msg="success", data=_inquiry_json(row, conv))
+
+
+@bp.post("/api/quote/inquiries/<int:inquiry_id>/override")
+@require_role()
+def save_override(inquiry_id):
+    """保存行内改价覆盖（详情页表格改价 debounce 自动调）。
+    body.items 为 [{oe, final_price}]；按 oe 合并到 price_json.pricing.items，
+    同时写 override_pricing 存原始覆盖。已发报价后允许继续改价（重新发一次会用覆盖）。
+    """
+    row = _visible_inquiry(inquiry_id)
+    if row is None:
+        return jsonify(code=404, msg="询价不存在或无权限"), 404
+    body = request.get_json(silent=True) or {}
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        return jsonify(code=400, msg="items 必须是非空数组"), 400
+    # 校验每条
+    cleaned = []
+    for it in items:
+        oe = str(it.get("oe") or "").strip()
+        fp = it.get("final_price")
+        if not oe:
+            continue
+        try:
+            fp = round(float(fp), 2)
+            if fp <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        cleaned.append({"oe": oe, "final_price": f"{fp:.2f}"})
+    if not cleaned:
+        return jsonify(code=400, msg="没有有效改价项"), 400
+
+    # 1. 存 override_pricing（原始覆盖，方便 send 时重建话术）
+    row.override_pricing = {"items": cleaned}
+
+    # 2. merge 到 price_json.pricing.items（前端拉详情/列表都能看到合并后的）
+    r = dict(row.price_json or {})
+    pricing = dict(r.get("pricing") or {})
+    pitems = list(pricing.get("items") or [])
+    if pitems:
+        by_oe = {x["oe"]: x for x in cleaned}
+        merged_total = 0.0
+        for i, it in enumerate(pitems):
+            oe = it.get("oe")
+            if oe in by_oe:
+                pitems[i] = {**it, "final_price": by_oe[oe]["final_price"]}
+            try:
+                merged_total += float(pitems[i].get("final_price") or 0)
+            except (TypeError, ValueError):
+                pass
+        pricing["items"] = pitems
+        if merged_total > 0:
+            pricing["final_price"] = f"{round(merged_total, 2):.2f}"
+        r["pricing"] = pricing
+        row.price_json = r
+
+    db.session.commit()
+    _notify_changed(row)
+    conv = db.session.get(Conversation, row.conversation_id)
+    return jsonify(code=0, msg="success", data=_inquiry_json(row, conv))
+
+
 def _visible_inquiry(inquiry_id):
     """当前登录人可见的询价行（绑定设备口径与列表一致）；不存在/跨设备返回 None。"""
     openids = user_openids(g.current_user.id)
@@ -128,7 +201,8 @@ def send_inquiry(inquiry_id):
         if price <= 0:
             return jsonify(code=400, msg="price 必须大于 0"), 400
 
-    text = rebuild_quote_text(row, price)
+    # 重建话术优先级：override_pricing（人工行内改价）> body.price（单卡顶栏改价）> 原始话术
+    text = rebuild_quote_text_with_override(row, price)
     if not (text or "").strip():
         return jsonify(code=400, msg="暂无报价话术可发送"), 400
 
@@ -163,6 +237,7 @@ def _inquiry_json(row, conv):
     return {
         "id": row.id,
         "conversation_id": row.conversation_id,
+        "message_id": int(row.message_id) if row.message_id else None,
         "conversation_name": name or anonymize.anon_label(conv.wxid),
         "chat_type": conv.chat_type,
         "sender_name": row.sender_name or "",

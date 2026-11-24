@@ -50,6 +50,19 @@ def _hit_blacklist(part_name, blacklist):
     return any(w in part_name or part_name in w for w in blacklist if w)
 
 
+def _clean(val):
+    """把脏值（Python None / 字符串 'None'/'null'/'undefined' / 纯空白）归一成 None。
+    上游 rule_extract 返回的 JSON 有时把 null 序列化成字符串 'None'，这里统一清洗。"""
+    if val is None:
+        return None
+    if isinstance(val, str):
+        v = val.strip()
+        if not v or v.lower() in ("none", "null", "undefined", "nan"):
+            return None
+        return v
+    return val
+
+
 def _status_of(scene, blacklist):
     part = (scene.get("part_name") or "").strip()
     oem = (scene.get("oem_no") or "").strip()
@@ -103,10 +116,11 @@ def dispatch(conversation_id, scenarios, blacklist):
 
         row = QuoteInquiry(
             conversation_id=conversation_id,
+            message_id=s.get("_msg_id") or None,
             sender_name=_name_of(s),
-            vin=(s.get("vin") or None),
-            part_name=(s.get("part_name") or None),
-            oem_no=(s.get("oem_no") or None),
+            vin=_clean(s.get("vin")),
+            part_name=_clean(s.get("part_name")),
+            oem_no=_clean(s.get("oem_no")),
             quoted=_truthy(s.get("quoted")),
             inquiry_time=s.get("inquiry_time"),
             inquiry_content=s.get("inquiry_content"),
