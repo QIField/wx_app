@@ -4,10 +4,9 @@
  * 筛选维度：关键词 + 日期范围 + 消息类型 + 方向 + 发送人
  * 交互：点结果 → locate 事件 → ChatPanel 打开会话 + 滚动定位 + 脉冲高亮
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useZIndex } from 'element-plus'
 import { searchMessages, fetchMessageDateMeta } from '../api'
-import { msgTextOf } from '../utils/message'
 import CustomDatePicker from './CustomDatePicker.vue'
 
 // Element Plus z-index 体系：defaultInitialZIndex=2000，nextZIndex() 每次 +1
@@ -60,6 +59,16 @@ const DIR_OPTIONS = [
   { label: '客服发送', value: 'staff' },
 ]
 
+/** 后端 msg_type 数字 → 前端 type 字符串（_msg_json 里的 msg_type） */
+const MSG_TYPE_MAP = {
+  1: 'text', 2: 'image', 3: 'file', 4: 'video',
+  5: 'link', 6: 'voice', 7: 'emoji', 9: 'forward',
+}
+/** 前端 type 字符串 → 后端 msg_type 数字（构建搜索参数时反查） */
+const TYPE_TO_MSG_TYPE = Object.fromEntries(
+  Object.entries(MSG_TYPE_MAP).map(([k, v]) => [v, Number(k)])
+)
+
 // ------- 生命周期 -------
 watch(() => props.visible, (v) => {
   if (v) {
@@ -83,6 +92,72 @@ watch(() => props.initialQuery, (v) => {
 })
 
 // ------- 工具 -------
+
+/** 时间格式化：后端 create_time "YYYY-MM-DD HH:MM:SS" → HH:mm */
+function fmtHHmm(timeStr) {
+  if (!timeStr) return ''
+  const match = String(timeStr).match(/(\d{2}):(\d{2})/)
+  return match ? `${match[1]}:${match[2]}` : ''
+}
+
+/** 字段映射：后端 snake_case → 前端 camelCase
+ *  复刻 MessageRow 聊天窗口 picOf / nameOf / avatarOf 同款决策链，
+ *  避免两处对"谁用什么头像/名称"各自演化漂移。 */
+function mapItem(raw) {
+  const conv = raw.conversation || {}
+  return {
+    id: raw.id,
+    convId: conv.id,
+    convName: conv.name,
+    convAvatar: conv.avatar,          // 单聊 fallback：Conversation 表存的对方头像
+    convChatType: conv.chat_type,     // 1=单聊 2=群聊
+    content: raw.content,
+    senderName: raw.sender_name || '未知',
+    senderAvatar: raw.sender_avatar || null,
+    senderAnon: !!raw.sender_anon,
+    operatorName: raw.operator_name || '',  // staff 发的消息：操作人姓名
+    type: MSG_TYPE_MAP[raw.msg_type] || 'text',
+    // direction 后端 1=客户入 2=客服出
+    direction: raw.direction === 2 ? 'staff' : 'customer',
+    createdAt: raw.create_time,
+  }
+}
+
+/** 头像选择：复刻 MessageRow.picOf 逻辑
+ *  - staff 发的：null（用颜色块首字）
+ *  - customer 群聊：sender_avatar（后端 sender_view 从 GroupMember 下发）
+ *  - customer 单聊：conv.avatar（Conversation 表存的对方头像） */
+function resolveAvatar(it) {
+  if (it.direction === 'staff') return null
+  if (it.convChatType === 2) return it.senderAvatar || null
+  return it.convAvatar || null
+}
+
+/** 头像块的首字母兜底：MessageRow.avatarOf 同款 */
+function avatarInitial(it) {
+  if (it.direction === 'staff') return (it.operatorName || '客').slice(0, 1)
+  if (it.convChatType === 2) return (it.senderName || '客').slice(0, 1)
+  return (it.convName || it.senderName || '?').slice(0, 1)
+}
+
+/** 名称选择：复刻 MessageRow.nameOf 入方向分支
+ *  核心区别：staff 发的消息 sender_name 存的是客户身份（消息归属客户），
+ *  要用 operator_name 展示 staff 自己的名字。 */
+function resolveName(it) {
+  if (it.direction === 'staff') {
+    if (it.operatorName === '自动报价') return '系统代发'
+    if (it.operatorName) return it.operatorName
+    return '手机端'
+  }
+  if (it.convChatType === 2) return it.senderName || '成员'
+  return it.convName || it.senderName || '未知'
+}
+
+/** 头像图片 404 兜底：hide img，靠下方 v-else 显示首字块 */
+function onAvatarError(e) {
+  e.target.style.display = 'none'
+}
+
 function highlight(text, kw) {
   if (!kw || !text) return text || ''
   const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -125,7 +200,8 @@ async function doSearch() {
   try {
     const params = buildParams()
     const data = await searchMessages(params)
-    items.value = data.items || []
+    // 应用字段映射：后端 snake_case → 前端 camelCase
+    items.value = (data.items || []).map(mapItem)
     hasMore.value = !!data.hasMore
   } catch (e) {
     errorMsg.value = e?.response?.data?.error || e.message || '搜索失败'
@@ -137,16 +213,19 @@ async function doSearch() {
 }
 
 function buildParams() {
-  const p = { page: page.value, pageSize }
-  if (props.convId) p.convId = props.convId
-  if (keyword.value.trim()) p.keyword = keyword.value.trim()
+  // 后端参数名：q, conv_id, msg_type, direction(1入2出), sender, date_from, date_to, page_size
+  const p = { page_size: pageSize }
+  if (props.convId) p.conv_id = props.convId
+  if (keyword.value.trim()) p.q = keyword.value.trim()
   if (dateSelected.value) {
     p.date_from = dateSelected.value
     p.date_to = dateSelected.value
   }
-  if (msgType.value) p.type = msgType.value
-  if (direction.value) p.direction = direction.value
-  if (senderName.value.trim()) p.senderName = senderName.value.trim()
+  // 前端 msgType 空值='全部类型'，后端 msg_type 为空=不过滤
+  if (msgType.value) p.msg_type = TYPE_TO_MSG_TYPE[msgType.value]
+  // 前端 direction 空值='全部方向'，后端 direction 1=客户 2=客服
+  if (direction.value) p.direction = direction.value === 'customer' ? 1 : 2
+  if (senderName.value.trim()) p.sender = senderName.value.trim()
   return p
 }
 
@@ -268,15 +347,31 @@ async function onItemClick(item) {
                 :class="{ 'hd-item-selected': selectedId === it.id }"
                 @click="onItemClick(it)"
               >
+                <!-- 头像：复刻 MessageRow.picOf 逻辑选头像源 -->
                 <div class="hd-item-avatar" :class="it.direction === 'staff' ? 'hd-item-avatar-me' : ''">
-                  {{ (it.senderName || '?').charAt(0).toUpperCase() }}
+                  <img
+                    v-if="resolveAvatar(it)"
+                    :src="resolveAvatar(it)"
+                    :alt="resolveName(it)"
+                    class="hd-item-avatar-img"
+                    referrerpolicy="no-referrer"
+                    @error="onAvatarError"
+                  />
+                  <template v-else>{{ avatarInitial(it).toUpperCase() }}</template>
                 </div>
                 <div class="hd-item-body">
                   <div class="hd-item-meta">
-                    <span class="hd-item-name">{{ it.senderName || '未知' }}</span>
-                    <span v-if="!convId" class="hd-item-conv">· {{ it.convName || '未知会话' }}</span>
+                    <!-- 发送者名称：复刻 MessageRow.nameOf 逻辑 -->
+                    <span class="hd-item-name">{{ resolveName(it) }}</span>
+                    <!-- 跨会话搜索时显示所属会话（单聊已用 convName 做名称则跳过） -->
+                    <span
+                      v-if="!convId && it.convChatType === 2 && it.convName"
+                      class="hd-item-conv"
+                    >· {{ it.convName }}</span>
+                    <!-- 消息类型标签 -->
                     <span class="hd-item-type hd-item-type-{{ it.type }}">{{ it.type || 'text' }}</span>
-                    <span class="hd-item-time">{{ it.createdAt }}</span>
+                    <!-- 消息时间 HH:mm 格式 -->
+                    <span class="hd-item-time">{{ fmtHHmm(it.createdAt) }}</span>
                   </div>
                   <div class="hd-item-content" v-html="highlight(it.content, keyword) || fallbackHtml(it.type)"></div>
                 </div>
@@ -512,8 +607,16 @@ async function onItemClick(item) {
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 600;
   flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
 }
 .hd-item-avatar-me { background: linear-gradient(135deg, #34c759 0%, #1f9f4f 100%); }
+.hd-item-avatar-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
 
 /* body */
 .hd-item-body { flex: 1; min-width: 0; }
