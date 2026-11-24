@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>报价详情 — SI 客服系统</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- ============== TOP BAR ============== -->
+    <header class="topbar">
+      <div class="topbar__left">
+        <div class="topbar__brand">
+          <div class="topbar__brand-logo">
+            <!-- Mercedes-like icon -->
+            <svg class="i-18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
+              <polygon points="12,2 22,20 2,20"/>
+              <circle cx="12" cy="14" r="4" fill="#fff" stroke="#fff" stroke-width="1"/>
+            </svg>
+          </div>
+          <div class="topbar__brand-text">
+            <span class="topbar__brand-name">SI 客服系统</span>
+            <span class="topbar__brand-sub">QUOTE WORKBENCH</span>
+          </div>
+        </div>
+        <div class="topbar__breadcrumb">
+          <span>报价管理</span>
+          <span class="sep">/</span>
+          <span>询价单 #XJ104159</span>
+          <span class="sep">/</span>
+          <span class="current">报价详情</span>
+        </div>
+      </div>
+      <div class="topbar__right">
+        <div class="topbar__time">
+          <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:-3px;margin-right:4px">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span id="currentTime">2026-11-24 10:00</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============== MAIN ============== -->
+    <main class="main">
+
+      <!-- ====== Vehicle Banner (full width top) ====== -->
+      <section class="vehicle-banner animate-card">
+        <div class="vb-icon">
+          <svg class="i-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"/>
+            <circle cx="6.5" cy="16.5" r="2.5"/><circle cx="16.5" cy="16.5" r="2.5"/>
+          </svg>
+        </div>
+        <div class="vb-info">
+          <div class="vb-title" id="vbTitle">奔驰 S级 2021款 S450L 3.0T</div>
+          <div class="vb-fields" id="vbFields">
+            <!-- filled by JS -->
+          </div>
+        </div>
+        <div class="vb-actions">
+          <button class="btn btn-sm btn-ghost">
+            <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            编辑车辆信息
+          </button>
+        </div>
+      </section>
+
+      <!-- ====== Sidebar: Part List ====== -->
+      <aside class="sidebar animate-card">
+        <div class="sidebar__header">
+          <div>
+            <div class="sidebar__title">询价配件清单</div>
+            <div class="sidebar__count" id="partCount">共 4 项</div>
+          </div>
+          <button class="sidebar__add-btn" onclick="App.addPart()">
+            <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            添加配件
+          </button>
+        </div>
+        <div class="part-list" id="partList">
+          <!-- filled by JS -->
+        </div>
+      </aside>
+
+      <!-- ====== Main Content ====== -->
+      <section class="content animate-card">
+        <div class="content__header">
+          <div class="content__title">
+            <svg class="i-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            <span id="activePartName">火花塞</span>
+            <span class="tag tag-blue" id="activeOeTag">OE A2541590000</span>
+          </div>
+          <div class="content__actions">
+            <button class="btn btn-sm btn-ghost" onclick="App.showPreview()">
+              <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              预览话术
+            </button>
+            <button class="btn btn-sm btn-primary" onclick="App.sendQuote()">
+              <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              发送报价
+            </button>
+          </div>
+        </div>
+
+        <div class="content__body">
+
+          <!-- ======= SIDEBAR SNAPSHOT PREVIEW =======
+               原拓展栏 QuoteCard 简化后形态：只留关键信息 + 两个快捷入口 -->
+          <div class="section animate-card" style="border-style:dashed">
+            <div class="section__head" style="background:#FFF9F9">
+              <div class="section__title" style="color:var(--c-primary)">
+                <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                拓展栏简化卡（聊天右侧 Quick Action）
+              </div>
+              <span class="tag tag-orange">简化后</span>
+            </div>
+            <div class="section__body">
+              <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+                <!-- Sidebar card mockup -->
+                <div class="snapshot-card" style="width:280px;flex-shrink:0">
+                  <div class="snapshot-card__corner">询价 #159</div>
+                  <div class="snapshot-card__tag">
+                    <svg class="i-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    待报价
+                  </div>
+                  <div class="snapshot-card__car">奔驰 S级 2021款 S450L</div>
+                  <div class="snapshot-card__meta">
+                    <span>VIN ···854389</span>
+                    <span>4 配件</span>
+                  </div>
+                  <div class="snapshot-card__price-row">
+                    <div>
+                      <div class="snapshot-card__price-label">初始询价单价</div>
+                      <div class="snapshot-card__price-value"><span class="currency">¥</span>258.00</div>
+                    </div>
+                    <div style="text-align:right;font-size:10px;color:var(--c-text-muted)">
+                      群：博瑞中国车安<br>询价人：张悦
+                    </div>
+                  </div>
+                  <div class="snapshot-card__mini">
+                    <span>
+                      <svg class="i-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      2026-11-19
+                    </span>
+                  </div>
+                  <div class="snapshot-card__actions">
+                    <button class="btn btn-primary" onclick="App.openDetailPage()">
+                      <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="13" x2="6" y2="13"/><line x1="18" y1="17" x2="6" y2="17"/><line x1="8" y1="9" x2="6" y2="9"/><circle cx="11" cy="5" r="2"/><path d="M17 3h2a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3"/></svg>
+                      打开详情页报价
+                    </button>
+                    <button class="btn" onclick="App.jumpToBubble()" style="background:var(--c-surface)">
+                      <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                      定位聊天气泡
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Description -->
+                <div style="flex:1;min-width:280px;font-size:12px;line-height:1.9">
+                  <div style="color:var(--c-text);font-weight:600;margin-bottom:6px">改动点：</div>
+                  <ul style="color:var(--c-text-sub);padding-left:18px">
+                    <li>原 <code style="font-family:var(--f-num);color:var(--c-accent);background:var(--c-bg);padding:1px 5px;border-radius:3px">QuoteCard.vue</code> 展开态包含 4 大区块（车辆信息 / 报价明细 / 产品档案 / 报价话术）→ <b>简化为 1 张紧凑摘要卡</b></li>
+                    <li>关键指标只保留：车型 + 询价单号 + 配件数量 + 初始单价 + 询价人</li>
+                    <li>隐藏：VIN 详情、品牌比价表、爆炸图周边配件、保质期表格 —— 全部下放到详情页</li>
+                    <li>底部两个动作：<b class="tag tag-blue">打开详情页报价</b> → 跳转当前原型页；<b class="tag tag-blue">定位聊天气泡</b> → 聊天面板自动滚到该询价消息位置</li>
+                  </ul>
+                  <div style="margin-top:10px;color:var(--c-text-muted);font-size:11px">
+                    ⓘ 拓展栏作为高频操作入口，必须"轻"—— 300ms 内扫完信息 + 一键跳详情
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ======= QUOTE SUMMARY (KEY HIGHLIGHT) ======= -->
+          <div class="quote-summary animate-card" id="quoteSummary">
+            <!-- filled by JS -->
+          </div>
+
+          <!-- ======= SECTION: Customer Info ======= -->
+          <div class="section animate-card">
+            <div class="section__head">
+              <div class="section__title">客户与询价信息</div>
+              <button class="btn btn-ghost btn-sm">
+                <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                查看客户档案
+              </button>
+            </div>
+            <div class="section__body">
+              <div class="info-card" id="customerInfo">
+                <!-- filled by JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- ======= SECTION: Quote Items Table ======= -->
+          <div class="section animate-card">
+            <div class="section__head">
+              <div class="section__title">报价明细表格</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <span class="tag tag-blue" id="tableCount">共 5 条</span>
+                <button class="btn btn-sm btn-ghost" onclick="App.addQuoteRow()">
+                  <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  新增一行
+                </button>
+              </div>
+            </div>
+            <div class="section__body" style="padding:0">
+              <div class="quote-table-wrap">
+                <table class="quote-table">
+                  <thead>
+                    <tr>
+                      <th style="width:58px">图片</th>
+                      <th style="width:130px">OE码 <span class="required">*</span></th>
+                      <th style="width:100px">自编号</th>
+                      <th style="width:110px">品牌</th>
+                      <th style="width:140px">规格</th>
+                      <th style="width:100px;text-align:right">销售价</th>
+                      <th style="width:100px;text-align:right">成本价</th>
+                      <th style="width:90px;text-align:right">打税费</th>
+                      <th style="width:80px;text-align:center">库存数</th>
+                      <th style="width:110px">保质期</th>
+                      <th style="min-width:100px">备注</th>
+                      <th style="width:60px;text-align:center">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="quoteTableBody">
+                    <!-- filled by JS -->
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colspan="5" class="total-label">费用汇总</td>
+                      <td class="total-value" id="ftSaleSub">¥707.00</td>
+                      <td class="total-value" style="color:var(--c-text-sub);font-weight:500" id="ftCostSub">¥561.00</td>
+                      <td class="total-value" id="ftTaxSub">¥95.24</td>
+                      <td colspan="4"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ======= SECTION: Quote Terms & Notes ======= -->
+          <div class="section animate-card">
+            <div class="section__head">
+              <div class="section__title">报价条款与备注</div>
+            </div>
+            <div class="section__body">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">
+                <div>
+                  <label style="display:block;font-size:12px;color:var(--c-text-sub);margin-bottom:6px">报价有效期（天）</label>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <input type="number" class="tinput num" style="width:80px;padding:7px 10px;border:1px solid var(--c-border);border-radius:var(--r-sm)" value="10" id="validDaysInput">
+                    <span style="font-size:12px;color:var(--c-text-muted)">天（至 <strong id="expiryDate" style="color:var(--c-accent)">2026-12-04</strong>）</span>
+                  </div>
+                </div>
+                <div>
+                  <label style="display:block;font-size:12px;color:var(--c-text-sub);margin-bottom:6px">整单优惠</label>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-size:13px;font-family:var(--f-num);color:var(--c-text-sub)">¥</span>
+                    <input type="number" class="tinput num" style="width:100px;padding:7px 10px;border:1px solid var(--c-border);border-radius:var(--r-sm)" value="50.00" id="discountInput">
+                    <button class="btn btn-sm btn-ghost" onclick="App.setDiscountQuick()">
+                      <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                      快捷优惠
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div style="margin-top:16px">
+                <label style="display:block;font-size:12px;color:var(--c-text-sub);margin-bottom:6px">报价备注（将附在报价话术末尾）</label>
+                <textarea id="quoteNote" rows="3" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--c-border);border-radius:var(--r-sm);font-size:12px;resize:vertical;font-family:var(--f-body)" placeholder="例如：配件价格随市场波动，最终以订货当日价格为准。"></textarea>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============== PREVIEW MODAL ============== -->
+  <div class="modal-overlay" id="previewModal">
+    <div class="modal" style="min-width:520px;max-width:620px">
+      <div class="modal__header">
+        <div class="modal__title" style="display:flex;align-items:center;gap:8px">
+          <svg class="i-16" viewBox="0 0 24 24" fill="none" stroke="var(--c-primary)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          报价话术预览
+        </div>
+        <button class="modal__close" onclick="App.closeModal('previewModal')">
+          <svg class="i-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <div id="previewContent" style="
+          background: linear-gradient(180deg, #07C160 0%, #06AD56 100%);
+          color: #fff; padding: 20px; border-radius: var(--r-md);
+          font-size: 13px; line-height: 1.8; white-space: pre-wrap;
+          box-shadow: 0 4px 16px rgba(7,193,96,0.3);
+          font-family: var(--f-body);
+        ">
+          （点击"预览话术"按钮生成）
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn-ghost" onclick="App.closeModal('previewModal')">取消</button>
+        <button class="btn" onclick="App.copyPreview()">
+          <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制话术
+        </button>
+        <button class="btn btn-primary" onclick="App.closeModal('previewModal');App.sendQuote(true)">
+          <svg class="i-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          确认发送
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== TOAST CONTAINER ============== -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
