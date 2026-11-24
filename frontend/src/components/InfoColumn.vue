@@ -88,7 +88,8 @@ onBeforeUnmount(() => {
     <div class="col-info-clip">
       <div ref="edgeEl" class="col-info-edge" aria-hidden="true"></div>
       <!-- 内容层：绝对定位右缘锚定，动画期间宽度冻结，零回流 -->
-      <div v-if="contentMounted" class="col-info-inner" :style="innerStyle">
+      <!-- v-show 而非 v-if：收起/展开只是 CSS 隐藏，InfoPanel 常驻内存，keep-alive 内的子组件缓存不丢 -->
+      <div v-show="contentMounted" class="col-info-inner" :style="innerStyle">
         <InfoPanel />
       </div>
     </div>

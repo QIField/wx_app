@@ -94,13 +94,14 @@ async function doQuery(text) {
       </div>
     </template>
 
-    <!-- 三子页用 keep-alive 常驻内存，切 tab 不销毁 -->
-    <keep-alive>
-      <component
-        v-else
-        :is="subTab === 'ai' ? ManualAiChat : subTab === 'third' ? ManualThirdParty : ManualHistory"
-      />
-    </keep-alive>
+    <!-- query 子页是内联内容，另外三子页用 keep-alive 常驻内存 -->
+    <template v-else>
+      <keep-alive>
+        <component
+          :is="subTab === 'ai' ? ManualAiChat : subTab === 'third' ? ManualThirdParty : ManualHistory"
+        />
+      </keep-alive>
+    </template>
   </div>
 </template>
 
