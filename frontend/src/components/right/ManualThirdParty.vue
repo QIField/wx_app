@@ -7,25 +7,24 @@
  * - 字段严格按 COLS 定义显示，不做动态追加
  *
  * 默认查询示例 OE（1665000075），输入后回车/点击查询。
+ * 首次进入不自动加载，等用户自己输入 OE。
  */
-import { onMounted, ref, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qqJqr, qqZpy } from '../../api'
-
-const SOURCE_DEFAULT = '1665000075'
 
 const source = ref('zpy') // zpy | jqr
 const loading = ref(false)
 
 // 每个 tab 独立缓存：各自记住上次查询的 OE、结果、是否查过、错误
 const zpyState = {
-  number: ref(SOURCE_DEFAULT),
+  number: ref(''),
   rows: ref([]),
   loaded: ref(false),
   error: ref(''),
 }
 const jqrState = {
-  number: ref(SOURCE_DEFAULT),
+  number: ref(''),
   jyRows: ref([]),
   xjRows: ref([]),
   loaded: ref(false),
@@ -156,8 +155,8 @@ function switchSource(key) {
   // （number 是 computed，getter 会自动从对应 state 取值）
 }
 
-// 挂载时只查当前 tab 一次；另一个 tab 等到用户点过去再查
-onMounted(load)
+// 首次激活不自动查询，等用户输入 OE 点查询；缓存命中时也不重查
+// （InfoColumn 已用 v-show 保住 InfoPanel，keep-alive 让 onMounted 只触发一次）
 </script>
 
 <template>
