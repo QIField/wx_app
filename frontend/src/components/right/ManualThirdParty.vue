@@ -135,18 +135,6 @@ async function load() {
   loading.value = false
 }
 
-// ---------- 兆配云最低价高亮 ----------
-const minPrice = () => {
-  const prices = zpyState.rows.value
-    .map((r) => parseFloat(String(r['含税售价'] ?? '').replace(/[^\d.]/g, '')))
-    .filter((n) => n > 0)
-  return prices.length ? Math.min(...prices) : NaN
-}
-const isMin = (row) => {
-  const p = parseFloat(String(row['含税售价'] ?? '').replace(/[^\d.]/g, ''))
-  return p > 0 && p === minPrice()
-}
-
 // ---------- 切换 tab：只切 source，不重查、不清空 ----------
 function switchSource(key) {
   if (key === source.value) return
@@ -182,10 +170,9 @@ function switchSource(key) {
             <tr><th v-for="c in zpyCols" :key="c.key">{{ c.label }}</th></tr>
           </thead>
           <tbody>
-            <tr v-for="(r, i) in curZpyRows" :key="i" :class="{ min: isMin(r) }">
+            <tr v-for="(r, i) in curZpyRows" :key="i">
               <td v-for="c in zpyCols" :key="c.key">
                 {{ cellValue(r[c.key]) }}
-                <span v-if="c.key === '含税售价' && isMin(r)" class="qq-badge b-green">最低</span>
               </td>
             </tr>
           </tbody>
@@ -234,11 +221,6 @@ function switchSource(key) {
   background: var(--c-panel); color: var(--c-primary); font-weight: 600;
   box-shadow: 0 1px 3px rgba(31, 45, 61, 0.12);
 }
-
-/* 兆配云最低价行：绿色语义高亮 */
-.qq-table tr.min td { background: var(--c-ok-soft); font-weight: 600; }
-/* 单元格内「最低」徽章：比公共款更紧凑、实底绿（表格高亮语义） */
-.qq-table .qq-badge.b-green { padding: 1px 7px; margin-left: 4px; background: var(--c-ok); color: #fff; }
 
 /* 全字段展示 → 表格变宽，需要横向滚动 */
 .qq-scroll {
