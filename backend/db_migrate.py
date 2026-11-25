@@ -60,6 +60,10 @@ def upgrade_existing_schema():
     _backfill_inquiry_message_id()
     # 2026-11-24 行内改价持久化：详情页表格改价 → 保存 override_pricing 覆盖
     _try_alter("ALTER TABLE quote_inquiry ADD COLUMN override_pricing JSON NULL")
+    # 2026-11-24 user_device.online 兜底：存量 MySQL 库该列 NOT NULL 但没 DEFAULT，
+    # 新代码构造 UserDevice 忘记填 online 时触发 IntegrityError (1048)。
+    # SQLite 不支持 MODIFY，_try_alter 会静默跳过；SQLite 新库由 ORM create_all 正确建。
+    _try_alter("ALTER TABLE user_device MODIFY COLUMN online SMALLINT NOT NULL DEFAULT -1")
 
 
 def _backfill_remark_config():
