@@ -1,7 +1,7 @@
 <script setup>
 /** 全屏报价详情页（新开标签页）
  *
- * 路由: /#/quote-detail/:id —— hash 路由，独立于工作台 main window
+ * 路由: /quote-detail/:id —— history 路由，独立于工作台 main window
  * 数据源: GET /api/quote/inquiries/:id
  * 布局: 深蓝汇总卡 + 车辆横幅 + 侧栏配件清单 + 主内容图片列表格 + 产品档案 + 报价话术 + 改价发送
  *

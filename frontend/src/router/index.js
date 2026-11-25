@@ -2,10 +2,10 @@
  *
  * 为什么不用 vue-router 全局接管？因为工作台有 login/workbench/admin 三态切换（非 SPA 路由），
  * 强行全路由化反而改面太大。这里只做"从拓展栏开新标签"这一件事：
- *   QuoteCard.onOpenDetail → window.open('/#/quote-detail/:id', '_blank')
- *   新开的标签加载同一个 index.html → App.vue 识别 hash → 渲染独立全屏 QuoteDetailPage
+ *   QuoteCard.onOpenDetail → window.open('/quote-detail/:id', '_blank')
+ *   新开的标签加载同一个 index.html → App.vue 识别 pathname → 渲染独立全屏 QuoteDetailPage
  */
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
@@ -18,17 +18,17 @@ const routes = [
 ]
 
 export const router = createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes,
 })
 
-/** 当前 hash 是否是详情页路由（App.vue 用来决定渲染哪个顶层） */
+/** 当前 path 是否是详情页路由（App.vue 用来决定渲染哪个顶层） */
 export function isDetailRoute() {
-  return location.hash.startsWith('#/quote-detail/')
+  return router.currentRoute.value.path.startsWith('/quote-detail/')
 }
 
-/** 从 hash 里提取询价 id（App.vue 在初始挂载时用） */
+/** 从路由里提取询价 id */
 export function getDetailInquiryId() {
-  const m = location.hash.match(/#\/quote-detail\/(\d+)/)
-  return m ? Number(m[1]) : 0
+  const id = Number(router.currentRoute.value.params.id)
+  return id || 0
 }

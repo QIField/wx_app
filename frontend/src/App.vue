@@ -1,6 +1,6 @@
 <script setup>
 /** 应用入口：恢复会话 → 按角色分流（developer/admin → 管理后台，agent → 工作台）。
- *  额外：hash 路由 /#/quote-detail/:id 新开详情页标签时，直接渲染 <router-view> 全屏详情页。 */
+ *  额外：history 路由 /quote-detail/:id 新开详情页标签时，直接渲染 <router-view> 全屏详情页。 */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { fetchMe, getToken, setToken } from './api'
 import LoginPage from './pages/LoginPage.vue'
