@@ -625,3 +625,163 @@ def test_sync_group_revoke_keeps_nickname(app, monkeypatch):
     conv = Conversation.query.one()
     assert conv.chat_type == Conversation.CHAT_GROUP
     assert conv.last_msg == '"佛山巴博瑞 啊圣" 撤回了一条消息'
+
+
+# ========== 多设备客服身份识别测试 ==========
+
+
+def test_cross_device_staff_message_direction_out(app, monkeypatch):
+    """同 org 下 A 发出的消息，对 B 设备来说方向正确识别为 OUT（自己人）。
+
+    根因：修复前，A_wxid ≠ B_wxid → is_self=False → direction=DIR_IN →
+    同事报价被当客户消息入库，自动报价再次提取配件→重复报价→左脚踩右脚。
+    修复后：get_org_staff_wxids 把 A_wxid 加进 B 的 staff_set → is_self=True → OUT。
+    """
+    from backend.extensions import db as _db
+    from backend.models.device import Device
+    from backend.models.org import Org
+    from backend.models.message import Message
+    from backend.sync import message_sync as ms
+    from backend.services.devices import _STAFF_WXIDS_CACHE  # 清缓存
+
+    with app.app_context():
+        # 造同 org 下两台设备
+        org = Org(name="佛山")
+        _db.session.add(org)
+        _db.session.flush()
+        dev_a = Device(openid="dev_A", wxid="wxid_staff_A", org_id=org.id)
+        dev_b = Device(openid="dev_B", wxid="wxid_staff_B", org_id=org.id)
+        _db.session.add_all([dev_a, dev_b])
+        _db.session.commit()
+
+        # 清进程内缓存（避免 get_org_staff_wxids 返回过期值）
+        _STAFF_WXIDS_CACHE.clear()
+        # 清设备 wxid 缓存
+        ms._SELF_WXID_CACHE.clear()
+
+        # 场景 1：B 拉到一条 A 发的群报价消息
+        item = make_item(
+            from_wxid="wxid_staff_A",     # A 的 wxid
+            to_wxid="group_xxx@chatroom",  # 群 wxid
+            content="wxid_staff_A:\n前减震 价格是 280 元，原厂配件",
+            msg_id="m_staff_quote",
+            new_msg_id="n_staff_quote",
+        )
+
+        peer, content, sender, direction = ms._direction_and_sender(
+            item, {}, openid="dev_B"
+        )
+
+        assert direction == Message.DIR_OUT, (
+            f"同 org 同事消息应识别为 OUT，实际 direction={direction} "
+            f"(is_self=False 说明 get_org_staff_wxids 没命中)"
+        )
+        assert peer == "group_xxx@chatroom"
+        assert sender == "wxid_staff_A"
+
+
+def test_cross_device_staff_message_direction_out_single_chat(app, monkeypatch):
+    """单聊场景同 org 跨设备消息方向也正确：A 发的单聊消息，B 看到是 OUT。"""
+    from backend.extensions import db as _db
+    from backend.models.device import Device
+    from backend.models.org import Org
+    from backend.models.message import Message
+    from backend.sync import message_sync as ms
+    from backend.services.devices import _STAFF_WXIDS_CACHE
+
+    with app.app_context():
+        org = Org(name="中山")
+        _db.session.add(org)
+        _db.session.flush()
+        dev_a = Device(openid="dev_A2", wxid="wxid_A2", org_id=org.id)
+        dev_b = Device(openid="dev_B2", wxid="wxid_B2", org_id=org.id)
+        _db.session.add_all([dev_a, dev_b])
+        _db.session.commit()
+
+        _STAFF_WXIDS_CACHE.clear()
+        ms._SELF_WXID_CACHE.clear()
+
+        item = make_item(
+            from_wxid="wxid_A2",
+            to_wxid="wxid_customer",
+            content="好的，VIN 发我一下",
+            msg_id="m_single",
+            new_msg_id="n_single",
+        )
+
+        peer, content, sender, direction = ms._direction_and_sender(
+            item, {}, openid="dev_B2"
+        )
+
+        assert direction == Message.DIR_OUT, (
+            f"同 org 同事单聊消息应识别为 OUT，实际 direction={direction}"
+        )
+
+
+def test_org_isolation_different_org_not_staff(app):
+    """不同 org 的设备 wxid 也视为自己人（全公司一体，不按 org 隔离）。"""
+    from backend.extensions import db as _db
+    from backend.models.device import Device
+    from backend.models.org import Org
+    from backend.models.message import Message
+    from backend.sync import message_sync as ms
+    from backend.services.devices import _STAFF_WXIDS_CACHE
+
+    with app.app_context():
+        org1 = Org(name="佛山")
+        org2 = Org(name="珠海")
+        _db.session.add_all([org1, org2])
+        _db.session.flush()
+        dev_a = Device(openid="dev_fs", wxid="wxid_A", org_id=org1.id)
+        dev_b = Device(openid="dev_zh", wxid="wxid_B", org_id=org2.id)
+        _db.session.add_all([dev_a, dev_b])
+        _db.session.commit()
+
+        _STAFF_WXIDS_CACHE.clear()
+        ms._SELF_WXID_CACHE.clear()
+
+        item = make_item(
+            from_wxid="wxid_A",  # 佛山设备发的
+            to_wxid="group_xxx@chatroom",
+            content="wxid_A:\n这是佛山同事发的报价",
+            msg_id="m_diff_org",
+            new_msg_id="n_diff_org",
+        )
+
+        # 珠海设备看到佛山设备发的消息 → 不同 org 也视为自己人
+        _, _, _, direction = ms._direction_and_sender(item, {}, openid="dev_zh")
+
+        # 不按 org 隔离：佛山/珠海都是自己人 → DIR_OUT
+        assert direction == Message.DIR_OUT, (
+            "不同 org 设备也应视为自己人，方向应为 OUT，"
+            f"实际 direction={direction}"
+        )
+
+
+def test_no_wxid_fallback_to_cache(app, monkeypatch):
+    """Device.wxid 为空但 _SELF_WXID_CACHE 有值时，自己的 wxid 仍能正确识别。"""
+    from backend.extensions import db as _db
+    from backend.models.device import Device
+    from backend.sync import message_sync as ms
+
+    with app.app_context():
+        # device 字典里 wxid 为空（新设备，还没学到）
+        dev = Device(openid="dev_new", wxid=None)  # org_id=None
+        _db.session.add(dev)
+        _db.session.commit()
+
+        # 手动往进程内缓存塞一个 wxid（模拟刚学出来的场景）
+        ms._SELF_WXID_CACHE["dev_new"] = "wxid_myself"
+
+        item = make_item(
+            from_wxid="wxid_myself",
+            to_wxid="group_xxx@chatroom",
+            content="wxid_myself:\n我自己发的报价",
+            msg_id="m_self",
+            new_msg_id="n_self",
+        )
+
+        _, _, _, direction = ms._direction_and_sender(item, {}, openid="dev_new")
+
+        # 自己发的 → DIR_OUT 基础判断仍然生效（不依赖同 org 扩展）
+        assert direction == Message.DIR_OUT

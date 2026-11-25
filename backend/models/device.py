@@ -20,6 +20,9 @@ class Device(db.Model, SoftDeleteMixin):
     id = db.Column(BigIntPK, primary_key=True, autoincrement=True)
     openid = db.Column(db.String(64), nullable=False, unique=True,
                        comment="中间方设备标识，全局唯一，录入后不可改")
+    wxid = db.Column(db.String(64), index=True,
+                     comment="该设备自己的微信wxid（从历史接收消息的to_wxid学习后回写；"
+                             "用于识别多设备自己人消息，方向判定正确化）")
     name = db.Column(db.String(64),
                      comment="设备名称（后台维护；存量迁移未命名的为空，待补选）")
     org_id = db.Column(BigIntPK, comment="所属组织 id（迁移遗留可空，后台创建时必填）")

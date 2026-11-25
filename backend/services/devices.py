@@ -132,3 +132,65 @@ def refresh_all_device_online(app):
         except Exception:  # noqa: BLE001 状态轮询失败不影响主业务
             db.session.rollback()
             app.logger.warning("设备在线状态轮询失败", exc_info=True)
+
+
+# ---------- 多设备客服身份识别 ----------
+# 所有已绑定设备的 wxid 互相视为"自己人"（不按 org 隔离，全公司一体），
+# 用于消息方向正确化（同事发的消息不再被当成客户 IN 方向入库）。
+
+import threading as _threading  # noqa: E402
+
+
+# {openid: {"wxids": set[str], "ts": float}} —— 进程内缓存，按 openid 粒度
+_STAFF_WXIDS_CACHE: dict[str, dict] = {}
+_STAFF_WXIDS_LOCK = _threading.Lock()
+_STAFF_WXIDS_TTL_SEC = 60  # 缓存 60 秒，设备 wxid 不会频繁变化
+
+
+def get_org_staff_wxids(openid: str) -> set[str]:
+    """系统内所有设备的微信 wxid 集合（含自己）。
+
+    用于跨设备消息方向正确化：同事发的消息对当前设备来说方向应该是 OUT
+    （自己人发的），而不是 IN（客户发的）。
+
+    不按 org 隔离——佛山/珠海/中山等所有地区设备都是自己人。
+    缓存 60 秒，设备配置变更后最多延迟 60 秒生效。
+    """
+    import time as _time
+
+    if not openid:
+        return set()
+
+    now = _time.time()
+    with _STAFF_WXIDS_LOCK:
+        cached = _STAFF_WXIDS_CACHE.get(openid)
+        if cached and (now - cached["ts"]) < _STAFF_WXIDS_TTL_SEC:
+            return cached["wxids"].copy()
+
+    # 查 DB：全表所有已绑定且 wxid 非空的设备（不按 org 过滤）
+    staff_wxids: set[str] = set()
+    try:
+        from backend.models.device import Device
+
+        # 所有软未删设备的 wxid（含 org_id=NULL 的新设备）
+        for dev in Device.query.filter(
+            Device.deleted_at.is_(None),
+            Device.wxid.isnot(None),
+            Device.wxid != "",
+        ).all():
+            staff_wxids.add(dev.wxid)
+
+        # 如果 DB 里一个都没（极早期），退化：用进程内缓存里自己的 wxid
+        if not staff_wxids:
+            from backend.sync.message_sync import _SELF_WXID_CACHE
+
+            wxid = _SELF_WXID_CACHE.get(openid, "")
+            if wxid:
+                staff_wxids.add(wxid)
+    except Exception:  # noqa: BLE001 任何异常 → 返回空集（保守：不影响方向判断）
+        return set()
+
+    with _STAFF_WXIDS_LOCK:
+        _STAFF_WXIDS_CACHE[openid] = {"wxids": staff_wxids, "ts": now}
+
+    return staff_wxids

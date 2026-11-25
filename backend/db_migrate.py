@@ -71,6 +71,11 @@ def upgrade_existing_schema():
     _try_alter("ALTER TABLE quote_config ADD INDEX idx_quote_config_openid (openid)")
     _rebuild_remark_unique_for_device()  # UniqueConstraint 改了，SQLite 必须重建表
     _try_alter("ALTER TABLE quote_config ADD INDEX idx_quote_config_user (user_id)")
+    # 2026-11-25 多设备客服身份识别：Device 表持久化每个设备自己的微信 wxid，
+    # 用于跨设备消息方向正确化（全公司设备都是自己人，不再按 IN 方向入库）
+    _try_alter("ALTER TABLE device ADD COLUMN wxid VARCHAR(64) NULL")
+    _try_alter("ALTER TABLE device ADD INDEX idx_device_wxid (wxid)")
+    _backfill_device_wxids()
 
 
 def _backfill_remark_config():
@@ -375,3 +380,62 @@ def _rebuild_remark_unique_for_device():
             db.session.commit()
         except Exception:  # noqa: BLE001
             db.session.rollback()
+
+
+def _backfill_device_wxids():
+    """存量 device 行 wxid 回填：从每个 openid 最近 200 条 DIR_IN 消息的 payload.to_wxid
+    里取出现次数最多的 wxid（跟 sync/message_sync._device_wxid 逻辑一致）。
+
+    幂等：wxid 已有值的 device 行跳过。
+    """
+    from collections import Counter
+    from sqlalchemy import inspect, text
+
+    insp = inspect(db.engine)
+    if "device" not in [t for t in insp.get_table_names()]:
+        return
+    if "wxid" not in [c["name"] for c in insp.get_columns("device")]:
+        return
+
+    from backend.models.conversation import Conversation
+    from backend.models.device import Device
+    from backend.models.message import Message
+
+    # 找出所有 wxid 为空的 device
+    devices = Device.query.filter(
+        Device.deleted_at.is_(None), Device.wxid.is_(None),
+    ).all()
+    if not devices:
+        return
+
+    filled = 0
+    for dev in devices:
+        try:
+            rows = (
+                db.session.query(Message.payload)
+                .join(Conversation, Conversation.id == Message.conversation_id)
+                .filter(
+                    Conversation.openid == dev.openid,
+                    Message.direction == Message.DIR_IN,
+                    Message.deleted_at.is_(None),
+                )
+                .order_by(Message.id.desc())
+                .limit(200)
+                .all()
+            )
+            counts = Counter(
+                p.get("to_wxid")
+                for (p,) in rows
+                if isinstance(p, dict) and (p.get("to_wxid") or "").startswith("wxid_")
+            )
+            if counts:
+                wxid = counts.most_common(1)[0][0]
+                dev.wxid = wxid
+                filled += 1
+                db.session.commit()
+        except Exception as e:  # noqa: BLE001
+            db.session.rollback()
+            log.warning("backfill_device_wxids openid=%s 失败: %s", dev.openid, e)
+
+    if filled:
+        log.info("backfill_device_wxids: filled %d devices", filled)

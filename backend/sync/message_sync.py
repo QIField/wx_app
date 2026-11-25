@@ -426,6 +426,18 @@ def _direction_and_sender(item, raw, openid=""):
         or (bool(self_wxid) and from_wxid == self_wxid)
         or from_wxid == to_wxid
     )
+
+    # 扩展：同 org 下同事发的也视为"自己人"（OUT 方向），避免被当客户消息
+    if not is_self and openid and from_wxid:
+        try:
+            from backend.services.devices import get_org_staff_wxids
+
+            staff_set = get_org_staff_wxids(openid)
+            if from_wxid in staff_set:
+                is_self = True
+        except Exception:
+            pass  # 异常兜底：宁可方向误判（入口有互斥协议再拦）
+
     peer_wxid = to_wxid if is_self else from_wxid
     sender_wxid = from_wxid
     if not is_self and "@chatroom" in peer_wxid and ":\n" in content:
@@ -452,12 +464,29 @@ def _device_wxid(openid):
     """学习设备自己的 wxid：收到的消息 to_wxid 恒为自己，取最近 200 条出现最多的。
 
     没有这个值就分不清「业务端/手机自己发的」和「客户发来的」：手机发的消息会被
-    当成客户消息显示在左侧。进程内缓存，设备 wxid 不会变。
+    当成客户消息显示在左侧。进程内缓存 + Device.wxid 持久化双保险。
+
+    读取优先级：Device.wxid 持久化列 → 进程内缓存 → 历史消息学习（学习后回写）。
     """
     if not openid:
         return ""
+
+    # 快速路径：Device.wxid 持久化列已有值 → 直接用
+    try:
+        from backend.models.device import Device
+
+        dev = Device.query.filter(Device.openid == openid, Device.deleted_at.is_(None)).first()
+        if dev is not None and dev.wxid:
+            _SELF_WXID_CACHE[openid] = dev.wxid  # 顺便回填进程内缓存
+            return dev.wxid
+    except Exception:  # noqa: BLE001 Device 表还没 wxid 列（新部署）或其他异常
+        pass
+
+    # 进程内缓存
     if openid in _SELF_WXID_CACHE:
         return _SELF_WXID_CACHE[openid]
+
+    # 从历史消息学习
     self_wxid = ""
     try:
         from collections import Counter
@@ -483,7 +512,20 @@ def _device_wxid(openid):
             self_wxid = counts.most_common(1)[0][0]
     except Exception:
         self_wxid = ""
-    _SELF_WXID_CACHE[openid] = self_wxid
+
+    # 学到后回写 Device.wxid（持久化，下次进程重启也能直接读）
+    if self_wxid:
+        _SELF_WXID_CACHE[openid] = self_wxid
+        try:
+            from backend.models.device import Device
+
+            dev = Device.query.filter(Device.openid == openid, Device.deleted_at.is_(None)).first()
+            if dev is not None and not dev.wxid:
+                dev.wxid = self_wxid
+                db.session.commit()
+        except Exception:  # noqa: BLE001 回写失败不影响主流程
+            db.session.rollback()
+
     return self_wxid
 
 
