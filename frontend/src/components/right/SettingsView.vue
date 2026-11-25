@@ -5,11 +5,13 @@
  * 客服保存 403 → toast 后端文案）。黑名单标签可移除、可新增（前端同款预校验）。
  * 话术模板 / 通知配置为原型预留板块：渲染但置灰，标注「待后端支持」。
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { saveQuoteConfig } from '../../api'
 import { useQuoteConfig } from '../../composables/useQuoteConfig'
+import { useChatStore } from '../../stores/chat'
 
+const chat = useChatStore()
 const MAX_BLACKLIST = 20
 const MAX_PART_LEN = 20
 
@@ -48,7 +50,26 @@ onMounted(async () => {
         normal: cfg.price_map?.normal ?? '0.90',
       }
       parts.value = (cfg.parts_blacklist || []).map((t) => String(t))
-    })
+    }, chat.activeOpenid)
+  } catch (e) {
+    ElMessage.error(e.message || '配置加载失败')
+  } finally {
+    loading.value = false
+  }
+})
+
+/* ---------- 设备切换联动：重新拉配置（ai_enabled / quote_mode 是设备级） ---------- */
+watch(() => chat.activeOpenid, async () => {
+  loading.value = true
+  try {
+    await loadConfigFields((cfg) => {
+      rates.value = {
+        vip_a: cfg.price_map?.vip_a ?? '0.75',
+        vip_b: cfg.price_map?.vip_b ?? '0.82',
+        normal: cfg.price_map?.normal ?? '0.90',
+      }
+      parts.value = (cfg.parts_blacklist || []).map((t) => String(t))
+    }, chat.activeOpenid)
   } catch (e) {
     ElMessage.error(e.message || '配置加载失败')
   } finally {
@@ -98,7 +119,7 @@ async function onSave() {
         normal: Number(rates.value.normal).toFixed(2),
       },
       parts_blacklist: parts.value,
-    })
+    }, chat.activeOpenid)
     ElMessage.success('报价配置已保存')
   } catch (e) {
     ElMessage.error(e.message || '保存失败')

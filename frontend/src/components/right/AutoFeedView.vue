@@ -5,15 +5,17 @@
  * 列表：纯分隔线列表，QuoteCard 单卡承载 VIN/OE 双行收起 + 3 种展开模板。
  * 数据：GET /quote/inquiries + 15s 轮询 + WS quote_inquiry_changed 静默刷新。
  */
-import { computed, onActivated, onDeactivated, onBeforeUnmount, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { connectWs, fetchQuoteInquiries, saveQuoteConfig } from '../../api'
 import { useQuoteConfig } from '../../composables/useQuoteConfig'
+import { useChatStore } from '../../stores/chat'
 import QuoteCard from '../QuoteCard.vue'
 
 const POLL_MS = 15000
 const FETCH_LIMIT = 200
 
+const chat = useChatStore()
 const { aiOn, mode, load: loadConfigFields } = useQuoteConfig()
 const saved = ref({ aiOn: true, mode: 'preview' })
 
@@ -57,13 +59,13 @@ const filteredRows = computed(() => {
 /* ---------- 配置读写（保留原有逻辑） ---------- */
 async function loadConfig() {
   try {
-    await loadConfigFields()
+    await loadConfigFields(null, chat.activeOpenid)
     saved.value = { aiOn: aiOn.value, mode: mode.value }
   } catch { /* 不打断 */ }
 }
 async function saveConfig(payload) {
   try {
-    await saveQuoteConfig(payload)
+    await saveQuoteConfig(payload, chat.activeOpenid)
     saved.value = { aiOn: aiOn.value, mode: mode.value }
     ElMessage.success('报价配置已保存')
   } catch (e) {
@@ -77,13 +79,16 @@ async function saveConfig(payload) {
 async function fetchRows(silent = false) {
   if (!silent) loading.value = true
   try {
-    const res = await fetchQuoteInquiries({ limit: FETCH_LIMIT })
+    const res = await fetchQuoteInquiries({ limit: FETCH_LIMIT, openid: chat.activeOpenid })
     rows.value = res?.list || []
     loaded.value = true
   } catch { /* 不打断 */ }
   finally { loading.value = false }
 }
 function refresh() { fetchRows(true) }
+function onOpenDetail(id) {
+  window.open(`/quote-detail/${id}`, '_blank')
+}
 function onWsEvent(event) {
   if (event === 'quote_inquiry_changed') refresh()
 }
@@ -102,6 +107,14 @@ onActivated(() => {
 })
 onDeactivated(stopPolling)
 onBeforeUnmount(stopPolling)
+
+/* ---------- 设备切换联动：activeOpenid 变了 → 清缓存、重拉询价列表 + 配置 ---------- */
+watch(() => chat.activeOpenid, () => {
+  rows.value = []       // 清空旧设备缓存，避免串数据
+  loaded.value = false  // 重置首次加载标记（让 onActivated 也能走 fetch）
+  fetchRows()
+  loadConfig()
+})
 </script>
 
 <template>
@@ -141,6 +154,7 @@ onBeforeUnmount(stopPolling)
         v-for="q in filteredRows" :key="q.id"
         :inquiry="q"
         @refresh="refresh"
+        @open-detail="onOpenDetail"
       />
       <li v-if="loaded && !filteredRows.length" class="empty">
         {{ rows.length ? '当前筛选下暂无询价' : '暂无询价' }}

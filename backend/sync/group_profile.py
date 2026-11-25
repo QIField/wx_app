@@ -293,7 +293,7 @@ def apply_group_info(conv_id, wxid, info):
     if info.get("members") and group_member.save_members(conv.openid, wxid, info["members"]):
         changed = True
     # 中间方群备注 → ContactRemarkConfig (scope=group)
-    if upsert_group_remark(wxid, info.get("remark")):
+    if upsert_group_remark(wxid, info.get("remark"), conv.openid):
         changed = True
     if changed:
         db.session.commit()

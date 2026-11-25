@@ -238,11 +238,12 @@ export const sendQuoteInquiry = (id, price) =>
 /** 人工忽略询价：置 ignored；已报价 409。 */
 export const ignoreQuoteInquiry = (id) => http.post(`/quote/inquiries/${id}/ignore`)
 
-/** 快捷报价配置（global 行）：配件黑名单/价格系数/AI 开关/报价模式。 */
-export const fetchQuoteConfig = () => http.get('/quote/config')
+/** 快捷报价配置：GET 合并视图（global + device scope）。openid 指定当前查看的设备。 */
+export const fetchQuoteConfig = (openid) => http.get('/quote/config', { params: openid ? { openid } : undefined })
 
-/** 保存报价配置：body 任意子集，仅 admin/developer 可写（客服 403，前端 toast）。 */
-export const saveQuoteConfig = (payload) => http.put('/quote/config', payload)
+/** 保存报价配置：PUT body 可带任意子集；openid 指定写入哪个设备的 device scope。 */
+export const saveQuoteConfig = (payload, openid) =>
+  http.put('/quote/config', payload, { params: openid ? { openid } : undefined })
 
 /* ===== 快捷报价查询/统计（拓展栏重做 · 手动报价与报价分析数据源） ===== */
 

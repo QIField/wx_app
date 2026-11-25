@@ -1,7 +1,7 @@
 """自动报价触发器（阶段 2 核心，docs/auto-quote-plan.md 定案版流程）。
 
   收到新消息 → 资格判定（契约 C：通讯录开关（群看群/单聊看用户）
-              AND 全局 AI 执行开关 quote_config.ai_enabled）
+              AND 设备级 AI 执行开关 quote_config.device.ai_enabled）
   → 每会话 3s 去抖（新消息重置计时，等客户连发收齐）
   → 拉最近 10 条组装 chat_content → extract_parts_demand
   → 契约 B 状态机落表（quote_dispatch）。
@@ -48,15 +48,19 @@ def init_app(app):
 # ---------- 资格判定（契约 C） ----------
 
 
-def _remark_enabled(scope_type, wxid):
-    row = ContactRemarkConfig.query.filter_by(
+def _remark_enabled(scope_type, wxid, openid):
+    """设备维度的联系人级自动报价开关（设备独立，同一联系人在不同设备可单独开关）。"""
+    q = ContactRemarkConfig.query.filter_by(
         scope_type=scope_type, target_wxid=wxid, deleted_at=None,
-    ).first()
+    )
+    row = q.filter(ContactRemarkConfig.openid == openid).first() if openid else None
+    if row is None:
+        row = q.filter(ContactRemarkConfig.openid.is_(None)).first()  # 兼容迁移过渡
     return bool(row.auto_quote_enabled) if row else False
 
 
 def is_eligible(conversation_id, message_time=None):
-    """群会话只看群开关、单聊只看用户开关（群>用户），再 AND 全局执行开关。
+    """群会话只看群开关、单聊只看用户开关（群>用户），再 AND 全局+设备执行开关。
 
     message_time（datetime，可选）：若有值且 ai_enabled_at 闸门已生效
     （AI 最近从关→开），则 message_time < ai_enabled_at 的历史消息直接跳过。
@@ -66,9 +70,9 @@ def is_eligible(conversation_id, message_time=None):
     if conv is None:
         return False
     scope = "group" if conv.chat_type == Conversation.CHAT_GROUP else "user"
-    if not _remark_enabled(scope, conv.wxid):
+    if not _remark_enabled(scope, conv.wxid, conv.openid):
         return False
-    cfg = merged_config(0)
+    cfg = merged_config(conv.openid)
     if not cfg["ai_enabled"]:
         return False
     # 时间闸门：AI 关→开后产生的 ai_enabled_at
@@ -262,10 +266,10 @@ def analyze_conversation(conversation_id):
     - AI 的 chat_content 加【历史】【新询价】标签 + 系统提示
     - 分析完成 → 进度条更新到 new_msgs 里最大的 id
     """
-    cfg = merged_config(0)
     conv = Conversation.query.filter_by(id=conversation_id, deleted_at=None).first()
     if conv is None:
         return
+    cfg = merged_config(conv.openid)
 
     # 时间闸门：只拉 AI 开启时间之后的消息（闸门之前的历史消息不再参与分析）
     gate_dt = cfg.get("ai_enabled_at_dt")

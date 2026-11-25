@@ -20,7 +20,7 @@ from backend.services import anonymize, quote_sender
 from backend.services.auth import require_role
 from backend.services.devices import user_openids
 from backend.services.quote_dispatch import notify_inquiry
-from backend.services.quote_pricing import rebuild_quote_text
+from backend.services.quote_pricing import rebuild_quote_text, rebuild_quote_text_with_override
 
 bp = Blueprint("quote_inquiry", __name__)
 
@@ -31,10 +31,21 @@ MAX_LIMIT = 200
 @bp.get("/api/quote/inquiries")
 @require_role()
 def list_inquiries():
-    """询价列表：?status=0-4 过滤状态，?conversation_id= 定位会话，id 倒序分页。"""
-    openids = user_openids(g.current_user.id)
-    if not openids:
+    """询价列表：?status=0-4 过滤状态，?conversation_id= 定位会话，
+    ?openid= 精确限定设备（多设备场景下前端传 chat.activeOpenid），id 倒序分页。
+    openid 未传时 fallback 账号绑定的所有设备（向后兼容）。"""
+    all_openids = user_openids(g.current_user.id)
+    if not all_openids:
         return jsonify(code=0, msg="success", data={"total": 0, "page": 1, "limit": 0, "list": []})
+
+    # 精确 openid（指定了就只查这台设备，没传就查账号绑定的全部）
+    exact_openid = (request.args.get("openid") or "").strip()
+    if exact_openid:
+        if exact_openid not in all_openids:
+            return jsonify(code=403, msg="无权访问该设备的询价"), 403
+        openids = [exact_openid]
+    else:
+        openids = all_openids
 
     query = (
         db.session.query(QuoteInquiry, Conversation)

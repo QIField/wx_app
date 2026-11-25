@@ -1,13 +1,14 @@
-"""统一备注配置 API（contact_remark_config：用户级全局生效 / 群级）。
+"""统一备注配置 API（contact_remark_config：设备维度）。
+
+设备维度（2026-11-25）：scope_type + target_wxid + openid 唯一。
+同一联系人在不同设备上各有独立行，互不影响；同一设备被多账号关联时共享配置。
 
 - GET/PUT /api/contacts/{contact_id}/remark-config：好友→用户级，群→群级（自动判定）。
 - GET/PUT /api/groups/{contact_id}/members/{member_alias}/remark-config：
-  群成员入口 → 写用户级行（私聊/其他群同源，全局生效）。
-- POST /api/remark/sync：触发中间方修改微信备注（仅好友 scope=user 生效），
-  同步成功后写 ContactRemarkConfig；scope=group 中间方暂不支持，只写本地。
+  群成员入口 → 写用户级行。openid 从群会话解析（群成员备注是设备内视角）。
+- POST /api/remark/sync：触发中间方修改微信备注（仅好友 scope=user 生效）。
 - contact_id 允许负数（补集会话条目，出参约定 -conv.id），复用通讯录解析规则。
 - 脱敏契约：入参只收条目 id 与 alias 短码；alias 不可逆，按群名册重算匹配。
-- 存量 contact_profile 数据已由 db_migrate 一次性搬入新表，新表是唯一事实源。
 """
 from flask import Blueprint, g, jsonify, request
 import logging
@@ -20,7 +21,7 @@ from backend.models.group_member import GroupMember
 from backend.services import anonymize
 from backend.services.audit import AuditModule, log_action
 from backend.services.auth import require_role
-from backend.services.devices import user_openids
+from backend.services.devices import active_openid_for, user_openids
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("remark_config", __name__)
@@ -30,21 +31,35 @@ bp = Blueprint("remark_config", __name__)
 
 
 def _parse_target(resolver, contact_id):
-    """条目 id 解析公共样板：id 转换失败或解析不到 → None（端点统一回 404）。"""
+    """条目 id 解析公共样板：id 转换失败或解析不到 → None。"""
     try:
         return resolver(int(contact_id))
     except ValueError:
         return None
 
 
+def _resolve_active_openid():
+    """当前登录人选定的设备 openid（active_openid_for：请求指定优先，否则第一个绑定）。"""
+    openid, err = active_openid_for(g.current_user)
+    if err:
+        return None
+    return openid
+
+
 def _config_target(contact_id):
-    """条目 id → (wxid, scope_type)。群条目 → group 级，其余 → user 级。
+    """条目 id → (wxid, scope_type, openid)。群条目 → group 级，其余 → user 级。
 
     正数 = contact 行；负数 = 补集会话行（-conv.id），两套 id 不混查。
+    缺设备上下文时返回 None（active_openid_for 取不到就拒绝）。
     """
     openids = user_openids(g.current_user.id)
     if not openids:
         return None
+    # 选当前活跃设备（active_openid_for 已做了：请求指定优先，否则第一个绑定）
+    openid = _resolve_active_openid()
+    if not openid:
+        return None
+
     conv_filter = (
         Conversation.openid.in_(openids),
         Conversation.deleted_at.is_(None),
@@ -54,7 +69,7 @@ def _config_target(contact_id):
         if not conv:
             return None
         scope = SCOPE_GROUP if conv.chat_type == Conversation.CHAT_GROUP else SCOPE_USER
-        return conv.wxid, scope
+        return conv.wxid, scope, openid
     c = Contact.query.filter(
         Contact.id == contact_id,
         Contact.openid.in_(openids),
@@ -62,18 +77,21 @@ def _config_target(contact_id):
     ).first()
     if c:
         scope = SCOPE_GROUP if c.type == Contact.TYPE_GROUP else SCOPE_USER
-        return c.wxid, scope
+        return c.wxid, scope, openid
     conv = Conversation.query.filter(Conversation.id == contact_id, *conv_filter).first()
     if not conv:
         return None
     scope = SCOPE_GROUP if conv.chat_type == Conversation.CHAT_GROUP else SCOPE_USER
-    return conv.wxid, scope
+    return conv.wxid, scope, openid
 
 
 def _group_target(contact_id):
     """群条目 id → (openid, 群wxid)（仅群聊条目，供成员名册定位）。"""
     openids = user_openids(g.current_user.id)
     if not openids:
+        return None
+    openid = _resolve_active_openid()
+    if not openid:
         return None
     if contact_id < 0:
         conv = Conversation.query.filter(
@@ -115,11 +133,18 @@ def _member_wxid(contact_id, member_alias):
 # ---------- 读取 / 保存 ----------
 
 
-def _config_data(scope, wxid):
+def _config_data(scope, wxid, openid):
     """读取配置；无记录返回空默认值。"""
-    cfg = ContactRemarkConfig.query.filter_by(
+    q = ContactRemarkConfig.query.filter_by(
         scope_type=scope, target_wxid=wxid, deleted_at=None,
-    ).first()
+    )
+    # 有 openid 就精确命中该设备行；没 openid 时（旧接口残留）回退按 wxid+scope 查
+    if openid:
+        cfg = q.filter(ContactRemarkConfig.openid == openid).first()
+        if cfg is None:
+            cfg = q.filter(ContactRemarkConfig.openid.is_(None)).first()
+    else:
+        cfg = q.first()
     if cfg:
         return cfg.to_json()
     return {
@@ -130,11 +155,7 @@ def _config_data(scope, wxid):
 
 
 def _validated_payload(body):
-    """校验并归一请求体 → (payload, None) 或 (None, 错误消息)。remark 兼容旧字段名。
-
-    所有字段 None 时不覆盖原值（增量语义）。
-    level / auto_quote_enabled / tags 传 None 保持原值；传具体值才覆盖。
-    """
+    """校验并归一请求体 → (payload, None) 或 (None, 错误消息)。"""
     raw = body.get("remark_name")
     if raw is None:
         raw = body.get("remark")
@@ -189,23 +210,32 @@ def _compute_display_name(scope, wxid, remark_name):
     return anonymize.resolved_name(None, wxid)
 
 
-def _save_config(scope, wxid, body, sync_wechat=True):
-    """upsert 配置（含已删除行复活，唯一键不冲突）；写审计，返回 (响应, 状态码)。
+def _save_config(scope, wxid, openid, body, sync_wechat=True):
+    """upsert 配置（按 scope + wxid + openid 唯一键定位）。
 
     payload 四字段均支持 None（增量）：None 表示请求方没带该字段，保持原值；
     带具体值才覆盖。remark 允许空串（显式清除备注）。
 
-    sync_wechat=True 且 remark 有变更时，先调中间方 contacts_api.setFriendRemark
-    ——失败则整体回滚（本地也不写），返回 500 给前端，前端不触发 patch。
-    成功才 commit + 审计。只改 tags/level/auto_quote 不调中间方，直接 commit。
+    空 openid 兜底：如果调用方没传 openid，尝试解析（从 token 活跃设备取）；
+    仍取不到时按 (scope, wxid) 定位旧行（兼容迁移过渡）。
     """
     payload, err = _validated_payload(body)
     if err:
         return jsonify(code=400, msg=err), 400
     remark, auto_quote, tags, level, oe_detail = payload
 
-    # 先读当前行、算 diff（用于中间方失败时回滚）
-    cfg = ContactRemarkConfig.query.filter_by(scope_type=scope, target_wxid=wxid).first()
+    # 空 openid 兜底：尝试解析
+    if not openid:
+        openid = _resolve_active_openid()
+
+    # 先读当前行（按 openid 优先，openid 为空兼容旧行）、算 diff
+    # 注意：查旧行时不过滤 deleted_at——要能找到软删行来复活
+    q = ContactRemarkConfig.query.filter_by(
+        scope_type=scope, target_wxid=wxid,
+    )
+    cfg = q.filter(ContactRemarkConfig.openid == openid).first() if openid else None
+    if cfg is None:
+        cfg = q.filter(ContactRemarkConfig.openid.is_(None)).first()
     cfg_existed = cfg is not None
     old_remark = (cfg.remark_name if cfg else None) or ""
 
@@ -217,17 +247,22 @@ def _save_config(scope, wxid, body, sync_wechat=True):
 
     # 先调中间方：remark 有变更且 sync_wechat=True → 成功才往下走
     if sync_wechat and remark_changed and remark is not None:
-        ok, middle_error = _sync_to_wechat(wxid, remark)
+        ok, middle_error = _sync_to_wechat(wxid, remark, openid)
         if not ok:
             db.session.rollback()
             return jsonify(code=500, msg=f"微信侧备注修改失败：{middle_error}"), 500
 
-    # 中间方成功（或无需同步）后，才 upsert + commit
+    # upsert：找不到就新建（带 openid），找到就恢复软删行
     if cfg is None:
-        cfg = ContactRemarkConfig(scope_type=scope, target_wxid=wxid)
+        cfg = ContactRemarkConfig(
+            scope_type=scope, target_wxid=wxid, openid=openid,
+        )
         db.session.add(cfg)
     else:
         cfg.restore()
+        # 存量行 openid 可能为 NULL，当前端设备有值时补上
+        if openid and not cfg.openid:
+            cfg.openid = openid
 
     if remark is not None:
         cfg.remark_name = remark
@@ -247,7 +282,7 @@ def _save_config(scope, wxid, body, sync_wechat=True):
         cfg.oe_detail_enabled = oe_detail
     db.session.commit()
 
-    # 客户等级变更 → 自动重算该用户/群相关的 pending/review 询价
+    # 客户等级变更 → 自动重算所有 pending/review 询价
     if any("等级" in d for d in diff):
         from backend.services.quote_pricing import recompute_pending
         recompute_pending()
@@ -269,12 +304,12 @@ def _save_config(scope, wxid, body, sync_wechat=True):
 @bp.get("/api/contacts/<contact_id>/remark-config")
 @require_role()
 def get_remark_config(contact_id):
-    """统一备注配置；前端只传条目 id（不传 wxid——脱敏契约）。"""
+    """统一备注配置；前端只传条目 id（不传 wxid/openid——脱敏契约）。"""
     target = _parse_target(_config_target, contact_id)
     if not target:
-        return jsonify(code=404, msg="联系人不存在"), 404
-    wxid, scope = target
-    return jsonify(code=0, msg="success", data=_config_data(scope, wxid))
+        return jsonify(code=404, msg="联系人不存在或无设备权限"), 404
+    wxid, scope, openid = target
+    return jsonify(code=0, msg="success", data=_config_data(scope, wxid, openid))
 
 
 @bp.put("/api/contacts/<contact_id>/remark-config")
@@ -283,33 +318,37 @@ def put_remark_config(contact_id):
     """保存统一备注配置（备注名称 / 自动报价 / 标签）。"""
     target = _parse_target(_config_target, contact_id)
     if not target:
-        return jsonify(code=404, msg="联系人不存在"), 404
-    wxid, scope = target
-    resp, status = _save_config(scope, wxid, request.get_json(silent=True) or {})
+        return jsonify(code=404, msg="联系人不存在或无设备权限"), 404
+    wxid, scope, openid = target
+    resp, status = _save_config(scope, wxid, openid, request.get_json(silent=True) or {})
     return resp, status
 
 
-# ---------- 群成员入口（写用户级行，全局生效） ----------
+# ---------- 群成员入口 ----------
 
 
 @bp.get("/api/groups/<contact_id>/members/<member_alias>/remark-config")
 @require_role()
 def get_member_remark_config(contact_id, member_alias):
-    """群成员备注设置：定位用户级配置（与私聊/其他群同源）。"""
+    """群成员备注设置：定位用户级配置（设备维度：群内视角 → 设备 openid 取群条目）。"""
     wxid = _member_wxid(contact_id, member_alias)
-    if not wxid:
+    target = _parse_target(_group_target, contact_id)
+    if not (wxid and target):
         return jsonify(code=404, msg="群成员不存在"), 404
-    return jsonify(code=0, msg="success", data=_config_data(SCOPE_USER, wxid))
+    openid, _ = target
+    return jsonify(code=0, msg="success", data=_config_data(SCOPE_USER, wxid, openid))
 
 
 @bp.put("/api/groups/<contact_id>/members/<member_alias>/remark-config")
 @require_role()
 def put_member_remark_config(contact_id, member_alias):
-    """保存群成员备注设置：写入该成员的用户级行，私聊与所有群聊同步生效。"""
+    """保存群成员备注设置：写入该成员的用户级行（设备维度 openid 取群条目）。"""
     wxid = _member_wxid(contact_id, member_alias)
-    if not wxid:
+    target = _parse_target(_group_target, contact_id)
+    if not (wxid and target):
         return jsonify(code=404, msg="群成员不存在"), 404
-    resp, status = _save_config(SCOPE_USER, wxid, request.get_json(silent=True) or {})
+    openid, _ = target
+    resp, status = _save_config(SCOPE_USER, wxid, openid, request.get_json(silent=True) or {})
     return resp, status
 
 
@@ -321,7 +360,7 @@ def _scope_from_wxid(wxid):
     return SCOPE_GROUP if wxid.endswith("@chatroom") else SCOPE_USER
 
 
-def _sync_to_wechat(target_wxid, remark):
+def _sync_to_wechat(target_wxid, remark, openid=None):
     """调中间方 contacts_api.setFriendRemark 修改微信侧备注（好友和群通用同一接口）。
 
     返回 (synced, middle_error)：
@@ -338,14 +377,15 @@ def _sync_to_wechat(target_wxid, remark):
     if DEMO_MODE or _os.environ.get("SKIP_MIDDLE_SYNC"):
         return True, None
 
-    # 无可用上下文/设备 → 跳过中间方，不阻断本地保存（单测、未登录、未绑设备场景）
+    # 无可用设备 → 跳过中间方，不阻断本地保存
     try:
-        openids = user_openids(g.current_user.id) if getattr(g, 'current_user', None) else []
+        if not openid:
+            openids = user_openids(g.current_user.id) if getattr(g, 'current_user', None) else []
+            openid = openids[0] if openids else None
     except Exception:
-        openids = []
-    if not openids:
+        openid = None
+    if not openid:
         return True, None
-    openid = openids[0]
 
     try:
         body = middle_call(
@@ -369,14 +409,10 @@ def _sync_to_wechat(target_wxid, remark):
 def post_sync_remark():
     """触发中间方 setFriendRemark 修改微信侧备注 → 成功后写 ContactRemarkConfig。
 
-    请求体（对齐中间方接口风格）：
+    请求体：
       wxid: str         好友 wxid 或群 wxid（@chatroom 结尾自动判 scope=group）
       remark: str       新备注（空串或不传 = 清除备注，仅写本地）
       remark_name: str  兼容旧字段名
-
-    openid 自动从 token 绑定的设备取（无需前端传）。
-    好友和群备注共用同一个 contacts_api.setFriendRemark 接口，
-    scope 判定规则：wxid 以 @chatroom 结尾 → group，否则 → user。
     """
     body = request.get_json(silent=True) or {}
     wxid = body.get("wxid")
@@ -394,14 +430,12 @@ def post_sync_remark():
         return jsonify(code=400, msg=f"备注不能超过 {ContactRemarkConfig.MAX_REMARK_LEN} 字"), 400
 
     scope = _scope_from_wxid(wxid)
+    openid = _resolve_active_openid()
 
-    # 先调中间方（空串跳过，直接写本地）
-    synced, middle_error = _sync_to_wechat(wxid, remark)
+    synced, middle_error = _sync_to_wechat(wxid, remark, openid)
 
-    # 不管中间方成功与否，本地都写（保证业务端数据与前端展示一致）
-    # sync_wechat=False：_save_config 内部不再调中间方，避免重复下发
     save_body = {"remark_name": remark}
-    resp, status = _save_config(scope, wxid, save_body, sync_wechat=False)
+    resp, status = _save_config(scope, wxid, openid, save_body, sync_wechat=False)
     if status != 200:
         return resp, status
 

@@ -199,13 +199,19 @@ def rebuild_quote_text_with_override(row, price=None):
 
 
 def _customer_rate(conv):
-    """客户等级 → 系数：群会话看群行、单聊看用户行（与资格判定同口径），无行默认普通。"""
+    """客户等级 → 系数：群会话看群行、单聊看用户行（与资格判定同口径），无行默认普通。
+
+    设备维度：带 conv.openid 精确命中该设备上的联系人配置。
+    """
     scope = "group" if conv.chat_type == Conversation.CHAT_GROUP else "user"
-    row = ContactRemarkConfig.query.filter_by(
+    q = ContactRemarkConfig.query.filter_by(
         scope_type=scope, target_wxid=conv.wxid, deleted_at=None,
-    ).first()
+    )
+    row = q.filter(ContactRemarkConfig.openid == conv.openid).first() if conv.openid else None
+    if row is None:
+        row = q.filter(ContactRemarkConfig.openid.is_(None)).first()  # 兼容迁移过渡
     level = (row.level if row else None) or ContactRemarkConfig.LEVEL_NORMAL
-    price_map = merged_config(0)["price_map"]
+    price_map = merged_config(conv.openid)["price_map"]
     try:
         rate = float(price_map.get(level) or price_map[ContactRemarkConfig.LEVEL_NORMAL])
     except (TypeError, ValueError):
@@ -671,16 +677,18 @@ def _quote_text(row, car, items, level=None, rate=None):
     who = _resolve_real_name(row.sender_name, conv)
     blocks.append(f"@{who}")
 
-    # 读当前会话/用户的「原厂OE详号」开关（决定标识后是否追加括号里的原始 OE 号）
-    # 口径和 _customer_rate 一致：单聊 scope=user + target_wxid=conv.wxid；群聊 scope=group + target_wxid=conv.wxid
+    # 读当前会话/用户的「原厂OE详号」开关（设备维度：带 conv.openid 精确命中）
     oe_detail_enabled = False
     try:
         from backend.models.contact_remark_config import ContactRemarkConfig, SCOPE_GROUP, SCOPE_USER
         if conv and conv.wxid:
             scope = SCOPE_GROUP if conv.chat_type == Conversation.CHAT_GROUP else SCOPE_USER
-            cfg = ContactRemarkConfig.query.filter_by(
+            q = ContactRemarkConfig.query.filter_by(
                 scope_type=scope, target_wxid=conv.wxid, deleted_at=None,
-            ).first()
+            )
+            cfg = q.filter(ContactRemarkConfig.openid == conv.openid).first() if conv.openid else None
+            if cfg is None:
+                cfg = q.filter(ContactRemarkConfig.openid.is_(None)).first()
             oe_detail_enabled = bool(cfg.oe_detail_enabled) if cfg else False
     except Exception:
         oe_detail_enabled = False

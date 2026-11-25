@@ -66,7 +66,7 @@ def list_contacts():
     # remarks = {(scope_type, wxid): remark_name}，搜索 + 展示复用同一份
     all_wxids = [c.wxid for c in contacts]
     # 通讯录列表要混合查补集会话（没进 contact 表的老会话），先取 contact 行的 wxid
-    remarks = _batch_remarks(all_wxids)
+    remarks = _batch_remarks(all_wxids, openid)
 
     if keyword:
         kw = keyword.lower()
@@ -118,14 +118,21 @@ def list_contacts():
     return jsonify(code=0, msg="success", data={"list": items, "total": len(items)})
 
 
-def _batch_remarks(wxids):
-    """批量查 ContactRemarkConfig → {(scope_type, wxid): remark_name}。"""
+def _batch_remarks(wxids, openid=None):
+    """批量查 ContactRemarkConfig → {(scope_type, wxid): remark_name}。
+
+    设备维度（2026-11-25）：openid 指定设备精确命中该设备的行；
+    没传 openid 时 fallback 到 openid IS NULL 的旧行（迁移过渡期兼容）。
+    """
     if not wxids:
         return {}
-    rows = ContactRemarkConfig.query.filter(
+    q = ContactRemarkConfig.query.filter(
         ContactRemarkConfig.target_wxid.in_(wxids),
         ContactRemarkConfig.deleted_at.is_(None),
-    ).all()
+    )
+    rows = q.filter(ContactRemarkConfig.openid == openid).all() if openid else []
+    if not rows and openid:
+        rows = q.filter(ContactRemarkConfig.openid.is_(None)).all()
     return {(rc.scope_type, rc.target_wxid): (rc.remark_name or "") for rc in rows}
 
 

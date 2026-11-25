@@ -5,7 +5,7 @@
 
 发送通道用自家发消息编排（sync/send_service.send_message，自动=operator None 系统代发，
 人工=登录人快照）：
-- 自动：quote_mode（仅 global 行）= auto 才发，preview 留给人工（阶段 6 前端预览）；
+- 自动：quote_mode（按 conv.openid 取 device 行）= auto 才发，preview 留给人工（阶段 6 前端预览）；
   发送前守门：仍 pending + 有产品 + 有话术；SEND_ENABLED=false（只收不发阶段）整体跳过；
 - 人工（send_manual，阶段 6 预览流动作）：话术可经改价重建（quote_pricing.rebuild_quote_text）；
 - 成功置已报价（sent_at=now）；下发失败转 review（契约 B「发送失败」出口），error 记原因。
@@ -31,13 +31,18 @@ log = logging.getLogger(__name__)
 def auto_send_pending(rows):
     """批量自动发送（算价后调用）：逐条尝试，单条异常不影响其余；返回发出条数。
 
-    SEND_ENABLED 关闭或 quote_mode=preview（人工预览）时整体跳过。
+    SEND_ENABLED 关闭整体跳过；每条询价按所属设备取 device scope 的 quote_mode
+    （不同设备可以独立配置 preview/auto），preview 跳过。
     """
-    if not rows or not SEND_ENABLED or merged_config(0)["quote_mode"] != "auto":
+    if not rows or not SEND_ENABLED:
         return 0
     sent = 0
     for row in rows:
         try:
+            conv = db.session.get(Conversation, row.conversation_id)
+            mode = merged_config(conv.openid if conv else None)["quote_mode"]
+            if mode != "auto":
+                continue
             if _send_one(row):
                 sent += 1
         except Exception:  # noqa: BLE001 单条异常不拖垮批量

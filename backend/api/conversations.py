@@ -363,14 +363,22 @@ def _member_json(m):
 
 
 def _batch_conv_remarks(convs):
-    """批量查 ContactRemarkConfig → {(scope_type, wxid): remark_name}。"""
+    """批量查 ContactRemarkConfig → {(scope_type, wxid): remark_name}。
+
+    设备维度（2026-11-25）：convs 都在同一设备（openid 全部相同），
+    按 convs[0].openid 精确命中该设备的行；没行时 fallback NULL 行。
+    """
     if not convs:
         return {}
+    openid = convs[0].openid  # 同设备会话 openid 全部相同
     wxids = [c.wxid for c in convs]
-    rows = ContactRemarkConfig.query.filter(
+    q = ContactRemarkConfig.query.filter(
         ContactRemarkConfig.target_wxid.in_(wxids),
         ContactRemarkConfig.deleted_at.is_(None),
-    ).all()
+    )
+    rows = q.filter(ContactRemarkConfig.openid == openid).all() if openid else []
+    if not rows and openid:
+        rows = q.filter(ContactRemarkConfig.openid.is_(None)).all()
     return {(rc.scope_type, rc.target_wxid): (rc.remark_name or "") for rc in rows}
 
 

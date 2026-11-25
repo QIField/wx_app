@@ -1,10 +1,12 @@
-"""统一备注配置：用户级（全局生效）与群级两级作用域，业务自建、不写回微信。
+"""统一备注配置：设备维度 —— scope_type + target_wxid + openid 唯一。
 
-- scope=user：按成员 wxid 一行——私聊与所有群聊全局共用（配置跟随"人"），
-  群成员入口写入的也是这一行，保证切换会话/群聊配置一致。
-- scope=group：仅群自身（群备注名）。
-- wxid 只存数据库与后端内部逻辑，出参一律经 anonymize 脱敏（alias 短码）。
-- 标签为 JSON 整列覆盖；单次改写痕迹由 log_action 审计日志记录（含 before/after）。
+一个设备上的一个联系人/群 对应一行配置。同一联系人在不同设备上各有独立行，
+互不影响；同一行被多账号关联到该设备时共享。
+
+- scope_type=user  + target_wxid=好友wxid + openid：该设备上这个好友的全局备注
+- scope_type=group + target_wxid=群wxid + openid：该设备上这个群的群级备注
+- wxid 只存数据库与后端内部逻辑，出参一律经 anonymize 脱敏。
+- 标签为 JSON 整列覆盖；单次改写痕迹由 log_action 审计日志记录。
 """
 from backend.extensions import db
 from backend.models.base import BigIntPK, SoftDeleteMixin
@@ -35,6 +37,13 @@ class ContactRemarkConfig(db.Model, SoftDeleteMixin):
     target_wxid = db.Column(
         db.String(64), nullable=False, comment="目标wxid（user=成员/好友wxid，group=群ID）",
     )
+    # ★ 2026-11-25 设备维度：同一个联系人在不同设备上各有独立行
+    # 存量行 openid 为 NULL（db_migrate 回填后全部非空）；
+    # 新代码创建行必须显式传 openid
+    openid = db.Column(
+        db.String(64), nullable=True, index=True,
+        comment="所属设备 openid；NULL 表示未绑定设备（存量迁移遗留）",
+    )
     remark_name = db.Column(db.String(100), nullable=False, default="", comment="备注名称")
     auto_quote_enabled = db.Column(
         db.Boolean, nullable=False, default=False, comment="是否开启自动报价",
@@ -51,8 +60,9 @@ class ContactRemarkConfig(db.Model, SoftDeleteMixin):
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
     __table_args__ = (
-        db.UniqueConstraint("scope_type", "target_wxid", name="uk_remark_scope_target"),
-        db.Index("idx_remark_target", "target_wxid"),
+        # ★ 2026-11-25 设备维度唯一键：同一设备上 scope + wxid 唯一
+        db.UniqueConstraint("scope_type", "target_wxid", "openid", "deleted_at",
+                            name="uk_remark_scope_wxid_openid_deleted"),
     )
 
     def to_json(self):

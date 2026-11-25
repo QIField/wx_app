@@ -90,7 +90,7 @@ def apply_friend_info(conv, info):
         conv.avatar = info["head_img_url"]
         changed = True
     # 中间方好友备注 → ContactRemarkConfig (scope=user)
-    if upsert_user_remark(conv.wxid, info.get("remark")):
+    if upsert_user_remark(conv.wxid, info.get("remark"), conv.openid):
         changed = True
     if changed:
         db.session.commit()

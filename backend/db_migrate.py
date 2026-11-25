@@ -64,6 +64,13 @@ def upgrade_existing_schema():
     # 新代码构造 UserDevice 忘记填 online 时触发 IntegrityError (1048)。
     # SQLite 不支持 MODIFY，_try_alter 会静默跳过；SQLite 新库由 ORM create_all 正确建。
     _try_alter("ALTER TABLE user_device MODIFY COLUMN online SMALLINT NOT NULL DEFAULT -1")
+    # 2026-11-25 设备维度改造：ContactRemarkConfig 加 openid + QuoteConfig 加 openid
+    # 迁移只增列 + 改约束，不写数据（存量 openid 留 NULL，服务层兼容）
+    _try_alter("ALTER TABLE contact_remark_config ADD COLUMN openid VARCHAR(64) NULL")
+    _try_alter("ALTER TABLE quote_config ADD COLUMN openid VARCHAR(64) NULL")
+    _try_alter("ALTER TABLE quote_config ADD INDEX idx_quote_config_openid (openid)")
+    _rebuild_remark_unique_for_device()  # UniqueConstraint 改了，SQLite 必须重建表
+    _try_alter("ALTER TABLE quote_config ADD INDEX idx_quote_config_user (user_id)")
 
 
 def _backfill_remark_config():
@@ -303,3 +310,68 @@ def _backfill_inquiry_message_id():
     if filled:
         db.session.commit()
         log.info("backfill_inquiry_msg: filled %d rows", filled)
+
+
+def _rebuild_remark_unique_for_device():
+    """ContactRemarkConfig UniqueConstraint 从 (scope_type, target_wxid, deleted_at)
+    改为 (scope_type, target_wxid, openid, deleted_at) —— SQLite 必须重建表。
+
+    幂等：约束名已存在于表索引时跳过；openid 列还没加时 ALTER 会静默跳过。
+    存量行 openid 为 NULL（服务层已兼容）；新代码创建行必须显式传 openid。
+    """
+    import sqlalchemy as sa
+    from sqlalchemy import inspect, text
+
+    insp = inspect(db.engine)
+    if "contact_remark_config" not in insp.get_table_names():
+        return
+    if "openid" not in [c["name"] for c in insp.get_columns("contact_remark_config")]:
+        return  # openid 列还没加，等下一轮
+
+    # 幂等：如果新约束已存在（按 name 检查），跳过
+    existing_names = {idx["name"] for idx in insp.get_indexes("contact_remark_config")}
+    new_constraint_name = "uk_remark_scope_wxid_openid_deleted"
+    if new_constraint_name in existing_names:
+        return
+
+    if db.engine.dialect.name != "sqlite":
+        # MySQL：直接 ADD CONSTRAINT（注意跳过 openid=NULL 时的重复，MySQL 允许 NULL 多行）
+        try:
+            db.session.execute(text(
+                "ALTER TABLE contact_remark_config "
+                f"ADD CONSTRAINT {new_constraint_name} "
+                "UNIQUE (scope_type, target_wxid, openid, deleted_at)"
+            ))
+            db.session.commit()
+        except Exception:  # noqa: BLE001 可能约束已存在或 openid=NULL 多行冲突
+            db.session.rollback()
+        return
+
+    # SQLite：rename → 新建 ORM 当前定义 → INSERT ... SELECT → 删旧表
+    # 参考 _drop_user_device_openid_unique 的已验证模式
+    from backend.models.contact_remark_config import ContactRemarkConfig  # noqa: F401
+
+    table = db.metadata.tables["contact_remark_config"]
+    old_cols = {c["name"] for c in insp.get_columns("contact_remark_config")}
+
+    try:
+        db.session.execute(text("PRAGMA foreign_keys = OFF"))
+        db.session.execute(text("ALTER TABLE contact_remark_config RENAME TO _contact_remark_config_old"))
+        db.session.execute(text(str(sa.schema.CreateTable(table).compile(db.engine))))
+        cols = ", ".join(c.name for c in table.columns if c.name in old_cols)
+        db.session.execute(text(
+            f"INSERT INTO contact_remark_config ({cols}) SELECT {cols} FROM _contact_remark_config_old"
+        ))
+        db.session.execute(text("DROP TABLE _contact_remark_config_old"))
+        db.session.execute(text("PRAGMA foreign_keys = ON"))
+        db.session.commit()
+        log.info("rebuild_remark_unique: SQLite 表重建完成")
+    except Exception as e:  # noqa: BLE001
+        log.warning("rebuild_remark_unique SQLite 重建失败：%s，跳过", e)
+        db.session.rollback()
+        # 恢复旧表（如果还在）
+        try:
+            db.session.execute(text("ALTER TABLE _contact_remark_config_old RENAME TO contact_remark_config"))
+            db.session.commit()
+        except Exception:  # noqa: BLE001
+            db.session.rollback()
