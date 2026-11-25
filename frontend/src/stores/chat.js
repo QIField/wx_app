@@ -208,34 +208,40 @@ export const useChatStore = defineStore('chat', {
 
     /** 切换聊天账号：清当前会话并重拉列表（通讯录由页面监听 activeOpenid 重拉）。
      *  [perf] 端到端分段：total / devices_ms / convs_ms —— 和后端 [perf] conversations 对拼看全链路。
-     *  switchingDevice=true 期间全局 loading 锁，阻止重复点击和其他操作。 */
+     *  switchingDevice=true 期间全局 loading 锁，阻止重复点击和其他操作。
+     *
+     *  关键时序：先请求新设备的 conversations（用局部 openid 传参），拿到结果后再切换 activeOpenid。
+     *  否则 activeOpenid 已指向新设备、但 conversations 还是旧设备的，unreadOf 会把旧设备的未读数
+     *  错误累加到新设备卡片上（旧设备的卡片反而瞬间归零）。 */
     async switchDevice(openid) {
       if (openid === this.activeOpenid || this.switchingDevice) return
       this.switchingDevice = true
       try {
         const t0 = performance.now()
+        // 1. 先发请求：用局部 openid 拉新设备的 conversations，但不动状态
+        const [devices, convs] = await Promise.all([
+          fetchDevices(),
+          fetchConversations(openid),
+        ])
+        // 2. 请求都回来了，再一次性切换状态（此时 unreadOf 对所有设备都返回正确值）
         this.activeOpenid = openid
         this.currentId = null
         this.currentMessages = []
         this.membersByConv = {} // 名册按账号隔离，换号必须清缓存
         this.hasMore = false
-        const t1 = performance.now()
-        const [, tApi] = await Promise.all([
-          this.loadDevices().then(() => ({ t: performance.now() })),
-          this.loadConversations().then(() => ({ t: performance.now() })),
-        ])
+        this.devices = devices
+        this.conversations = convs
         console.info(
-          `[perf] switchDevice openid=${openid.slice(0, 8)} init=${(t1 - t0).toFixed(0)}ms `
-          `convs=${(tApi.t - t1).toFixed(0)}ms total=${(performance.now() - t0).toFixed(0)}ms`
+          `[perf] switchDevice openid=${openid.slice(0, 8)} total=${(performance.now() - t0).toFixed(0)}ms`
         )
       } finally {
         this.switchingDevice = false
       }
     },
 
-    async loadConversations() {
+    async loadConversations(openid) {
       // 未读一律以后端为准：不因"正在打开"而清除，只有用户点击会话窗口内容才算已读
-      this.conversations = await fetchConversations(this.activeOpenid)
+      this.conversations = await fetchConversations(openid ?? this.activeOpenid)
     },
 
     /** 从通讯录发起会话：按 contact_id 建/取（contact 行自带 conversation_id 时本地直进；不传 wxid——脱敏契约）。 */
