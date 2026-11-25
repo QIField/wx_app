@@ -1,77 +1,147 @@
 <script setup>
-/** 报价处理台单卡 —— 拓展栏简化版。
+/** QuoteCard.vue —— 重构版 v2。
  *
- * 折叠态：群名 + 状态 chip + 车型 + 时间 + 最终价/配件名
- * 展开态：紧凑摘要卡（车型·VIN·询价概要·配件预览）+ 快捷动作区
- *   - 打开详情页报价：emit('open-detail', inquiry.id)
- *   - 定位聊天气泡：切会话 → 按 inquiry_time 找最近消息 → scrollIntoView
- * 改价/发送/忽略/复制话术全部保留。
+ * 收起态：状态 pill + VIN 行 + OE 行 + 时间 + 箭头（单行 52px grid）。
+ * 展开态：左 4px 竖指示条（蓝=正常 / 红=错误）+ 2 种模板。
  *
- * 数据结构同前（契约 A，price_json），动作走 /quote/inquiries/{id}/send|ignore。
+ * 模板 normal：车辆识别信息 + 配件报价清单（所有非 error 条目统一）
+ * 模板 error ：浅红报错卡 + 原始 VIN 信息（price_json.error 存在）
+ *
+ * API 契约（不变）：
+ *   props:   inquiry
+ *   emits:   refresh / open-detail
+ *   imports: ignoreQuoteInquiry
  */
 import { computed, inject, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useChatStore } from '../stores/chat.js'
-import { ignoreQuoteInquiry, sendQuoteInquiry } from '../api'
+import { ignoreQuoteInquiry } from '../api'
 
 const props = defineProps({ inquiry: { type: Object, required: true } })
 const emit = defineEmits(['refresh', 'open-detail'])
 
-const chat = useChatStore()
+/** 聊天面板 ref —— 用于定位聊天气泡 */
 const chatPanelRef = inject('chatPanelRef', null)
+
 const expanded = ref(false)
-const priceInput = ref('')
-const busy = ref(false)
 
-const r = computed(() => props.inquiry.price_json || {})
-const car = computed(() => r.value.car)
-const items = computed(() => (r.value.pricing || {}).items || [])
-const product = computed(() => r.value.product)
-const quoteText = computed(() => ((r.value.pricing || {}).text || '').trim())
+/* ============= 分类 ============= */
+const p = computed(() => props.inquiry || {})
+const pj = computed(() => p.value.price_json || {})
+const car = computed(() => pj.value.car || null)
+const pricing = computed(() => pj.value.pricing || { items: [] })
 
-/** 可动作状态：待报价/待人工；已报价只读、已忽略已拦截只读。 */
-const actionable = computed(() => [0, 1].includes(props.inquiry.status))
+/** 两种模板：error（服务异常）/ normal（其余全走同一套）。 */
+const tpl = computed(() => pj.value.error ? 'error' : 'normal')
 
-const carLine = computed(() => {
-  const c = car.value
-  if (!c) return props.inquiry.part_name || '（未识别车型）'
-  const head = [c.brandName, c.model].filter(Boolean).join(' ')
-  const tail = [c.yearPattern ? `${c.yearPattern}款` : '', c.displacement, c.fuel].filter(Boolean).join(' ')
-  return tail ? `${head} ${tail}` : head
+const isError = computed(() => tpl.value === 'error')
+
+/* ============= 状态 pill ============= */
+const STATUS_MAP = {
+  0: { label: '待处理', cls: 'amber' },
+  1: { label: '待处理', cls: 'amber' },
+  3: { label: '已报价', cls: 'green' },
+  2: { label: '错误',   cls: 'red' },
+  4: { label: '错误',   cls: 'red' },
+}
+const statusChip = computed(() => {
+  const s = p.value.status
+  if (p.value.status_label) return { label: p.value.status_label, cls: STATUS_MAP[s]?.cls || 'amber' }
+  return STATUS_MAP[s] || { label: '待处理', cls: 'amber' }
 })
 
-/** 配件缩略图预览（最多展示 2 个） */
-const itemPreviews = computed(() =>
-  items.value.slice(0, 2).map(it => ({
-    image: it.product?.image || product.value?.image,
-    name: it.product?.product_name || it.part || it.oe,
-    price: it.final_price || it.cost_price,
-    oe: it.oe,
-  }))
-)
+/* ============= 收起行数据 ============= */
+const inquiryVIN = computed(() => (p.value.vin || '').trim())
+const carVIN = computed(() => (car.value?.vin || '').trim() || inquiryVIN.value)
+const carModelStr = computed(() => {
+  if (!car.value) return ''
+  return car.value.saleModelName
+    || [car.value.brandName, car.value.model].filter(Boolean).join(' ')
+})
+/** 判断字符串是否是微信号（纯英文数字，无中文） */
+const WXID_RE = /^[a-zA-Z0-9_-]+$/
+function isWechatId(s) { return s && WXID_RE.test(s) && /[a-zA-Z]/.test(s) }
 
-/** VIN 后 6 位（省略展示） */
-const vinShort = computed(() => {
-  const v = car.value?.vin
-  if (!v) return ''
-  return v.length > 6 ? '···' + v.slice(-6) : v
+/** 主行：私聊显示客户名 / 群聊显示群名 + 客户名（过滤微信号） */
+const primaryLabel = computed(() => {
+  const convName = p.value.conversation_name || ''
+  const sender = p.value.sender_name || ''
+  // 过滤：纯英文数字串当作微信号，不展示
+  const cleanConv = isWechatId(convName) ? '' : convName
+  const cleanSender = isWechatId(sender) ? '' : sender
+  const isGroup = p.value.chat_type === 2 || (p.value.chat_type === 1 && cleanConv && cleanConv !== cleanSender)
+  if (isGroup && cleanConv && cleanSender) return `${cleanConv} · ${cleanSender}`
+  return cleanSender || cleanConv || sender || convName || '未识别'
+})
+/** 次行：配件名称（多 OE 则用 / 分割，否则 part_name 或 inquiry_content 截断） */
+const oeList = computed(() => {
+  const items = pricing.value.items || []
+  const list = items.map(it => it.oe).filter(Boolean)
+  if (list.length) return list
+  if (p.value.oem_no) return [p.value.oem_no]
+  return []
+})
+const partNames = computed(() => {
+  // 从 items 里取 product.name 或 part_name 或 oe，用 / 拼
+  const items = pricing.value.items || []
+  const bits = items.map(it => it.product?.name || it.oe).filter(Boolean)
+  if (bits.length) return bits.join(' / ')
+  if (p.value.part_name) return p.value.part_name
+  if (p.value.oem_no) return p.value.oem_no
+  if (p.value.inquiry_content) return p.value.inquiry_content.slice(0, 40)
+  return '—'
+})
+const isMultiPart = computed(() => oeList.value.length > 1)
+const timeLabel = computed(() => {
+  const t = p.value.inquiry_time || p.value.sent_at || p.value.created_at
+  if (!t) return ''
+  const d = new Date(t)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) {
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    return `${hh}:${mm}`
+  }
+  return `${d.getMonth() + 1}/${d.getDate()}`
 })
 
-const timeText = computed(() =>
-  props.inquiry.sent_at || props.inquiry.inquiry_time || props.inquiry.created_at || '')
+/* ============= 展开详情数据 ============= */
+const carFull = computed(() => {
+  if (!car.value) return ''
+  const bits = [
+    carModelStr.value,
+    car.value.yearPattern,
+    car.value.displacement,
+    car.value.fuel,
+  ].filter(Boolean)
+  return bits.join(' · ')
+})
+const sourceLabel = computed(() => {
+  const bits = []
+  const convName = p.value.conversation_name
+  const sender = p.value.sender_name
+  if (convName && !isWechatId(convName)) bits.push(convName)
+  if (sender && !isWechatId(sender)) bits.push('· 成员 ' + sender)
+  if (!bits.length) return ''
+  return bits.join('  ')
+})
+const quoteText = computed(() => pricing.value.text || '')
 
-/* ---------- 核心动作 ---------- */
-
-/** 打开详情页报价：新开标签页 /#/quote-detail/:id */
-function onOpenDetail() {
-  const url = `${location.origin}${location.pathname}#/quote-detail/${props.inquiry.id}`
-  window.open(url, '_blank', 'noopener')
+/* ============= 操作 ============= */
+function toggle(e) {
+  if (e.target.closest('.q-btn') || e.target.closest('.q-row-time')) return
+  expanded.value = !expanded.value
+}
+function copyText(text, okLabel) {
+  if (!text) { ElMessage.warning('没有可复制内容'); return }
+  navigator.clipboard.writeText(text)
+    .then(() => ElMessage.success(okLabel))
+    .catch(() => ElMessage.error('复制失败'))
 }
 
-/** 定位聊天气泡：委托 ChatPanel.locateMessage（已内置 ensureOpened + loadOlderMessages + highlight）。
- *  入参：{ convId, id } —— ChatPanel.onHistoryLocate 的标准签名。 */
+/** 定位聊天气泡 —— 切会话 + 滚动到 inquiry 关联的消息 */
 async function onJumpToBubble() {
-  const { conversation_id: convId, message_id: msgId } = props.inquiry
+  const { conversation_id: convId, message_id: msgId } = p.value
   if (!convId) { ElMessage.warning('该询价未关联会话'); return }
   if (!chatPanelRef.value?.locateMessage) {
     ElMessage.error('聊天面板未就绪，请稍候再试'); return
@@ -86,328 +156,320 @@ async function onJumpToBubble() {
     ElMessage.error('定位失败：' + (e.message || '未知原因'))
   }
 }
-
-/* ---------- 报价 & 发送 ---------- */
-
-async function onSend() {
-  const price = priceInput.value.trim()
-  if (price && !(Number(price) > 0)) {
-    ElMessage.warning('改价需为大于 0 的数字')
-    return
-  }
-  busy.value = true
+async function doIgnore() {
   try {
-    await sendQuoteInquiry(props.inquiry.id, price)
-    ElMessage.success('报价已发送')
-  } catch (e) {
-    ElMessage.error(e.message || '发送失败')
-  } finally {
-    busy.value = false
+    await ignoreQuoteInquiry(p.value.id)
+    ElMessage.success('已忽略')
     emit('refresh')
-  }
-}
-
-async function onIgnore() {
-  busy.value = true
-  try {
-    await ignoreQuoteInquiry(props.inquiry.id)
-    ElMessage.success('已忽略该询价')
   } catch (e) {
     ElMessage.error(e.message || '操作失败')
-  } finally {
-    busy.value = false
-    emit('refresh')
   }
 }
-
-async function copyText() {
-  try {
-    await navigator.clipboard.writeText(quoteText.value)
-    ElMessage.success('话术已复制')
-  } catch {
-    ElMessage.error('复制失败，请手动选择复制')
-  }
+function retryVIN() {
+  ElMessage.info('重试 VIN — 后续接入后端接口')
+}
+function openDetail() {
+  emit('open-detail', p.value.id)
 }
 </script>
 
 <template>
-  <div class="card" :class="{ open: expanded }">
-    <div class="head" @click="expanded = !expanded">
-      <div class="row-top">
-        <span class="group">{{ inquiry.conversation_name }}</span>
-        <span class="chip" :class="`s${inquiry.status}`">{{ inquiry.status_label }}</span>
-      </div>
-      <div class="car">{{ carLine }}</div>
-      <div class="row-bottom">
-        <span class="time">{{ timeText }}</span>
-        <span class="meta">
-          <em v-if="r.pricing?.final_price" class="num price">¥{{ r.pricing.final_price }}</em>
-          <em v-else class="part">{{ inquiry.part_name || '—' }}</em>
-          <svg class="chev" :class="{ up: expanded }" viewBox="0 0 24 24" width="12" height="12">
-            <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </span>
-      </div>
-    </div>
+  <li class="quote-item" :class="{ expanded, error: isError }" @click="toggle">
 
-    <!-- 展开态：紧凑摘要卡 + 快捷动作区 -->
-    <div v-if="expanded" class="detail">
-
-      <!-- 主操作区（视觉最显眼） -->
-      <div class="quick-actions">
-        <button class="qa-btn qa-primary" @click.stop="onOpenDetail">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-          </svg>
-          打开详情页报价
-        </button>
-        <button class="qa-btn qa-ghost" @click.stop="onJumpToBubble">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-          </svg>
-          定位聊天气泡
-        </button>
-      </div>
-
-      <!-- 紧凑摘要卡 -->
-      <div v-if="r.error" class="err">{{ r.error }}</div>
-
-      <div class="snap">
-        <div class="snap-row">
-          <span class="snap-label">车型</span>
-          <span class="snap-val snap-car">{{ carLine }}</span>
+    <!-- ========== 收起行 ========== -->
+    <div class="q-row">
+      <div class="q-status" :class="statusChip.cls">{{ statusChip.label }}</div>
+      <div class="q-body">
+        <div class="q-body-vin">
+          <span class="q-vin" :class="{ empty: primaryLabel === '未识别' }">{{ primaryLabel }}</span>
+          <span v-if="isMultiPart" class="q-ic">{{ oeList.length }} 项</span>
         </div>
-        <div v-if="vinShort" class="snap-row">
-          <span class="snap-label">VIN</span>
-          <span class="snap-val num">{{ vinShort }}</span>
-        </div>
-        <div class="snap-row">
-          <span class="snap-label">配件</span>
-          <span class="snap-val">
-            {{ inquiry.part_name || '—' }}
-            <span v-if="items.length" class="snap-count">· {{ items.length }} 款报价</span>
-          </span>
+        <div class="q-body-oe">
+          <span class="q-oe" :class="{ empty: partNames === '—' }">{{ partNames }}</span>
         </div>
       </div>
-
-      <!-- 配件缩略图预览（最多 2 个，单行紧凑） -->
-      <div v-if="itemPreviews.length" class="thumbs">
-        <div v-for="(p, i) in itemPreviews" :key="i" class="thumb-item">
-          <img v-if="p.image" class="thumb-img" :src="p.image" alt="" loading="lazy">
-          <div v-else class="thumb-img placeholder">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-          </div>
-          <div class="thumb-info">
-            <div class="thumb-name" :title="p.name">{{ p.name }}</div>
-            <div class="thumb-oe num">{{ p.oe }}</div>
-            <div v-if="p.price" class="thumb-price num">¥{{ p.price }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 原有报价话术 & 改价发送（功能保留） -->
-      <div v-if="quoteText || actionable" class="send-block">
-        <div v-if="quoteText" class="send-head">
-          <span>报价话术</span>
-          <a class="copy" @click.prevent="copyText">复制</a>
-        </div>
-        <textarea v-if="quoteText" class="quote-text" readonly :value="quoteText" rows="3"></textarea>
-        <div v-if="actionable" class="price-row">
-          <input
-            v-model="priceInput" class="price-input" type="number" min="0" step="0.01"
-            placeholder="改价（可选）" @keyup.enter="onSend"
-          >
-          <button class="btn send" :disabled="busy" @click="onSend">发送</button>
-          <button class="btn ignore" :disabled="busy" @click="onIgnore">忽略</button>
-        </div>
-        <div v-else-if="inquiry.sent_at" class="sent-note">已于 {{ inquiry.sent_at }} 发送</div>
+      <div class="q-row-time">{{ timeLabel }}</div>
+      <div class="q-arrow" :class="{ open: expanded }">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2.5 3.5L5 6L7.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
     </div>
-  </div>
+
+    <!-- ========== 展开详情 ========== -->
+    <Transition name="expand">
+      <div v-if="expanded" class="q-expand">
+
+        <!-- 来源条（三种模板共有） -->
+        <div v-if="sourceLabel" class="q-source">来自 {{ sourceLabel }}</div>
+
+        <!-- ===== 模板 normal（所有非 error 条目统一） ===== -->
+        <template v-if="tpl === 'normal'">
+          <!-- 车辆识别信息 -->
+          <div class="q-card">
+            <div class="q-card-title">车辆识别信息</div>
+            <div class="q-kv"><span class="q-k">VIN</span><span class="q-v mono">{{ carVIN || '—' }}</span></div>
+            <div class="q-kv"><span class="q-k">车型</span><span class="q-v">{{ carFull || carModelStr || '—' }}</span></div>
+          </div>
+
+          <!-- OE 清单（品牌/完整报价留给详情页） -->
+          <div class="q-card">
+            <div class="q-card-title">
+              OE 清单
+              <template v-if="oeList.length">（{{ oeList.length }} 项）</template>
+            </div>
+            <template v-if="oeList.length">
+              <div class="q-oes">
+                <div v-for="(o, i) in oeList" :key="o + i" class="q-oe-item">
+                  <span class="q-oe-num">{{ i + 1 }}</span>
+                  <span class="q-oe-code mono">{{ o }}</span>
+                </div>
+              </div>
+            </template>
+            <div v-else class="q-empty">暂无 OE 匹配，点击按钮手动查询</div>
+          </div>
+
+          <!-- 按钮组 -->
+          <div class="q-actions">
+            <button class="q-btn primary q-btn-lg" @click.stop="openDetail">打开详情页报价</button>
+            <button class="q-btn ghost q-btn-lg" @click.stop="onJumpToBubble">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:4px">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+              </svg>
+              定位聊天气泡
+            </button>
+            <button class="q-btn ghost q-btn-lg" @click.stop="copyText(quoteText || p.inquiry_content || p.part_name, '内容已复制')">复制内容</button>
+          </div>
+        </template>
+
+        <!-- ===== 模板 C：错误 ===== -->
+        <template v-else-if="tpl === 'error'">
+          <div class="q-card error">
+            <div class="q-error-msg">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 4v2.5M6.5 9h.01" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <span>{{ pj.error }}</span>
+            </div>
+          </div>
+          <div class="q-card">
+            <div class="q-card-title">原始 VIN 信息</div>
+            <div class="q-kv"><span class="q-k">原始 VIN</span>
+              <span class="q-v mono red">{{ carVIN || '—' }}</span>
+            </div>
+            <div class="q-kv"><span class="q-k">报错步骤</span>
+              <span class="q-v">{{ pj.error_step || '—' }}</span>
+            </div>
+          </div>
+          <div class="q-actions">
+            <button class="q-btn ghost q-btn-lg" @click.stop="retryVIN">重试 VIN</button>
+            <button class="q-btn ghost q-btn-lg" @click.stop="onJumpToBubble">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:4px">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+              </svg>
+              定位聊天气泡
+            </button>
+            <button class="q-btn ghost q-btn-lg" @click.stop="doIgnore">忽略</button>
+          </div>
+        </template>
+
+      </div>
+    </Transition>
+  </li>
 </template>
 
 <style scoped>
-.card {
+/* ==================== 基础 ==================== */
+.quote-item {
+  list-style: none;
   position: relative;
-  animation: card-in 0.3s both;
+  background: #FFFFFF;
+  border-bottom: 1px solid #E5E7EB;
 }
-@keyframes card-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
-}
-.card::before {
+/* 左竖指示条（absolute z-index 0，内容 z-index 1，不影响布局） */
+.quote-item::before {
   content: '';
-  position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px;
-  background: var(--c-primary);
-  border-radius: 2px;
-  opacity: 0;
-  transition: opacity 0.15s;
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: transparent;
+  z-index: 0;
+  transition: background 0.2s;
 }
-.card:hover::before, .card.open::before { opacity: 1; }
-.card.open, .head:hover { background: #fdf7f6; }
-
-.head { padding: 9px 11px; cursor: pointer; }
-
-.row-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-.group {
-  font-weight: 600; font-size: 13px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.quote-item.expanded::before {
+  background: #3370FF;
 }
-.chip {
-  flex-shrink: 0; font-size: 10px; padding: 2px 8px; border-radius: 999px;
-  color: var(--c-text-sub); background: var(--c-bg);
-}
-.chip.s1 { color: #b45309; background: #fef3c7; }   /* 待人工 */
-.chip.s3 { color: #15803d; background: #dcfce7; }   /* 已报价 */
-.chip.s4 { color: var(--c-text-sub); background: var(--c-bg); } /* 已忽略 */
-
-.car {
-  margin: 6px 0;
-  padding: 5px 8px;
-  font-size: 12px; line-height: 1.5;
-  color: var(--c-primary-deep);
-  background: var(--c-primary-soft);
-  border-radius: var(--r-sm);
-  border-left: 3px solid var(--c-primary);
+.quote-item.expanded.error::before {
+  background: #D1242F;
 }
 
-.row-bottom { display: flex; justify-content: space-between; align-items: center; }
-.time { font-size: 11px; color: var(--c-text-sub); }
-.meta { display: flex; align-items: center; gap: 6px; }
-.price { font-style: normal; font-weight: 700; font-size: 13px; color: var(--c-primary); }
-.part {
-  font-style: normal; font-size: 11px; color: var(--c-text-sub);
-  max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.chev { color: var(--c-text-sub); transition: transform 0.15s; }
-.chev.up { transform: rotate(180deg); }
-
-/* ===== 展开态 ===== */
-.detail { padding: 8px 11px 11px; display: flex; flex-direction: column; gap: 8px; }
-.err {
-  font-size: 11px; color: var(--c-danger);
-  background: #fef2f2; border: 1px solid #fecaca;
-  border-radius: var(--r-sm); padding: 5px 7px;
-}
-
-/* 主操作区（两个大按钮） */
-.quick-actions {
-  display: flex; gap: 6px; padding-bottom: 8px;
-  border-bottom: 1px dashed var(--c-border);
-}
-.qa-btn {
-  flex: 1; min-width: 0;
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  font-size: 12px; font-weight: 500;
-  padding: 7px 10px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--c-border-strong);
-  background: var(--c-surface);
-  color: var(--c-text);
+/* ==================== 收起行 ==================== */
+.q-row {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 56px 1fr auto 28px;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 16px;
+  align-items: center;
   cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
+  transition: background 0.12s;
 }
-.qa-btn:hover { transform: translateY(-1px); }
-.qa-primary {
-  background: var(--c-primary);
-  border-color: var(--c-primary-deep);
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(232,32,22,0.25);
-}
-.qa-primary:hover { background: var(--c-primary-deep); box-shadow: 0 2px 6px rgba(232,32,22,0.35); }
-.qa-ghost:hover { background: var(--c-primary-soft); border-color: var(--c-primary); color: var(--c-primary); }
+.q-row:hover { background: #FAFBFC; }
+.quote-item.expanded > .q-row:hover { background: transparent; }
 
-/* 紧凑摘要卡 */
-.snap {
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-md);
-  padding: 6px 10px;
-  background: var(--c-panel);
+/* 状态 pill */
+.q-status {
+  font-size: 10.5px; font-weight: 600; line-height: 1;
+  padding: 3px 8px; border-radius: 10px; text-align: center;
+  white-space: nowrap; justify-self: start;
 }
-.snap-row {
-  display: flex; gap: 8px;
-  font-size: 11px; line-height: 1.9;
-}
-.snap-label { color: var(--c-text-muted); width: 36px; flex-shrink: 0; }
-.snap-val { color: var(--c-text); word-break: break-all; }
-.snap-car { color: var(--c-primary-deep); font-weight: 500; }
-.snap-count { color: var(--c-primary); font-size: 10px; }
+.q-status.green { background: #E6F4EA; color: #179C52; }
+.q-status.amber { background: #FDF6E0; color: #B08800; }
+.q-status.red { background: #FDECEE; color: #D1242F; }
 
-/* 配件缩略图预览 */
-.thumbs {
-  display: flex; gap: 6px;
+/* 主信息双行 —— 固定两行高度，防止任何子元素折行撑高 */
+.q-body {
+  display: grid;
+  grid-template-rows: 16px 14px;   /* 两行固定高，够 12px + 11px 文字 */
+  row-gap: 2px;
+  min-width: 0;
+  overflow: hidden;                /* 兜底：任何溢出直接裁掉 */
 }
-.thumb-item {
-  flex: 1; min-width: 0;
-  display: flex; gap: 6px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-sm);
-  padding: 6px;
-  background: var(--c-surface);
+.q-body-vin { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.q-vin {
+  font-size: 12px; color: #24292F; font-weight: 500; line-height: 16px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: block;                  /* block 保证 white-space 必生效 */
 }
-.thumb-img {
-  width: 40px; height: 40px;
-  object-fit: cover;
-  border-radius: var(--r-xs);
-  border: 1px solid var(--c-border);
-  flex-shrink: 0;
-  background: var(--c-panel);
+.q-vin.empty { color: #B4BBC4; font-style: italic; font-family: inherit; }
+.q-ic {
+  font-size: 9.5px; font-weight: 600; flex-shrink: 0; line-height: 1;
+  color: #3370FF; background: #EAF0FB;
+  padding: 1px 6px; border-radius: 8px;
 }
-.thumb-img.placeholder {
-  display: grid; place-items: center;
-  color: var(--c-text-muted);
+/* 收起态 OE 单行 */
+.q-body-oe {
+  font-size: 11px; color: #8C959F;
+  font-family: 'SF Mono', Consolas, Menlo, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 14px;
 }
-.thumb-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0; }
-.thumb-name {
-  font-size: 11px; font-weight: 600;
+.q-oe { display: inline; }
+.q-oe + .q-oe::before { content: ' · '; color: #C9CDD2; }
+.q-oe.empty { color: #C9CDD2; font-style: italic; font-family: inherit; }
+
+/* 时间 */
+.q-row-time {
+  font-size: 11px; color: #B4BBC4;
+  font-family: 'SF Mono', Consolas, Menlo, monospace;
+  white-space: nowrap; justify-self: end;
+}
+
+/* 箭头 */
+.q-arrow {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; color: #B4BBC4;
+  transition: transform 0.2s;
+}
+.q-arrow.open { transform: rotate(180deg); color: var(--c-text-sub); }
+
+/* ==================== 展开详情 ==================== */
+.q-expand {
+  position: relative; z-index: 1;
+  padding: 0 16px 16px 16px;
+  border-bottom: 1px solid #E5E7EB;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* 来源条 */
+.q-source {
+  font-size: 11px; color: var(--c-text-muted);
+  padding: 6px 0 2px 0;
+}
+
+/* 白色圆角卡片 */
+.q-card {
+  background: #FFFFFF;
+  border: 1px solid #EAECEF;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.q-card.error {
+  background: #FDECEE;
+  border-color: #F5C2C2;
+}
+
+.q-card-title {
+  font-size: 11px; font-weight: 600; color: var(--c-text-muted);
+  margin-bottom: 8px; letter-spacing: 0.3px;
+}
+
+/* key-value 行 */
+.q-kv {
+  display: grid; grid-template-columns: 72px 1fr;
+  gap: 8px; align-items: center;
+  font-size: 11.5px; line-height: 1.6;
+}
+.q-kv + .q-kv { margin-top: 2px; }
+.q-k { color: var(--c-text-muted); }
+.q-v { color: var(--c-text); word-break: break-all; }
+.q-v.mono { font-family: 'SF Mono', Consolas, Menlo, monospace; }
+.q-v.red { color: #D1242F; }
+
+/* 空提示 */
+.q-empty {
+  font-size: 11.5px; color: #B4BBC4;
+  text-align: center; padding: 12px 0;
+}
+
+/* 错误消息 */
+.q-error-msg {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 11.5px; color: #D1242F; line-height: 1.5;
+}
+.q-error-msg svg { flex-shrink: 0; margin-top: 1px; }
+
+/* OE 清单（纯编号列表，品牌报价留给详情页） */
+.q-oes { display: flex; flex-direction: column; gap: 2px; }
+.q-oe-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: 4px;
+  font-size: 12px;
+}
+.q-oe-item:hover { background: #F7F8FA; }
+.q-oe-num {
+  width: 18px; height: 18px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 600; color: #8C959F;
+  background: #F0F2F5; border-radius: 4px;
+}
+.q-oe-code {
+  color: var(--c-text);
+  font-family: 'SF Mono', Consolas, Menlo, monospace;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.thumb-oe { font-size: 10px; color: var(--c-text-muted); }
-.thumb-price { font-size: 12px; font-weight: 700; color: var(--c-primary); margin-top: 2px; }
 
-/* 话术 + 改价发送 */
-.send-block {
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-md);
-  padding: 6px 8px;
+/* ==================== 按钮 ==================== */
+.q-actions {
+  display: flex; gap: 8px; padding-top: 2px;
 }
-.send-head {
-  font-size: 11px; font-weight: 600; color: var(--c-text-sub);
-  margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;
+.q-btn {
+  font-family: inherit; cursor: pointer;
+  border-radius: 6px; font-weight: 500;
+  transition: all 0.12s; border: 1px solid transparent;
 }
-.copy { color: var(--c-primary); font-weight: 400; cursor: pointer; font-size: 11px; }
-.copy:hover { text-decoration: underline; }
+.q-btn-lg { padding: 7px 16px; font-size: 12px; }
+.q-btn.primary {
+  background: #3370FF; color: #FFFFFF;
+}
+.q-btn.primary:hover { background: #2461F0; }
+.q-btn.ghost {
+  background: #FFFFFF; color: var(--c-text-sub);
+  border-color: #E2E5EA;
+}
+.q-btn.ghost:hover { background: #F5F7FA; color: var(--c-text); }
 
-.quote-text {
-  width: 100%; box-sizing: border-box;
-  font-size: 11px; line-height: 1.55; font-family: inherit;
-  color: var(--c-text); background: #fafbfd;
-  border: 1px solid var(--c-border); border-radius: var(--r-xs);
-  padding: 5px 6px; resize: vertical;
+/* ==================== 过渡 ==================== */
+.expand-enter-active, .expand-leave-active {
+  transition: opacity 0.18s ease;
 }
-.price-row { display: flex; gap: 6px; margin-top: 6px; }
-.price-input {
-  flex: 1; min-width: 0; box-sizing: border-box;
-  font-size: 12px; padding: 5px 8px;
-  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
-  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+.expand-enter-from, .expand-leave-to {
+  opacity: 0;
 }
-.price-input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 3px rgba(232, 32, 22, 0.1); }
-.btn {
-  flex-shrink: 0; font-size: 12px; padding: 5px 12px;
-  border-radius: var(--r-md); border: 1px solid var(--c-border-strong);
-  background: var(--c-panel); color: var(--c-text); cursor: pointer;
-  transition: all 0.15s;
-}
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn.send {
-  background: var(--c-primary); border-color: var(--c-primary-deep);
-  color: #fff; font-weight: 600;
-  box-shadow: 0 1px 4px rgba(232, 32, 22, 0.25);
-}
-.btn.send:hover:not(:disabled) { background: var(--c-primary-deep); }
-.btn.ignore:hover:not(:disabled) { color: var(--c-danger); border-color: var(--c-danger); }
-.sent-note { margin-top: 6px; font-size: 11px; color: #15803d; }
 </style>

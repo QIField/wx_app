@@ -1,10 +1,9 @@
 <script setup>
-/** 视图一：自动报价 —— AI 执行开关 + 报价模式 + 新消息触发流（真实询价 feed）。
+/** 自动报价 Feed —— 重构版（按 prototype-quote-panel.html 设计稿）。
  *
- * 数据：GET /quote/inquiries（绑定设备口径，id 倒序）一次拉 200 条，卡片按状态呈现：
- *   pending/review 可操作（展开改价发送/忽略）、sent 只读、ignored/blocked 置灰。
- * 新鲜度：15s 轮询 + WS quote_inquiry_changed 静默刷新；暂停按钮停轮询。
- * 开关/模式：GET /quote/config 回填；PUT 保存失败回滚原值 + toast（客服 403 文案后端给）。
+ * 顶栏：AI 自动报价开关 + 今日统计 + 筛选 chips。
+ * 列表：纯分隔线列表，QuoteCard 单卡承载 VIN/OE 双行收起 + 3 种展开模板。
+ * 数据：GET /quote/inquiries + 15s 轮询 + WS quote_inquiry_changed 静默刷新。
  */
 import { computed, onActivated, onDeactivated, onBeforeUnmount, ref } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -16,26 +15,52 @@ const POLL_MS = 15000
 const FETCH_LIMIT = 200
 
 const { aiOn, mode, load: loadConfigFields } = useQuoteConfig()
-const saved = ref({ aiOn: true, mode: 'preview' }) // 最近一次成功落库值（失败回滚基准）
+const saved = ref({ aiOn: true, mode: 'preview' })
 
 const rows = ref([])
 const loading = ref(false)
 const loaded = ref(false)
 const paused = ref(false)
 let timer = null
-let sub = null // connectWs 订阅 {ws, stop}，卸载时 stop() 防重连泄漏
+let sub = null
 
-const modeCls = computed(() => (!aiOn.value ? 'off' : mode.value === 'auto' ? 'auto' : 'preview'))
-const modeTxt = computed(() =>
-  !aiOn.value ? '未开启' : mode.value === 'auto' ? '识别成功自动发送' : '仅侧边预览')
+/* ---------- 筛选状态 ---------- */
+const filter = ref('all')
+const FILTER_CHIPS = [
+  { key: 'all',       label: '全部' },
+  { key: 'quoted',    label: '已报价' },
+  { key: 'pending',   label: '待处理' },
+  { key: 'normal',    label: '正常询价' },
+  { key: 'abnormal',  label: '异常询价' },
+]
 
+/* ---------- 统计（本地 count，不用新 API） ---------- */
+const stats = computed(() => ({
+  total:  rows.value.length,
+  quoted: rows.value.filter(r => r.status === 3).length,
+  pending: rows.value.filter(r => [0, 1].includes(r.status)).length,
+}))
+
+/* ---------- 过滤 ---------- */
+const filteredRows = computed(() => {
+  const list = rows.value
+  const hasError = r => !!(r.price_json && r.price_json.error)
+  switch (filter.value) {
+    case 'quoted':   return list.filter(r => r.status === 3)
+    case 'pending':  return list.filter(r => [0, 1].includes(r.status))
+    case 'normal':   return list.filter(r => !hasError(r) && r.status !== 4)
+    case 'abnormal': return list.filter(r => hasError(r) || r.status === 4)
+    default: return list
+  }
+})
+
+/* ---------- 配置读写（保留原有逻辑） ---------- */
 async function loadConfig() {
   try {
     await loadConfigFields()
     saved.value = { aiOn: aiOn.value, mode: mode.value }
-  } catch { /* 配置拉取失败不打断 feed，开关保持默认值可重试 */ }
+  } catch { /* 不打断 */ }
 }
-
 async function saveConfig(payload) {
   try {
     await saveQuoteConfig(payload)
@@ -48,46 +73,31 @@ async function saveConfig(payload) {
   }
 }
 
+/* ---------- 拉取 + 轮询 + WS ---------- */
 async function fetchRows(silent = false) {
   if (!silent) loading.value = true
   try {
     const res = await fetchQuoteInquiries({ limit: FETCH_LIMIT })
     rows.value = res?.list || []
     loaded.value = true
-  } catch {
-    /* 轮询失败不打断页面，下个周期再试 */
-  } finally {
-    loading.value = false
-  }
+  } catch { /* 不打断 */ }
+  finally { loading.value = false }
 }
-
-function refresh() {
-  fetchRows(true)
-}
-
+function refresh() { fetchRows(true) }
 function onWsEvent(event) {
-  if (event === 'quote_inquiry_changed') refresh() // 落库/动作广播 → 静默刷新
+  if (event === 'quote_inquiry_changed') refresh()
 }
-
 function startPolling() {
   if (timer) return
-  timer = setInterval(() => {
-    if (!paused.value) refresh()
-  }, POLL_MS)
+  timer = setInterval(() => { if (!paused.value) refresh() }, POLL_MS)
   sub = connectWs(onWsEvent)
 }
 function stopPolling() {
-  clearInterval(timer)
-  timer = null
+  clearInterval(timer); timer = null
   if (sub) { sub.stop(); sub = null }
 }
-
-// keep-alive 场景：首次激活 / 每次重新激活都要启动
 onActivated(() => {
-  if (!loaded.value) {
-    fetchRows()
-    loadConfig()
-  }
+  if (!loaded.value) { fetchRows(); loadConfig() }
   startPolling()
 })
 onDeactivated(stopPolling)
@@ -95,108 +105,116 @@ onBeforeUnmount(stopPolling)
 </script>
 
 <template>
-  <div class="auto">
-    <div class="strip">
-      <div class="strip-row">
-        <span class="lbl">AI 智能识别</span>
-        <label class="qq-switch" :title="aiOn ? '已开启' : '已关闭'">
+  <div class="feed">
+
+    <!-- ======== 顶栏：AI 开关 + 今日统计 ======== -->
+    <div class="sub">
+      <div class="ai-switch">
+        <span class="dot"></span>
+        AI 自动报价
+        <label class="sw" :title="aiOn ? '已开启' : '已关闭'">
           <input v-model="aiOn" type="checkbox" @change="saveConfig({ ai_enabled: aiOn })">
-          <span class="track"></span>
+          <span class="track"><span class="knob"></span></span>
         </label>
-        <span class="mode-chip" :class="modeCls">{{ modeTxt }}</span>
       </div>
-      <div class="strip-row">
-        <span class="sw-label">自动报价模式</span>
-        <select v-model="mode" class="mode-sel" @change="saveConfig({ quote_mode: mode })">
-          <option value="preview">仅侧边预览</option>
-          <option value="auto">识别成功自动发送</option>
-        </select>
+      <div class="stats">
+        今日 <span class="n t">{{ stats.total }}</span>
+        <span class="s">·</span>
+        已报价 <span class="n g">{{ stats.quoted }}</span>
+        <span class="s">·</span>
+        待处理 <span class="n a">{{ stats.pending }}</span>
       </div>
     </div>
 
-    <div class="feed-head">
-      <span class="t">新消息触发流</span>
-      <span class="live" :class="{ paused: paused }"><i></i>{{ paused ? 'PAUSED' : 'LIVE' }}</span>
-      <button class="pause" @click="paused = !paused">{{ paused ? '▶ 继续' : '⏸ 暂停' }}</button>
+    <!-- ======== 筛选 chips ======== -->
+    <div class="filter">
+      <button
+        v-for="c in FILTER_CHIPS" :key="c.key"
+        class="chip" :class="{ active: filter === c.key }"
+        @click="filter = c.key"
+      >{{ c.label }}</button>
     </div>
 
-    <div v-loading="loading && !loaded" class="feed">
+    <!-- ======== 列表 ======== -->
+    <ul v-loading="loading && !loaded" class="list">
       <QuoteCard
-        v-for="q in rows" :key="q.id"
-        :inquiry="q" :class="{ dim: [2, 4].includes(q.status) }"
+        v-for="q in filteredRows" :key="q.id"
+        :inquiry="q"
         @refresh="refresh"
       />
-      <div v-if="loaded && !rows.length" class="qq-empty">暂无询价</div>
-    </div>
+      <li v-if="loaded && !filteredRows.length" class="empty">
+        {{ rows.length ? '当前筛选下暂无询价' : '暂无询价' }}
+      </li>
+    </ul>
+
   </div>
 </template>
 
 <style scoped>
-.auto { display: flex; flex-direction: column; min-height: 100%; }
-
-/* 配置横幅：红软底（参照车车安乘配「推广商城」横幅），两行布局适配窄面板 */
-.strip {
-  padding: 9px 11px;
-  background: var(--c-primary-soft);
-  border: 1px solid #f9c7c5;
-  border-radius: var(--r-lg);
-  margin-bottom: 10px;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.lbl { font-size: 11px; color: var(--c-primary-deep); font-weight: 700; white-space: nowrap; }
-.sw-label { font-size: 11px; color: var(--c-text-sub); white-space: nowrap; }
-.mode-sel {
-  flex: 1; min-width: 0; padding: 4px 6px; font-size: 11px;
-  border: 1px solid #f9c7c5; border-radius: var(--r-md);
-  background: var(--c-panel); color: var(--c-text); outline: none; font-family: inherit;
-  transition: border-color 0.15s;
-}
-.mode-sel:focus { border-color: var(--c-primary); }
-
-.mode-chip { margin-left: auto; font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
-.mode-chip.preview { background: var(--c-warn-soft); color: var(--c-warn); border: 1px solid rgba(240, 130, 30, 0.35); }
-.mode-chip.auto { background: var(--c-ok-soft); color: var(--c-ok); border: 1px solid rgba(24, 160, 88, 0.35); }
-.mode-chip.off { background: var(--c-bg); color: var(--c-text-sub); border: 1px solid var(--c-border); }
-
-.feed-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; }
-.feed-head .t {
-  font-weight: 700; font-size: 12px;
-  display: flex; align-items: center; gap: 6px;
-}
-/* 章节标题红色竖条（车车安乘配卡片标题语言） */
-.feed-head .t::before {
-  content: ''; width: 3px; height: 12px; flex: none;
-  border-radius: 2px;
-  background: var(--c-primary);
-}
-.live { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--c-ok); font-family: var(--f-num); }
-.live i { width: 6px; height: 6px; border-radius: 50%; background: var(--c-ok); animation: blink 1.2s infinite; }
-.live.paused { color: var(--c-text-sub); }
-.live.paused i { background: var(--c-border-strong); animation: none; }
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
-.pause {
-  margin-left: auto; font-size: 11px; padding: 3px 9px;
-  border: 1px solid var(--c-border-strong); border-radius: 999px;
-  color: var(--c-text-sub); cursor: pointer; background: var(--c-panel);
-  transition: all 0.15s;
-}
-.pause:hover { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-soft); }
-
-/* feed 卡片：白卡浮起，hover 轻抬 */
-.feed { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
-.feed > :deep(.card) {
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-lg);
+/* ======== 顶栏 ======== */
+.feed {
+  display: flex; flex-direction: column; min-height: 0;
   background: var(--c-panel);
-  box-shadow: 0 2px 8px rgba(31, 45, 61, 0.05);
-  overflow: hidden;
-  transition: box-shadow 0.15s, border-color 0.15s;
 }
-.feed > :deep(.card:hover) { border-color: var(--c-border-strong); box-shadow: 0 4px 12px rgba(31, 45, 61, 0.08); }
-.feed > :deep(.card.dim) { opacity: 0.72; }
-.footnote { text-align: center; font-size: 10px; color: var(--c-text-sub); opacity: 0.7; padding: 4px 0 2px; }
+
+.sub {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 16px;
+  border-bottom: 1px solid #EEF0F3;
+  flex-shrink: 0;
+}
+.ai-switch { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--c-text-sub); }
+.ai-switch .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--c-ok);
+  box-shadow: 0 0 0 3px rgba(23,156,82,0.12);
+}
+.sw { cursor: pointer; }
+.sw input { display: none; }
+.sw .track {
+  display: inline-block; width: 30px; height: 16px;
+  background: #D5D8DD; border-radius: 10px;
+  position: relative; transition: background 0.15s;
+  vertical-align: middle;
+}
+.sw input:checked + .track { background: #3370FF; }
+.sw .knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px; background: #fff; border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.12); transition: transform 0.15s;
+}
+.sw input:checked + .track .knob { transform: translateX(14px); }
+
+.stats { font-size: 11.5px; color: var(--c-text-muted); display: flex; gap: 4px; }
+.stats .n { font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats .n.t { color: var(--c-text); }
+.stats .n.g { color: var(--c-ok); }
+.stats .n.a { color: var(--c-warn); }
+.stats .s { color: var(--c-text-muted); margin: 0 1px; }
+
+/* ======== 筛选 ======== */
+.filter {
+  display: flex; gap: 4px; padding: 8px 16px;
+  border-bottom: 1px solid #EEF0F3;
+  flex-shrink: 0; overflow-x: auto;
+}
+.filter::-webkit-scrollbar { display: none; }
+.chip {
+  flex-shrink: 0; font-size: 11px; padding: 3px 10px; border-radius: 10px;
+  background: transparent; color: var(--c-text-sub);
+  border: 1px solid transparent; cursor: pointer;
+  font-family: inherit; font-weight: 500; transition: all 0.15s;
+}
+.chip:hover { background: var(--c-bg); color: var(--c-text); }
+.chip.active { background: #EAF0FB; color: #3370FF; }
+
+/* ======== 列表 ======== */
+.list { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0; }
+.list::-webkit-scrollbar { width: 4px; }
+.list::-webkit-scrollbar-thumb { background: #EEF0F3; border-radius: 4px; }
+
+.empty {
+  padding: 40px 0; text-align: center;
+  font-size: 12px; color: var(--c-text-muted);
+}
 </style>
