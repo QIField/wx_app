@@ -32,6 +32,10 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+    # [perf] 分段耗时日志（conversations/messages 等接口）走 INFO 输出；
+    # 生产环境可按需降到 WARNING，或通过 app.logger.handlers 精细控制。
+    app.logger.setLevel(__import__("logging").INFO)
+
     db.init_app(app)
     sock.init_app(app)
 

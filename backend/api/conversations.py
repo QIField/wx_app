@@ -67,12 +67,18 @@ def _my_conversation(conversation_id):
 @bp.get("/api/conversations")
 @require_role()
 def list_conversations():
-    """会话列表：当前设备内 置顶优先，其余按最后消息时间倒序（NULL 排最后）。"""
-    if not _my_openids():
+    """会话列表：当前设备内 置顶优先，其余按最后消息时间倒序（NULL 排最后）。
+
+    [perf] 分段：resolve → query → remarks → assemble → total，带 openid 前缀、n 条数。
+    """
+    _t0 = time.perf_counter()
+    my_openids = _my_openids()
+    if not my_openids:
         return jsonify(code=0, msg="success", data=[])
     openid, err = _active_openid()
     if err:
         return err
+    _t1 = time.perf_counter()
 
     rows = (
         Conversation.query.filter(
@@ -86,9 +92,34 @@ def list_conversations():
         )
         .all()
     )
+    _t2 = time.perf_counter()
+
     # 批量查 ContactRemarkConfig 覆盖会话名（一次查询 N 个会话，避免 N+1）
     remarks = _batch_conv_remarks(rows)
-    return jsonify(code=0, msg="success", data=[_conv_json(c, remarks) for c in rows])
+    _t2b = time.perf_counter()
+    # 批量查 Contact → contact_id（一次查询 N 个会话，避免 N+1；
+    # 群聊 Contact 行未入库时批量也命不中——此时返回 None，不再单条白查，
+    # 由 open_conversation 等单点接口按需补查）
+    contact_ids = _batch_conv_contact_ids(rows)
+    _t3 = time.perf_counter()
+
+    data = [_conv_json(c, remarks, contact_ids, skip_contact_fallback=True) for c in rows]
+    _t4 = time.perf_counter()
+
+    hit = sum(
+        1 for c in rows
+        if (c.openid, c.wxid,
+            Contact.TYPE_FRIEND if c.chat_type == Conversation.CHAT_SINGLE else Contact.TYPE_GROUP)
+        in contact_ids
+    )
+    current_app.logger.info(
+        "[perf] conversations openid=%s resolve=%.0fms query=%.0fms remarks=%.0fms contacts=%.0fms assemble=%.0fms total=%.0fms n=%d contact_hit=%d",
+        openid[:8] if openid else "",
+        (_t1 - _t0) * 1000, (_t2 - _t1) * 1000, (_t2b - _t2) * 1000,
+        (_t3 - _t2b) * 1000, (_t4 - _t3) * 1000, (_t4 - _t0) * 1000,
+        len(rows), hit,
+    )
+    return jsonify(code=0, msg="success", data=data)
 
 
 @bp.post("/api/conversations")
@@ -343,31 +374,59 @@ def _batch_conv_remarks(convs):
     return {(rc.scope_type, rc.target_wxid): (rc.remark_name or "") for rc in rows}
 
 
+def _batch_conv_contact_ids(convs):
+    """批量查 Contact → (openid, wxid, type): id。一次 SQL 兜住 N 个会话的 contact_id，避免 N+1。"""
+    if not convs:
+        return {}
+    openid = convs[0].openid  # 同一设备内 openid 全部相同
+    single_wxids = [c.wxid for c in convs if c.chat_type == Conversation.CHAT_SINGLE]
+    group_wxids = [c.wxid for c in convs if c.chat_type == Conversation.CHAT_GROUP]
+    if not single_wxids and not group_wxids:
+        return {}
+    rows = Contact.query.filter(
+        Contact.openid == openid,
+        Contact.deleted_at.is_(None),
+        db.or_(
+            db.and_(Contact.type == Contact.TYPE_FRIEND, Contact.wxid.in_(single_wxids)) if single_wxids else db.false(),
+            db.and_(Contact.type == Contact.TYPE_GROUP, Contact.wxid.in_(group_wxids)) if group_wxids else db.false(),
+        ),
+    ).all()
+    return {(openid, r.wxid, r.type): r.id for r in rows}
+
+
 def _scope_of(conv):
     """会话 → ContactRemarkConfig scope：群聊=group，单聊=user。"""
     return SCOPE_GROUP if conv.chat_type == Conversation.CHAT_GROUP else SCOPE_USER
 
 
-def _conv_json(c, remarks=None):
+def _conv_json(c, remarks=None, contact_ids=None, skip_contact_fallback=False):
     """会话出参（脱敏契约）：不含 wxid；名称未解析 → name=None + alias，头像一并匿名。
 
     展示优先级：ContactRemarkConfig.remark_name > 中间方昵称 > 匿名标识。
     附 pinyin/initials/pinyin_toks 供会话搜索框拼音匹配（输入 zhang/z 命中 张峰）。
+
+    contact_ids 可选批量 dict（列表接口传）；skip_contact_fallback=True 时
+    批量 miss 直接返回 None，不再单条白查——列表接口里 200+ 次 miss 累计 1.3s 就是被这拖慢的。
+    单点接口（open_conversation / list_messages）不传 skip，miss 会单查兜底。
     """
     remarks = remarks or {}
+    contact_ids = contact_ids or {}
     scope = _scope_of(c)
     remark_name = (remarks.get((scope, c.wxid)) or "").strip()
     if remark_name:
         name = remark_name
     else:
         name = anonymize.resolved_name(c.name, c.wxid)
-    # conv → contact_id 映射：Conversation.wxid + openid 定位 Contact 行
-    contact_id = None
-    contact_type = 1 if c.chat_type == Conversation.CHAT_SINGLE else 2
-    contact = Contact.query.filter_by(
-        wxid=c.wxid, openid=c.openid, type=contact_type, deleted_at=None,
-    ).first()
-    if contact: contact_id = contact.id
+    # conv → contact_id：先查批量 dict，miss 按需单条回退
+    contact_type = Contact.TYPE_FRIEND if c.chat_type == Conversation.CHAT_SINGLE else Contact.TYPE_GROUP
+    key = (c.openid, c.wxid, contact_type)
+    contact_id = contact_ids.get(key)
+    if contact_id is None and not skip_contact_fallback:
+        contact = Contact.query.filter_by(
+            wxid=c.wxid, openid=c.openid, type=contact_type, deleted_at=None,
+        ).first()
+        if contact:
+            contact_id = contact.id
     return {
         "id": c.id,
         "chat_type": c.chat_type,
