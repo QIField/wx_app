@@ -95,8 +95,14 @@ def sync_device(openid):
     latest = cursor.last_sync_time
     pushed = []   # 本轮新入库的消息，commit 后统一广播
     revokes = []  # 本轮命中的撤回事件（原消息已打标），commit 后广播
+    group_event_groups = set()  # 群事件涉及的群 wxid（去重）
     for item in items:
-        saved = _save_message(openid, item, revokes)
+        fields = _normalize(item, openid)
+        if fields is None:
+            continue
+        if fields.get("group_event"):
+            group_event_groups.add(fields["peer_wxid"])
+        saved = _save_message(openid, item, revokes, _fields=fields)
         if saved is None:
             continue
         pushed.append(saved)
@@ -105,7 +111,38 @@ def sync_device(openid):
 
     cursor.last_sync_time = latest
     db.session.commit()
+
+    # 群事件（进群/退群/被踢）→ 立即 chatroom_info 补拉，让成员名册对齐
+    if group_event_groups:
+        _refresh_group_events(openid, group_event_groups)
+
     return pushed, revokes
+
+
+def _refresh_group_events(openid, group_wxids):
+    """群事件触发的 chatroom_info 补拉：让成员名册与微信权威名册对齐。
+
+    成员退群后，save_members → reconcile 会把不在 memberList 里的成员
+    标记 deleted_at。这条链路是退群清理的主路径——兜底轮只处理"缺资料"
+    的群，已齐资料的群靠这里的事件驱动同步。
+    """
+    from backend.models.conversation import Conversation
+    from backend.sync import group_profile
+
+    try:
+        convs = Conversation.query.filter(
+            Conversation.openid == openid,
+            Conversation.wxid.in_(group_wxids),
+            Conversation.chat_type == Conversation.CHAT_GROUP,
+            Conversation.deleted_at.is_(None),
+        ).all()
+        if convs:
+            group_profile.refresh_groups_now(openid, convs)
+    except Exception as exc:  # noqa: BLE001 补拉失败不影响收消息主链路
+        db.session.rollback()
+        from flask import current_app
+
+        current_app.logger.warning("群事件名册补拉失败: %s", exc)
 
 
 def broadcast_messages(pushed, openid=""):
@@ -190,7 +227,7 @@ def _extract_messages(body):
     return (data or {}).get("list") or []
 
 
-def _save_message(openid, item, revokes=None):
+def _save_message(openid, item, revokes=None, _fields=None):
     """单条消息入库：去重 → 转字段 → 建/找会话 → 写 message → 更新会话。
 
     撤回通知不入库：按 msgid 定位原消息打 revoked 标记，事件挂到 revokes；
@@ -198,8 +235,11 @@ def _save_message(openid, item, revokes=None):
     噪音消息（51 状态同步/游戏中心等微信不渲染的事件）入库即软删：留底
     不展示，不建会话、不广播、不刷摘要。正常入库时返回推送信息字典
     （commit 后供广播用）；重复或坏数据返回 None。
+
+    _fields：外部已算好的 normalize 结果（sync_device 提前算一次用来
+    判断群事件，避免这里重复解析）；None 时内部自己调 _normalize。
     """
-    fields = _normalize(item, openid)
+    fields = _fields if _fields is not None else _normalize(item, openid)
     if fields is None:
         return None
 
@@ -303,6 +343,7 @@ def _normalize(item, openid=""):
         revoke = None
         sys_notice = False
         noise = False
+        group_event = False  # 群成员/设置变更事件（sysmsgtemplate）→ 触发 chatroom_info 补拉
         kind = msg_xml.classify(content)
         if kind == msg_xml.REVOKE:
             revoke = msg_xml.revoke_info(content)
@@ -311,6 +352,9 @@ def _normalize(item, openid=""):
         elif raw_type == sysmsg.STATUS_NOTIFY or content.lstrip().startswith("<"):
             # 撤回之外的系统事件：能转文案的转微信同款灰条，
             # 微信不渲染的（51/游戏中心等）标噪音软删
+            # 在 content 被灰条文案替换前先判断是否群事件
+            if "@chatroom" in peer_wxid and msg_xml.is_group_event(content):
+                group_event = True
             sys_gray, noise = sysmsg.resolve(content, raw_type, openid)
             if sys_gray:
                 content = sys_gray
@@ -320,6 +364,8 @@ def _normalize(item, openid=""):
             payload["system"] = True
         if noise:
             payload["noise"] = True
+        if group_event:
+            payload["group_event"] = True
         if kind in (msg_xml.LINK, msg_xml.FILE):
             payload["app"] = msg_xml.app_info(content)
         if kind == msg_xml.QUOTE:
@@ -350,6 +396,7 @@ def _normalize(item, openid=""):
             "payload": payload,
             "revoke": revoke,
             "noise": noise,
+            "group_event": group_event,  # 群成员/设置变更 → 触发 chatroom_info 补拉
             "middle_msg_id": str(item.get("msg_id") or ""),
             "new_msg_id": str(
                 item.get("new_msg_id")

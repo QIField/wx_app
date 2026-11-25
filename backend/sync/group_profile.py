@@ -27,6 +27,11 @@ _fail_counts = {}    # (openid, wxid) -> 连续失败次数（内存即可）
 _pending = {}        # task_uuid -> (conversation_id, wxid, openid)：已下发待收割的群资料任务
 _pending_fails = {}  # task_uuid -> 收割失败轮数（超 5 轮丢弃，防永久占坑）
 
+# 名册兜底对账：活跃群周期性同步 memberList（防 sysmsg 丢失导致退群成员残留）
+# (openid, wxid) → 上次 chatroom_info 下发时间戳；仅兜底使用，进程重启清零
+_roster_sync_ts = {}
+ROSTER_SYNC_CUTOFF = 3600   # 同一群兜底对账冷却期 1 小时
+
 
 def missing_profile(conv):
     """资料是否缺失：群名/头像缺失，或群聊的成员名册还没落库。
@@ -85,7 +90,13 @@ def dispatch_group_tasks(openid=None):
 
     openid 传入时只处理该设备的群（登录全量路径），缺省处理全部。
     已判定离线的设备不发任务（失败会白烧重试次数），翻身在线后自动恢复。
+
+    兜底对账：缺资料群处理完后，若仍有剩余下发名额，给活跃但已齐资料的群
+    周期性同步 memberList（防 sysmsg 丢失导致退群成员残留）。
     """
+    import time as _time
+
+    from backend.models.group_member import GroupMember
     from backend.services.devices import offline_devices
 
     offline = offline_devices()
@@ -97,6 +108,8 @@ def dispatch_group_tasks(openid=None):
     slots = PROFILE_BATCH - len(_pending)
     if slots <= 0:
         return
+
+    # ---- 第一段：给缺资料的群下发 ----
     for conv in unnamed_groups(limit=slots, openid=openid):
         if conv.openid in offline:
             continue
@@ -109,6 +122,61 @@ def dispatch_group_tasks(openid=None):
         client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid},
                     task_uuid, openid=conv.openid or "")
         _pending[task_uuid] = (conv.id, conv.wxid, conv.openid)
+        pending_wxids.add(key)
+
+    # ---- 第二段：兜底名册对账 ----
+    # 缺资料群处理完后，剩余 slots 给活跃但已齐资料的群同步 memberList
+    remaining = PROFILE_BATCH - len(_pending)
+    if remaining <= 0:
+        return
+    now = _time.time()
+    for conv in _active_groups_needing_roster_sync(remaining, openid=openid, offline=offline):
+        key = (conv.openid, conv.wxid)
+        if key in pending_wxids:
+            continue
+        if _fail_counts.get(key, 0) >= MAX_FAIL_RETRY:
+            continue
+        if now - _roster_sync_ts.get(key, 0) < ROSTER_SYNC_CUTOFF:
+            continue
+        task_uuid = new_task_uuid()
+        client.call("group_api", "chatroom_info", {"chatroom_id": conv.wxid},
+                    task_uuid, openid=conv.openid or "")
+        _pending[task_uuid] = (conv.id, conv.wxid, conv.openid)
+        _roster_sync_ts[key] = now
+        pending_wxids.add(key)
+
+
+def _active_groups_needing_roster_sync(limit, openid=None, offline=None):
+    """活跃且已齐资料的群（有未删除成员、有最近消息）：兜底名册对账候选。
+
+    只挑"资料齐全 + 有活跃成员"的群——缺资料的群已在 unnamed_groups 覆盖。
+    有活跃成员说明群在用，退群清理有价值；没活跃成员的空壳群暂时不管。
+    """
+    from backend.models.group_member import GroupMember
+
+    filters = [
+        Conversation.deleted_at.is_(None),
+        Conversation.chat_type == Conversation.CHAT_GROUP,
+        GroupMember.deleted_at.is_(None),
+    ]
+    if openid:
+        filters.append(Conversation.openid == openid)
+    if offline:
+        filters.append(Conversation.openid.notin_(offline))
+    return (
+        Conversation.query.outerjoin(
+            GroupMember,
+            db.and_(
+                GroupMember.openid == Conversation.openid,
+                GroupMember.chatroom_wxid == Conversation.wxid,
+            ),
+        )
+        .filter(*filters)
+        .group_by(Conversation.id)
+        .order_by(Conversation.last_msg_at.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def unnamed_groups(limit, openid=None):

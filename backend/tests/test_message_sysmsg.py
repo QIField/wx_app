@@ -218,3 +218,88 @@ def test_sync_unknown_sysmsg_noise(app, monkeypatch):
 
     assert Message.query.count() == 0
     assert Conversation.query.count() == 0
+
+
+# ---------- 群事件触发名册同步 ----------
+
+def test_is_group_event_identifies_sysmsgtemplate():
+    """is_group_event：只认 sysmsgtemplate，撤回/拍一拍/普通 sysmsg 都不是。"""
+    assert msg_xml.is_group_event(TEMPLATE_XML) is True
+    assert msg_xml.is_group_event(PAT_XML) is False
+    assert msg_xml.is_group_event('<sysmsg type="revokemsg"></sysmsg>') is False
+    assert msg_xml.is_group_event('<sysmsg type="guide"><template>欢迎</template></sysmsg>') is False
+    assert msg_xml.is_group_event("普通文本") is False
+    assert msg_xml.is_group_event("<msg></msg>") is False
+
+
+def test_sync_group_event_triggers_roster_refresh(app, monkeypatch):
+    """群事件 sysmsgtemplate → 触发 refresh_groups_now 同步成员名册。
+
+    退群/进群/被踢等事件发生时，微信会发 sysmsgtemplate 系统消息。
+    收消息侧识别到后应立即补拉 chatroom_info，让 group_member 表的
+    退群成员被 reconcile 标记为 deleted_at。
+    """
+    from backend.sync import group_profile
+
+    # 先造一个群会话（openid=dev01）
+    conv = Conversation(openid="dev01", wxid="88888888@chatroom",
+                       chat_type=Conversation.CHAT_GROUP, name="测试群")
+    from backend.extensions import db
+    db.session.add(conv)
+    db.session.commit()
+
+    # mock refresh_groups_now 来记录调用
+    refreshed = []
+
+    def fake_refresh(openid, convs):
+        refreshed.extend([c.wxid for c in convs])
+
+    monkeypatch.setattr(group_profile, "refresh_groups_now", fake_refresh)
+
+    # mock client.call （让 get_message 返回群事件）
+    item_with_prefix = make_item(
+        msg_id="mt1", new_msg_id="nt1",
+        from_wxid="88888888@chatroom",
+        content=TEMPLATE_XML,
+    )
+    patch_pull(monkeypatch, make_body([item_with_prefix]))
+
+    message_sync.sync_once(app)
+
+    # 验证群事件触发了 refresh_groups_now
+    assert "88888888@chatroom" in refreshed
+
+
+def test_sync_non_group_event_no_refresh(app, monkeypatch):
+    """拍一拍（sysmsg type=pat）不是群成员变更事件 → 不触发 refresh_groups_now。"""
+    from backend.sync import group_member as gm_mod
+    from backend.sync import group_profile
+
+    conv = Conversation(openid="dev01", wxid="88888888@chatroom",
+                       chat_type=Conversation.CHAT_GROUP, name="测试群")
+    from backend.extensions import db
+    db.session.add(conv)
+    db.session.commit()
+
+    # mock sender_profiles（拍一拍需要查名册）
+    monkeypatch.setattr(
+        gm_mod, "sender_profiles",
+        lambda openid, chatroom, wxids: {
+            "wxid_customer": {"nickname": "客户", "avatar": ""},
+            "wxid_me": {"nickname": "我", "avatar": ""}})
+
+    refreshed = []
+    monkeypatch.setattr(group_profile, "refresh_groups_now",
+                        lambda o, cs: refreshed.extend([c.wxid for c in cs]))
+
+    item_with_prefix = make_item(
+        msg_id="mp1", new_msg_id="np1",
+        from_wxid="88888888@chatroom",
+        content=PAT_XML,
+    )
+    patch_pull(monkeypatch, make_body([item_with_prefix]))
+
+    message_sync.sync_once(app)
+
+    # 拍一拍不是群成员变更，不应触发 refresh_groups_now
+    assert refreshed == []

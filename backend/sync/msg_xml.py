@@ -237,6 +237,25 @@ def quote_refer_svrid(content):
     return svrid or None
 
 
+# sysmsg type 常量：群事件模板（进群/退群/被踢/群设置变更）
+_SYSMSG_TYPE = "sysmsgtemplate"
+
+
+def is_group_event(content):
+    """是否为群成员/设置变更事件（<sysmsg type="sysmsgtemplate">）。
+
+    这类事件包括：邀请入群、主动退群、被移出群、群名修改等。
+    收消息侧据此触发 chatroom_info 补拉，让成员名册（group_member）
+    与微信权威名册保持同步——退群成员及时标记 deleted_at。
+
+    注意：撤回通知 type=revokemsg、拍一拍 type=pat，都不是群成员变更。
+    """
+    root = _parse(content)
+    if root is None or root.tag.lower() != "sysmsg":
+        return False
+    return (root.attrib.get("type") or "").lower() == _SYSMSG_TYPE
+
+
 def image_size(content):
     """图片消息的缩略图像素尺寸 (w, h)，取不到或非法返回 None。
 
