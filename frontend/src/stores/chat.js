@@ -136,6 +136,7 @@ export const useChatStore = defineStore('chat', {
     loadingMore: false,
     devices: [],         // 绑定的聊天账号卡片 [{openid, remark, display_name, online, unread}]
     activeOpenid: '',    // 当前查看的聊天账号（缺省=第一个绑定）
+    switchingDevice: false, // 切换账号中：全局 loading 锁，阻止重复点击/其他操作
     operatorName: '',    // 当前登录人姓名：本地乐观气泡直接显示操作人
     membersByConv: {},   // 群成员名册缓存 { convId: [{id,name,avatar,alias,pinyin,initials}] }
   }),
@@ -205,15 +206,31 @@ export const useChatStore = defineStore('chat', {
       } catch { /* 检测失败不改状态，等定时检测纠正 */ }
     },
 
-    /** 切换聊天账号：清当前会话并重拉列表（通讯录由页面监听 activeOpenid 重拉）。 */
+    /** 切换聊天账号：清当前会话并重拉列表（通讯录由页面监听 activeOpenid 重拉）。
+     *  [perf] 端到端分段：total / devices_ms / convs_ms —— 和后端 [perf] conversations 对拼看全链路。
+     *  switchingDevice=true 期间全局 loading 锁，阻止重复点击和其他操作。 */
     async switchDevice(openid) {
-      if (openid === this.activeOpenid) return
-      this.activeOpenid = openid
-      this.currentId = null
-      this.currentMessages = []
-      this.membersByConv = {} // 名册按账号隔离，换号必须清缓存
-      this.hasMore = false
-      await Promise.all([this.loadDevices(), this.loadConversations()])
+      if (openid === this.activeOpenid || this.switchingDevice) return
+      this.switchingDevice = true
+      try {
+        const t0 = performance.now()
+        this.activeOpenid = openid
+        this.currentId = null
+        this.currentMessages = []
+        this.membersByConv = {} // 名册按账号隔离，换号必须清缓存
+        this.hasMore = false
+        const t1 = performance.now()
+        const [, tApi] = await Promise.all([
+          this.loadDevices().then(() => ({ t: performance.now() })),
+          this.loadConversations().then(() => ({ t: performance.now() })),
+        ])
+        console.info(
+          `[perf] switchDevice openid=${openid.slice(0, 8)} init=${(t1 - t0).toFixed(0)}ms `
+          `convs=${(tApi.t - t1).toFixed(0)}ms total=${(performance.now() - t0).toFixed(0)}ms`
+        )
+      } finally {
+        this.switchingDevice = false
+      }
     },
 
     async loadConversations() {

@@ -62,7 +62,10 @@ watch(() => chat.activeOpenid, () => { contacts.load() })
 </script>
 
 <template>
-  <div class="frame wb-frame">
+  <div class="frame wb-frame"
+       v-loading.fullscreen.lock="chat.switchingDevice"
+       element-loading-text="正在切换账号…"
+       element-loading-background="rgba(255, 255, 255, 0.55)">
     <header class="topbar">
       <div class="left">
         <div class="brand">
