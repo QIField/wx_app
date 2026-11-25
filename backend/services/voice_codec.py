@@ -33,6 +33,20 @@ _DECODER_TIMEOUT = 60
 _FFMPEG_TIMEOUT = 120
 
 
+def _run(cmd: list[str], timeout: int) -> bool:
+    """跑外部命令，成功返回 True；抛异常或 returncode != 0 返回 False。
+
+    统一 subprocess.run 调用模式：capture_output、error 忽略、超时兜底。
+    """
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, errors="ignore", timeout=timeout,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def find_tool(name: str, explicit: str = "") -> str:
     """按「显式参数 → 环境变量 → PATH → tools/ → scripts/」找可执行文件。"""
     if not explicit:
@@ -86,28 +100,23 @@ def silk_to_mp3(silk: Path, out: Path, rate: int = DEFAULT_RATE) -> Path | None:
             pcm = tmpdir / "audio.pcm"
 
             # 第一步：SILK 解码成裸 PCM（decoder 输入 输出 两个位置参数）
-            result = subprocess.run(
-                [decoder, str(src), str(pcm)],
-                capture_output=True, text=True, errors="ignore",
-                timeout=_DECODER_TIMEOUT,
-            )
-            if result.returncode != 0 or not pcm.is_file() or pcm.stat().st_size == 0:
+            ok = _run([decoder, str(src), str(pcm)], _DECODER_TIMEOUT)
+            if not ok or not pcm.is_file() or pcm.stat().st_size == 0:
                 return None
 
             # 第二步：PCM 按 s16le/单声道/指定采样率解释，编成 64k mp3
             out.parent.mkdir(parents=True, exist_ok=True)
-            result = subprocess.run(
+            ok = _run(
                 [
                     ffmpeg, "-y", "-loglevel", "error",
                     "-f", "s16le", "-ar", str(rate), "-ac", "1",
                     "-i", str(pcm), "-codec:a", "libmp3lame", "-b:a", "64k",
                     str(out),
                 ],
-                capture_output=True, text=True, errors="ignore",
-                timeout=_FFMPEG_TIMEOUT,
+                _FFMPEG_TIMEOUT,
             )
-            if result.returncode != 0 or not out.is_file():
+            if not ok or not out.is_file():
                 return None
         return out
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return None
