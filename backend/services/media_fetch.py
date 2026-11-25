@@ -239,10 +239,10 @@ def sniff_type(data, fallback):
         return "image/gif", ".gif"
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "image/webp", ".webp"
-    if b"#!SILK_V3" in data[:16]:
-        # 微信语音常在魔数前多 1~2 字节长度头（如 02 23），startswith 会漏判成 .bin
+    if b"#!SILK_V3" in data[:64]:
+        # 微信语音常在魔数前多 1~N 字节长度头（如 02 23 或更长），前 16 字节可能漏判成 .bin
         return "audio/silk", ".silk"
-    if b"#!AMR" in data[:16]:
+    if b"#!AMR" in data[:64]:
         return "audio/amr", ".amr"
     if len(data) > 12 and data[4:8] == b"ftyp":
         return "video/mp4", ".mp4"

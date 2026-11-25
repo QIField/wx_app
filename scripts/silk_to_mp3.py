@@ -42,9 +42,23 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="已存在同名 mp3 时覆盖")
     args = parser.parse_args()
 
-    if not voice_codec.find_tool("decoder") or not voice_codec.find_tool("ffmpeg"):
-        print("缺少依赖：decoder（silk-v3-decoder）或 ffmpeg 未找到。")
-        print(f"把可执行文件放到 {voice_codec.SEARCH_DIRS[0]} 或加入 PATH 后重试。")
+    # 依赖检查：解码可用（pysilk 库 or 外部 decoder.exe）+ 编码可用（ffmpeg，imageio-ffmpeg 兜底）
+    has_pysilk = False
+    try:
+        import pysilk  # noqa: F401
+        has_pysilk = True
+    except Exception:
+        pass
+    has_decoder = has_pysilk or bool(voice_codec.find_tool("decoder"))
+    has_ffmpeg = bool(voice_codec.find_tool("ffmpeg"))
+    if not has_decoder or not has_ffmpeg:
+        missing = []
+        if not has_decoder:
+            missing.append("silk-python（pip install silk-python）或 decoder.exe")
+        if not has_ffmpeg:
+            missing.append("ffmpeg（系统安装）或 imageio-ffmpeg（pip install imageio-ffmpeg）")
+        print(f"缺少依赖：{'；'.join(missing)}")
+        print(f"外部可执行文件可放到 {voice_codec.SEARCH_DIRS[0]} 或加入 PATH。")
         return 2
 
     target = Path(args.target)

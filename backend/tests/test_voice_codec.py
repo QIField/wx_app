@@ -49,13 +49,37 @@ def test_silk_to_mp3_rejects_non_silk(tmp_path):
     assert voice_codec.silk_to_mp3(junk, tmp_path / "junk.mp3") is None
 
 
+def _has_silk_decoder():
+    """SILK 解码器可用：pysilk Python 库 or 外部 decoder.exe。"""
+    try:
+        import pysilk  # noqa: F401
+        return True
+    except Exception:
+        pass
+    return bool(voice_codec.find_tool("decoder"))
+
+
+def _has_ffmpeg_encoder():
+    """ffmpeg 可用：系统 ffmpeg or imageio_ffmpeg Python 库。"""
+    return bool(voice_codec.find_tool("ffmpeg"))
+
+
 def test_silk_to_mp3_with_real_tools(tmp_path):
-    """端到端：本机装了 decoder+ffmpeg（tools/）时真转一条（真实样例文件在才执行）。"""
-    src = ROOT / "downloads" / "voice_samples" / "voice_2468_20261031172158.silk"
-    if not src.exists():
+    """端到端：本机装了解码器+ffmpeg（pysilk/imageio-ffmpeg 也算）时真转一条。"""
+    # 优先用 media 目录里已下载的 silk 文件（.gitignore 忽略了 backend/media/，不能用 git ls-files）
+    import glob as _glob
+    candidates = [Path(p) for p in _glob.glob(str(ROOT / "backend" / "media" / "*" / "*.silk"))]
+    if not candidates:
+        # fallback：downloads/voice_samples/ 目录
+        alt = ROOT / "downloads" / "voice_samples"
+        if alt.exists():
+            candidates = list(alt.glob("*.silk"))
+    if not candidates:
         pytest.skip("本机没有真实 silk 样例")
-    if not voice_codec.find_tool("decoder") or not voice_codec.find_tool("ffmpeg"):
-        pytest.skip("本机未安装 decoder/ffmpeg")
+    src = candidates[0]
+
+    if not _has_silk_decoder() or not _has_ffmpeg_encoder():
+        pytest.skip("本机未安装 SILK 解码器或 ffmpeg")
 
     out = tmp_path / "a.mp3"
     result = voice_codec.silk_to_mp3(src, out)

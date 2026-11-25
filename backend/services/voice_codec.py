@@ -1,16 +1,17 @@
 """SILK → mp3 转码唯一实现：媒体落盘后即时转码（media_fetch）与批量脚本共用。
 
 浏览器解不了微信 SILK 编码（voiceformat=4），必须两步走：
-decoder（silk-v3-decoder）把 silk 解成裸 PCM → ffmpeg 按 s16le/单声道/24kHz 编成 mp3。
+SILK 解码成裸 PCM → ffmpeg 按 s16le/单声道/24kHz 编成 mp3。
 
-依赖两个外部程序，按「显式参数 → 环境变量 → PATH → 项目 tools/ → scripts/」查找：
-1. decoder —— https://github.com/kn007/silk-v3-decoder 的 silk_v3_decoder
-2. ffmpeg —— winget install Gyan.FFmpeg 或直接放 tools/
-任一缺失或转码失败都返回 None（不抛错）：调用方降级返回原始 silk，
+依赖策略（优先级从高到低）：
+  SILK 解码：pysilk(Python 库) > 外部 decoder.exe
+  MP3 编码 ：ffmpeg(PATH/tools/scripts/env) > imageio_ffmpeg(Python 库)
+任一环节缺失或转码失败都返回 None（不抛错）：调用方降级返回原始 silk，
 保证「工具没装」只影响能不能播，不影响媒体链路本身。
 """
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import subprocess
@@ -48,9 +49,15 @@ def _run(cmd: list[str], timeout: int) -> bool:
 
 
 def find_tool(name: str, explicit: str = "") -> str:
-    """按「显式参数 → 环境变量 → PATH → tools/ → scripts/」找可执行文件。"""
+    """按「显式参数 → 环境变量 → PATH → tools/ → scripts/ → Python 库」找可执行文件。
+
+    ffmpeg 的最后兜底是 imageio_ffmpeg.get_ffmpeg_exe()（pip 安装即得自带二进制），
+    所以即使系统没装 ffmpeg 也能跑；decoder 无 Python 兜底，必须外部程序或用
+    silk_to_pcm 的 pysilk 路径。
+    """
     if not explicit:
-        explicit = os.getenv("SILK_DECODER" if name == "decoder" else "FFMPEG_BIN", "")
+        env_key = "SILK_DECODER" if name == "decoder" else "FFMPEG_BIN"
+        explicit = os.getenv(env_key, "")
     if explicit:
         return explicit
     for candidate in (name, f"{name}.exe"):
@@ -62,6 +69,13 @@ def find_tool(name: str, explicit: str = "") -> str:
             path = directory / f"{name}{suffix}"
             if path.is_file():
                 return str(path)
+    # 最后兜底：ffmpeg 走 imageio-ffmpeg（pip 装就有）
+    if name == "ffmpeg":
+        try:
+            import imageio_ffmpeg  # type: ignore
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            pass
     return ""
 
 
@@ -85,26 +99,65 @@ def _stripped(path: Path, tmpdir: Path) -> Path:
     return fixed
 
 
-def silk_to_mp3(silk: Path, out: Path, rate: int = DEFAULT_RATE) -> Path | None:
-    """把 silk 文件转成 mp3。成功返回 mp3 路径；任何失败返回 None（调用方降级）。"""
-    if not looks_like_silk(silk):
-        return None
+def silk_to_pcm(silk: Path, rate: int = DEFAULT_RATE) -> bytes | None:
+    """把 silk 文件解成裸 PCM（s16le，单声道，指定采样率）。
+
+    优先用 pysilk(Python 库)，找不到再 fallback 外部 decoder.exe。
+    成功返回 PCM 字节；失败返回 None。
+    """
+    # 路径 1：pysilk Python 库（silk-python 包）
+    try:
+        import pysilk  # type: ignore
+        silk_data = silk.read_bytes()
+        # 微信 silk 常在魔数前带 1~2 字节长度头，直接喂 pysilk 也能处理
+        out = io.BytesIO()
+        pysilk.decode(io.BytesIO(silk_data), out, rate)
+        pcm = out.getvalue()
+        if pcm:
+            return pcm
+    except Exception:
+        pass
+
+    # 路径 2：外部 decoder.exe（silk-v3-decoder）
     decoder = find_tool("decoder")
-    ffmpeg = find_tool("ffmpeg")
-    if not decoder or not ffmpeg:
-        return None  # 工具未安装：静默降级，由调用方决定是否记日志
+    if not decoder:
+        return None
     try:
         with tempfile.TemporaryDirectory() as raw:
             tmpdir = Path(raw)
             src = _stripped(silk, tmpdir)
             pcm = tmpdir / "audio.pcm"
+            if _run([decoder, str(src), str(pcm)], _DECODER_TIMEOUT) and pcm.is_file() and pcm.stat().st_size > 0:
+                return pcm.read_bytes()
+    except OSError:
+        pass
+    return None
 
-            # 第一步：SILK 解码成裸 PCM（decoder 输入 输出 两个位置参数）
-            ok = _run([decoder, str(src), str(pcm)], _DECODER_TIMEOUT)
-            if not ok or not pcm.is_file() or pcm.stat().st_size == 0:
-                return None
 
-            # 第二步：PCM 按 s16le/单声道/指定采样率解释，编成 64k mp3
+def silk_to_mp3(silk: Path, out: Path, rate: int = DEFAULT_RATE) -> Path | None:
+    """把 silk 文件转成 mp3。成功返回 mp3 路径；任何失败返回 None（调用方降级）。
+
+    解码路径优先 pysilk(Python 库)，编码路径优先 ffmpeg(imageio_ffmpeg 兜底)。
+    """
+    if not looks_like_silk(silk):
+        return None
+
+    # 第一步：silk → PCM（pysilk 优先，decoder.exe fallback）
+    pcm_bytes = silk_to_pcm(silk, rate)
+    if pcm_bytes is None or len(pcm_bytes) == 0:
+        return None
+
+    # 第二步：PCM → mp3（ffmpeg 优先，imageio-ffmpeg 兜底已在 find_tool 内）
+    ffmpeg = find_tool("ffmpeg")
+    if not ffmpeg:
+        return None
+
+    try:
+        with tempfile.TemporaryDirectory() as raw:
+            tmpdir = Path(raw)
+            pcm = tmpdir / "audio.pcm"
+            pcm.write_bytes(pcm_bytes)
+
             out.parent.mkdir(parents=True, exist_ok=True)
             ok = _run(
                 [
