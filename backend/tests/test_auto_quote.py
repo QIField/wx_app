@@ -53,11 +53,11 @@ def make_remark(scope, wxid, enabled=True):
     return row
 
 
-def set_global_ai(enabled):
-    """upsert 全局执行开关行（真值表会翻转多次，global 行只应有一行）。"""
-    row = QuoteConfig.query.filter_by(scope="global", deleted_at=None).first()
+def set_device_ai(enabled, openid="dev-openid"):
+    """upsert device 行的 AI 开关（按 conv.openid）。"""
+    row = QuoteConfig.query.filter_by(scope="device", openid=openid, deleted_at=None).first()
     if row is None:
-        row = QuoteConfig(scope="global", ai_enabled=enabled)
+        row = QuoteConfig(scope="device", openid=openid, ai_enabled=enabled)
     else:
         row.ai_enabled = enabled
     db.session.add(row)
@@ -190,7 +190,7 @@ def test_eligibility_truth_table(app):
     assert auto_quote.is_eligible(conv_single.id) is True
 
     # 群开了、群行关 → 不报（用户行开也不报：群>用户）
-    set_global_ai(True)
+    set_device_ai(True)
     make_remark("group", "group2", enabled=False)
     assert auto_quote.is_eligible(conv_group.id) is False
 
@@ -198,9 +198,9 @@ def test_eligibility_truth_table(app):
     make_remark("user", "wxid_user1", enabled=False)
     assert auto_quote.is_eligible(conv_single.id) is False
 
-    # 全局执行开关关 → 全部不报
+    # 设备级 AI 开关关 → 全部不报
     make_remark("group", "group2", enabled=True)
-    set_global_ai(False)
+    set_device_ai(False)
     assert auto_quote.is_eligible(conv_group.id) is False
 
 

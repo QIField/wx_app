@@ -106,10 +106,11 @@ def set_remark(wxid, enabled):
     db.session.commit()
 
 
-def set_config(ai_enabled=None, quote_mode=None):
-    row = QuoteConfig.query.filter_by(scope=SCOPE_GLOBAL, deleted_at=None).first()
+def set_config(ai_enabled=None, quote_mode=None, openid="dev-openid"):
+    """upsert device 行（按 conv.openid）。global 行不再管 ai_enabled / quote_mode。"""
+    row = QuoteConfig.query.filter_by(scope="device", openid=openid, deleted_at=None).first()
     if row is None:
-        row = QuoteConfig(scope=SCOPE_GLOBAL)
+        row = QuoteConfig(scope="device", openid=openid)
         db.session.add(row)
     if ai_enabled is not None:
         row.ai_enabled = ai_enabled

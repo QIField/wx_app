@@ -27,11 +27,11 @@ def make_conv(wxid="group1"):
     return conv
 
 
-def set_global_mode(mode):
-    """global 行报价模式 upsert（merged_config 只读 global 行）。"""
-    row = QuoteConfig.query.filter_by(scope=SCOPE_GLOBAL).first()
+def set_device_mode(mode, openid="dev01"):
+    """device 行报价模式 upsert（merged_config 只读 device 行）。"""
+    row = QuoteConfig.query.filter_by(scope="device", openid=openid).first()
     if row is None:
-        db.session.add(QuoteConfig(scope=SCOPE_GLOBAL, quote_mode=mode, ai_enabled=True))
+        db.session.add(QuoteConfig(scope="device", openid=openid, quote_mode=mode, ai_enabled=True))
     else:
         row.quote_mode = mode
     db.session.commit()
@@ -81,7 +81,7 @@ def test_skipped_when_send_disabled(app, monkeypatch):
     """SEND_ENABLED=false（只收不发阶段）：整体跳过。"""
     conv = make_conv()
     row = make_inquiry(conv)
-    set_global_mode("auto")
+    set_device_mode("auto")
     monkeypatch.setattr(quote_sender, "SEND_ENABLED", False)
     assert quote_sender.auto_send_pending([row]) == 0
     assert row.status == QuoteInquiry.ST_PENDING
@@ -91,7 +91,7 @@ def test_auto_send_text_only(app, sender_spy):
     """有产品图也只发话术文本（图片不再下发，仅保留在 price_json 里供前端展示）。"""
     conv = make_conv()
     row = make_inquiry(conv, image=IMAGE)  # price_json 里有图片
-    set_global_mode("auto")
+    set_device_mode("auto")
 
     assert quote_sender.auto_send_pending([row]) == 1
     assert sender_spy["image"] == []  # 图片不再下发
@@ -113,7 +113,7 @@ def test_no_image_does_not_block(app, sender_spy):
     """无产品图时照样只发话术——行为和有图完全一致。"""
     conv = make_conv()
     row = make_inquiry(conv, image="")
-    set_global_mode("auto")
+    set_device_mode("auto")
 
     assert quote_sender.auto_send_pending([row]) == 1
     assert sender_spy["image"] == []
@@ -135,7 +135,7 @@ def test_dispatch_failure_goes_review(app, sender_spy, monkeypatch):
     """话术下发失败 → 进 review，error 记原因。"""
     conv = make_conv()
     row = make_inquiry(conv)
-    set_global_mode("auto")
+    set_device_mode("auto")
 
     def boom(**kw):
         raise send_service.SendDispatchError("网络不可达")
@@ -153,7 +153,7 @@ def test_batch_resilient(app, sender_spy, monkeypatch):
     conv = make_conv()
     bad = make_inquiry(conv)
     good = make_inquiry(conv)
-    set_global_mode("auto")
+    set_device_mode("auto")
 
     real_post_text = send_service.middle_sender.post_text
     state = {"n": 0}

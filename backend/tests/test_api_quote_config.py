@@ -10,10 +10,14 @@ from backend.services.auth import create_token
 
 @pytest.fixture()
 def dev_client(app):
-    """developer 角色客户端（黑名单/价格系数仅 admin/developer 可写）。"""
+    """developer 角色客户端（黑名单/价格系数仅 admin/developer 可写）。
+
+    设备维度改造（2026-11-25）：ai_enabled / quote_mode 是 device scope，
+    所以 fixture 必须绑设备，否则 PUT 设备级字段会被拒（openid 为空）。
+    """
     from backend.tests.conftest import make_user
 
-    make_user(username="dv01", name="开发者甲", role="developer")
+    make_user(username="dv01", name="开发者甲", role="developer", open_ids=["dev01"])
     user = User.query.filter_by(username="dv01").one()
     token, _ = create_token(user)
 

@@ -1,4 +1,4 @@
-﻿﻿"""收消息轮询单测：mock 中间方 get_message，验证入库与游标。
+﻿"""收消息轮询单测：mock 中间方 get_message，验证入库与游标。
 
 系统灰条与噪音的用例在 test_message_sysmsg.py。
 """
